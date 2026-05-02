@@ -1,91 +1,58 @@
-# stremio-ftp
+# Stremio FTP
 
-Stremio FTP is a self-hosted Stremio addon for streaming media from an FTP or FTPS server through per-user Stremio manifest URLs. The implementation includes encrypted profile creation, FTP credential storage, connection testing, on-demand index refreshes, manifest and stream lookup routes, range-capable HTTP proxy streaming, and a configuration portal.
+Stremio FTP is a self-hosted Stremio source addon that lets users stream movies and series episodes from their own FTP or FTPS server. It exposes a web configuration portal where a user saves FTP credentials, scans the FTP library, and receives a private Stremio manifest URL.
 
-Current limitation: scans are triggered manually from the portal. Background refresh scheduling, token rotation, pause controls, and profile deletion are not implemented yet.
+The addon does not provide catalogs. It is a stream-source addon: open a movie or episode from another Stremio catalog, and this addon appears as a streaming option when the clicked title is found in the indexed FTP library.
 
-## Legal Content And Access
+## Features
 
-Use this addon only with media you own, are licensed to access, or are otherwise legally allowed to stream. The addon does not provide media, bypass access controls, or grant rights to content on an FTP server. You are responsible for the FTP credentials, files, network exposure, and Stremio clients you configure.
+- Web configuration portal at `/configure?setup=...`
+- Per-user profiles using browser UID plus passphrase, with no signup system
+- Encrypted FTP credential storage
+- FTP, explicit FTPS, and implicit FTPS support through `basic-ftp`
+- Optional invalid-certificate allowance for self-signed or seedbox FTP certificates
+- Movies and series episode filename parsing
+- Manual index refresh from the portal
+- Private per-profile manifest URLs for Stremio
+- HTTP range proxy streaming from FTP to Stremio
+- Docker and Docker Compose deployment
+- SQLite persistence in `CONFIG_DIR`
 
-## Local Development
+## Important Caveats
 
-Install dependencies and run the server in development mode:
+- Use this only with media you own, are licensed to access, or are otherwise legally allowed to stream.
+- The addon does not include metadata catalogs. Install another Stremio catalog addon for browsing.
+- Scans are manual. Background scheduled rescans are not implemented yet.
+- The manifest install token is shown when a profile is created. The server stores only a hash of it, so unlocking an existing profile can load FTP settings but cannot reconstruct an old install URL.
+- The generated manifest URL can stream indexed files for that profile. Keep it private.
+- Changing `CONFIG_ENCRYPTION_KEY` after profiles exist will make saved FTP credentials undecryptable.
+- If your FTP server has thousands of files, scanning `/` can take time. Prefer the narrowest root folders that contain your media.
+- Filename matching is best-effort. Include clear title/year patterns for movies and `S01E02` style patterns for episodes when possible.
 
-```bash
-npm install
-BASE_URL=http://127.0.0.1:7000 CONFIG_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef CONFIG_DIR=.config PORT=7000 npm run dev
-```
+## Requirements
 
-Run tests and build the production output:
+- Node.js 22+ for local development
+- Docker for container deployment
+- A publicly reachable HTTPS URL for Stremio clients
+- Outbound network access from the addon server to your FTP host and port
 
-```bash
-npm test
-npm run build
-```
-
-Start the built server locally:
-
-```bash
-BASE_URL=http://127.0.0.1:7000 CONFIG_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef CONFIG_DIR=.config PORT=7000 npm start
-```
-
-The health endpoint should respond at `http://127.0.0.1:7000/health`.
-
-## Docker Compose Startup
-
-Build and run the addon with Docker Compose:
-
-```bash
-BASE_URL=https://stremio-ftp.example.com
-CONFIG_ENCRYPTION_KEY="$(openssl rand -hex 32)"
-SETUP_TOKEN="$(openssl rand -hex 24)"
-export BASE_URL CONFIG_ENCRYPTION_KEY SETUP_TOKEN
-docker compose up --build
-```
-
-The compose file stores persistent configuration and the SQLite database in the named Docker volume `stremio-ftp-config`. Set `BASE_URL` to the HTTPS origin that Stremio clients can reach, and use stable random `CONFIG_ENCRYPTION_KEY` and `SETUP_TOKEN` values before creating profiles. Changing the encryption key later prevents existing encrypted profile secrets from being decrypted.
-
-## HTTPS Reverse Proxy
-
-Local browser testing can use `http://127.0.0.1:7000`, but remote Stremio clients need a publicly reachable HTTPS URL. Put the addon behind a reverse proxy such as Caddy, Nginx, Traefik, or a tunnel that terminates TLS and forwards requests to port `7000`.
-
-Set `BASE_URL` to the external HTTPS origin, for example:
-
-```bash
-BASE_URL=https://stremio-ftp.example.com
-```
-
-The manifest and stream URLs are generated from `BASE_URL`, so it must match the address Stremio can reach.
-
-## Configuration Portal Workflow
-
-1. Open the configuration portal at `/configure?setup=your-setup-token` on your addon host.
-2. Create a profile with the browser-generated recovery UID and a passphrase.
-3. Save and test FTP settings, then refresh the index.
-4. Copy the generated manifest URL or use the Stremio install link.
-5. Keep the recovery UID and passphrase. Unlocking an existing profile does not reveal a previously generated install token.
-
-FTP credentials are encrypted at rest. The manifest token can stream files indexed for that profile, so keep generated install URLs private.
-
-## Manifest URL
-
-Generated manifest URLs include a per-profile token:
-
-```text
-https://stremio-ftp.example.com/u/profile-install-token/manifest.json
-```
-
-Keep profile URLs private. Stream URLs proxy matching FTP files through the addon and support HTTP range requests for Stremio playback.
+For a typical VPS deployment, put the container behind Nginx, Caddy, Traefik, or Cloudflare Tunnel. Stremio clients must be able to reach `BASE_URL`.
 
 ## Environment Variables
 
+Required:
+
 ```bash
 BASE_URL=https://stremio-ftp.example.com
-CONFIG_ENCRYPTION_KEY=replace-with-at-least-32-random-characters
-SETUP_TOKEN=replace-with-at-least-16-random-characters
-CONFIG_DIR=/config
+CONFIG_ENCRYPTION_KEY=replace-with-a-stable-random-secret-at-least-32-characters
+SETUP_TOKEN=replace-with-a-stable-random-secret-at-least-16-characters
+```
+
+Optional:
+
+```bash
 PORT=7000
+CONFIG_DIR=/config
 LOG_LEVEL=info
 CRAWLER_CONCURRENCY=2
 FTP_TIMEOUT_MS=15000
@@ -94,12 +61,228 @@ PROFILE_RATE_LIMIT_WINDOW_MS=600000
 PROFILE_RATE_LIMIT_MAX=20
 ```
 
-`BASE_URL`, `CONFIG_ENCRYPTION_KEY`, and `SETUP_TOKEN` are required. `CONFIG_DIR` defaults to `/config`, and the SQLite database is stored as `stremio-ftp.sqlite` inside that directory. Profile configuration endpoints and `/configure` require the setup token. Profile creation and unlock endpoints are rate-limited per client IP with `PROFILE_RATE_LIMIT_WINDOW_MS` and `PROFILE_RATE_LIMIT_MAX`.
+Notes:
+
+- `BASE_URL` must be the public origin, without a trailing slash.
+- `CONFIG_ENCRYPTION_KEY` must stay stable across container rebuilds and restarts.
+- `SETUP_TOKEN` protects `/configure` and profile-management APIs.
+- SQLite is stored at `$CONFIG_DIR/stremio-ftp.sqlite`.
+- `PROFILE_RATE_LIMIT_MAX` limits profile actions per client IP per rate-limit window.
+
+## Docker Compose
+
+Create `.env`:
+
+```bash
+BASE_URL=https://stremio-ftp.example.com
+CONFIG_ENCRYPTION_KEY=replace-with-output-from-openssl-rand-hex-32
+SETUP_TOKEN=replace-with-output-from-openssl-rand-hex-24
+PORT=7000
+CONFIG_DIR=/config
+LOG_LEVEL=info
+CRAWLER_CONCURRENCY=2
+FTP_TIMEOUT_MS=15000
+MAX_ON_DEMAND_SEARCH_MS=4500
+PROFILE_RATE_LIMIT_WINDOW_MS=600000
+PROFILE_RATE_LIMIT_MAX=20
+```
+
+Generate strong secrets:
+
+```bash
+openssl rand -hex 32
+openssl rand -hex 24
+```
+
+Start the addon:
+
+```bash
+docker compose up -d --build
+```
+
+Check health:
+
+```bash
+curl https://stremio-ftp.example.com/health
+```
+
+Open the portal:
+
+```text
+https://stremio-ftp.example.com/configure?setup=YOUR_SETUP_TOKEN
+```
+
+## Portal Workflow
+
+1. Fill in FTP settings first: host, port, username, password, TLS mode, certificate setting, and root paths.
+2. Enter a passphrase in Profile setup.
+3. Click `Create profile`. If the FTP form is complete, the portal creates the profile and saves FTP settings in one action.
+4. Click `Test connection`.
+5. Click `Rescan`.
+6. Install the generated Stremio manifest URL.
+
+For an existing browser profile:
+
+1. Open `/configure?setup=YOUR_SETUP_TOKEN`.
+2. Enter the same browser UID and passphrase.
+3. Click `Unlock profile`.
+4. Saved FTP settings load into the form. The saved password is not shown.
+5. Leave the password field blank to keep the saved password when testing or saving.
+
+## FTP Root Paths
+
+Root paths can be newline- or comma-separated.
+
+Examples:
+
+```text
+/Movies
+/TV
+```
+
+or:
+
+```text
+/
+```
+
+Scanning `/` works, but for large servers it is slower and more likely to include unrelated files. Prefer specific media folders when possible.
+
+## Local Development
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run development server:
+
+```bash
+BASE_URL=http://127.0.0.1:7000 \
+CONFIG_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef \
+SETUP_TOKEN=dev-setup-token-123456 \
+CONFIG_DIR=.config \
+PORT=7000 \
+npm run dev
+```
+
+Build and start production output:
+
+```bash
+npm run build
+BASE_URL=http://127.0.0.1:7000 \
+CONFIG_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef \
+SETUP_TOKEN=dev-setup-token-123456 \
+CONFIG_DIR=.config \
+PORT=7000 \
+npm start
+```
+
+Run checks:
+
+```bash
+npm test
+npm run build
+npm audit --omit=dev
+```
+
+## Reverse Proxy Example
+
+Nginx example:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name stremio-ftp.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/stremio-ftp.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/stremio-ftp.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:7000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+If Docker publishes to loopback, use:
+
+```yaml
+ports:
+  - "127.0.0.1:7000:7000"
+```
+
+## AI Agent Setup Prompt
+
+Paste this into an AI coding or server agent after replacing the placeholders:
+
+```text
+Set up the Stremio FTP addon on this Linux server.
+
+Repository: https://github.com/skynet01/stremio-ftp
+Public URL: https://YOUR_DOMAIN_HERE
+Internal port: 7000
+
+Requirements:
+1. Install Docker and Docker Compose if missing.
+2. Clone or update the repository at /opt/stremio-ftp.
+3. Create a persistent .env file with:
+   - BASE_URL=https://YOUR_DOMAIN_HERE
+   - CONFIG_ENCRYPTION_KEY=<generate with: openssl rand -hex 32>
+   - SETUP_TOKEN=<generate with: openssl rand -hex 24>
+   - PORT=7000
+   - CONFIG_DIR=/config
+   - LOG_LEVEL=info
+   - CRAWLER_CONCURRENCY=2
+   - FTP_TIMEOUT_MS=15000
+   - MAX_ON_DEMAND_SEARCH_MS=4500
+   - PROFILE_RATE_LIMIT_WINDOW_MS=600000
+   - PROFILE_RATE_LIMIT_MAX=20
+4. Build and run with Docker Compose.
+5. Put the app behind HTTPS using Nginx, Caddy, Traefik, or the existing reverse proxy.
+6. Make sure the public URL forwards to the container and /health returns JSON.
+7. Make sure outbound egress from the server allows FTP/FTPS to the user FTP host and port.
+8. Print the setup portal URL:
+   https://YOUR_DOMAIN_HERE/configure?setup=<SETUP_TOKEN>
+9. Do not rotate CONFIG_ENCRYPTION_KEY after profiles are created.
+10. Do not expose SETUP_TOKEN publicly.
+
+After setup, verify:
+- curl https://YOUR_DOMAIN_HERE/health
+- The configure page loads.
+- A profile can be created.
+- FTP settings can be saved, tested, and rescanned.
+```
 
 ## Troubleshooting
 
-FTP TLS or certificate errors usually mean the server certificate is expired, self-signed, missing an intermediate certificate, or the configured FTP security mode does not match the server. Verify the server with a standard FTP client, confirm whether it expects plain FTP, explicit FTPS, or implicit FTPS, and check that the hostname in the profile matches the certificate when certificate verification is enabled.
+`Unable to connect to FTP server`
 
-An empty index usually means the crawler could not find supported media files, could not enter the configured root path, or filenames could not be matched to movie or series metadata. Check the configured FTP path, credentials, file permissions, and file extensions before refreshing the index again.
+- Confirm host, port, username, and password in FileZilla or another FTP client.
+- Confirm TLS mode: disabled, explicit TLS, or implicit TLS.
+- Enable `Allow invalid certificate` only when the server uses a self-signed or otherwise invalid certificate.
+- Confirm the VPS firewall and cloud egress rules allow outbound access to the FTP host and port.
 
-If Stremio installs the addon but streams fail remotely, check that `BASE_URL` uses the public HTTPS origin, the reverse proxy forwards to the addon, and `/health` is reachable from outside the host network.
+`Rescan` returns `0` files
+
+- Confirm the root path exists on the FTP server.
+- Try `/` once to verify traversal, then narrow to `/Movies`, `/TV`, or similar.
+- Confirm files have supported video extensions and parseable names.
+- Prefer filenames containing movie year or episode markers such as `S01E02`.
+
+Addon installs but no streams appear
+
+- The clicked Stremio title must match an indexed FTP file.
+- Run `Rescan` after saving FTP settings.
+- Make sure `BASE_URL` is the public HTTPS URL.
+- Keep the manifest URL private and reinstall if you created a new profile.
+
+Saved settings load but password field is blank
+
+- This is intentional. The portal never displays the stored FTP password.
+- Leave the password field blank to keep the stored password.
+- Enter a new password only when rotating FTP credentials.
