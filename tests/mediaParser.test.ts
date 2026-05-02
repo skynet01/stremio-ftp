@@ -77,6 +77,14 @@ describe("media parser", () => {
     });
   });
 
+  it("strips 3D format tokens from movie titles", () => {
+    expect(parseMediaPath("/Movies/Zack Snyders Justice League_3DFF_FSBS.mkv")).toMatchObject({
+      mediaKind: "movie",
+      parsedTitle: "zack snyders justice league",
+      parsedYear: null,
+    });
+  });
+
   it("ignores unsupported files", () => {
     expect(parseMediaPath("/TV/Show/notes.txt")).toBeNull();
   });

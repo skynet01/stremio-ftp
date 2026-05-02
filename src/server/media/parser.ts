@@ -23,8 +23,10 @@ function qualityOf(value: string): string | null {
 
 function stripKnownTokens(value: string): string {
   return value
+    .replace(/[\._-]+/g, " ")
     .replace(/\bweb[\s._-]?dl\b/gi, " ")
-    .replace(/\b(2160p|1080p|720p|480p|4k|bluray|webrip|hdtv|x264|x265|hevc|aac|dts)\b/gi, " ")
+    .replace(/\bhalf[\s._-]?sbs\b/gi, " ")
+    .replace(/\b(2160p|1080p|720p|480p|4k|bluray|webrip|hdtv|x264|x265|hevc|aac|dts|3dff|fsbs|hsbs|sbs)\b/gi, " ")
     .replace(/\btt\d{7,8}\b/gi, " ");
 }
 
