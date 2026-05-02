@@ -1,0 +1,94 @@
+import Database from "better-sqlite3";
+import request from "supertest";
+import { describe, expect, it } from "vitest";
+import { createApp } from "../src/server/app";
+import type { AppConfig } from "../src/server/config";
+import { migrate } from "../src/server/db/schema";
+
+function config(): AppConfig {
+  return {
+    baseUrl: "https://addon.example.test",
+    configDir: "/tmp",
+    sqlitePath: ":memory:",
+    encryptionKey: "0123456789abcdef0123456789abcdef",
+    port: 7000,
+    logLevel: "error",
+    crawlerConcurrency: 2,
+    ftpTimeoutMs: 15000,
+    indexRefreshIntervalMs: 21600000,
+    maxOnDemandSearchMs: 4500,
+    negativeCacheTtlMs: 300000,
+    proxyIdleTimeoutMs: 30000,
+  };
+}
+
+describe("profile routes", () => {
+  it("creates a profile and returns install URLs", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    const response = await request(app)
+      .post("/api/profile")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    expect(response.body.manifestUrl).toMatch(/^https:\/\/addon\.example\.test\/u\/.+\/manifest\.json$/);
+    expect(response.body.stremioInstallUrl).toMatch(/^stremio:\/\/addon\.example\.test\/u\/.+\/manifest\.json$/);
+  });
+
+  it("returns 400 for an invalid create payload", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    const response = await request(app).post("/api/profile").send({ browserUid: "short", passphrase: "short" }).expect(400);
+
+    expect(response.body).toEqual({ error: "Invalid profile request" });
+  });
+
+  it("returns 409 for duplicate browser uid creation", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    await request(app).post("/api/profile").send({ browserUid: "browser-uid", passphrase: "passphrase" }).expect(201);
+    const response = await request(app)
+      .post("/api/profile")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(409);
+
+    expect(response.body).toEqual({ error: "Profile already exists" });
+  });
+
+  it("unlocks a profile and returns the profile id", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    const created = await request(app)
+      .post("/api/profile")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const response = await request(app)
+      .post("/api/profile/unlock")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(response.body).toEqual({ profileId: created.body.profileId });
+  });
+
+  it("returns 401 for an incorrect unlock passphrase", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    await request(app).post("/api/profile").send({ browserUid: "browser-uid", passphrase: "passphrase" }).expect(201);
+    const response = await request(app)
+      .post("/api/profile/unlock")
+      .send({ browserUid: "browser-uid", passphrase: "incorrect" })
+      .expect(401);
+
+    expect(response.body).toEqual({ error: "Invalid passphrase" });
+  });
+});
