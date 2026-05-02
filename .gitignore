@@ -1,1 +1,9 @@
 .worktrees/
+node_modules/
+dist/
+coverage/
+.env
+.config/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
