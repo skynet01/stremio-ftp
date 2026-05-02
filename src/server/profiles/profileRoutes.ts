@@ -94,8 +94,40 @@ export function profileRoutes(
 
     try {
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      service.saveFtpConfig(unlocked.profileId, parsed.data.ftpConfig);
+      const existingConfig = service.getFtpConfig(unlocked.profileId);
+      if (!parsed.data.ftpConfig.password && !existingConfig) {
+        return res.status(400).json({ error: "FTP password is required" });
+      }
+      service.saveFtpConfig(unlocked.profileId, {
+        ...parsed.data.ftpConfig,
+        password: parsed.data.ftpConfig.password || existingConfig?.password || "",
+      });
       res.json({ ok: true });
+    } catch {
+      res.status(401).json({ error: "Invalid passphrase" });
+    }
+  });
+
+  router.post("/profile/ftp/load", rateLimitProfiles, async (req, res) => {
+    const parsed = authenticatedSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid FTP settings request" });
+
+    try {
+      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      const ftpConfig = service.getFtpConfig(unlocked.profileId);
+      if (!ftpConfig) return res.status(404).json({ error: "FTP settings are not configured" });
+      res.json({
+        ftpConfig: {
+          host: ftpConfig.host,
+          port: ftpConfig.port,
+          username: ftpConfig.username,
+          password: "",
+          passwordConfigured: Boolean(ftpConfig.password),
+          tlsMode: ftpConfig.tlsMode,
+          allowInvalidCertificate: ftpConfig.allowInvalidCertificate,
+          roots: ftpConfig.roots,
+        },
+      });
     } catch {
       res.status(401).json({ error: "Invalid passphrase" });
     }

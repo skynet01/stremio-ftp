@@ -1,6 +1,7 @@
 import { Copy, Pause, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { createElement as h, type ReactNode, useState } from "react";
-import { createProfile, rescanIndex, saveFtpSettings, testFtpSettings, unlockProfile } from "./api.js";
+import { createProfile, loadFtpSettings, rescanIndex, saveFtpSettings, testFtpSettings, unlockProfile } from "./api.js";
+import type { LoadedFtpConfig } from "./api.js";
 
 type StatusTone = "green" | "amber" | "red" | "gray";
 const unavailableReason = "This action is not available in this build";
@@ -68,9 +69,39 @@ export function App() {
 
   const profileReady = profileState === "created" || profileState === "unlocked";
 
+  function applyLoadedFtpConfig(ftpConfig: LoadedFtpConfig) {
+    setHost(ftpConfig.host);
+    setPort(String(ftpConfig.port));
+    setUsername(ftpConfig.username);
+    setPassword("");
+    setTlsMode(ftpConfig.tlsMode);
+    setAllowInvalidCertificate(ftpConfig.allowInvalidCertificate);
+    setRootPaths(ftpConfig.roots.join("\n"));
+    setFtpMessage(
+      ftpConfig.passwordConfigured
+        ? "Saved FTP settings loaded. Leave password blank to keep the stored password."
+        : "Saved FTP settings loaded.",
+    );
+  }
+
+  async function loadSavedFtpSettings() {
+    try {
+      const loaded = await loadFtpSettings({ browserUid: recoveryUid, passphrase });
+      applyLoadedFtpConfig(loaded.ftpConfig);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No saved FTP settings found.";
+      if (message === "FTP settings are not configured") {
+        setFtpMessage("No saved FTP settings yet.");
+        return false;
+      }
+      throw error;
+    }
+  }
+
   async function saveProfile() {
     setProfileState("creating");
-    setProfileMessage("Saving profile...");
+    setProfileMessage("Creating profile...");
     try {
       const created = await createProfile({ browserUid: recoveryUid, passphrase });
       setManifestUrl(created.manifestUrl);
@@ -94,6 +125,22 @@ export function App() {
       }
       setProfileState("error");
       setProfileMessage(error instanceof Error ? error.message : "Unable to save profile.");
+    }
+  }
+
+  async function unlockExistingProfile() {
+    setProfileState("creating");
+    setProfileMessage("Unlocking profile...");
+    try {
+      await unlockProfile({ browserUid: recoveryUid, passphrase });
+      setManifestUrl(null);
+      setStremioInstallUrl(null);
+      setProfileState("unlocked");
+      const loaded = await loadSavedFtpSettings();
+      setProfileMessage(loaded ? "Profile unlocked. Saved FTP settings loaded." : "Profile unlocked.");
+    } catch (error) {
+      setProfileState("error");
+      setProfileMessage(error instanceof Error ? error.message : "Unable to unlock profile.");
     }
   }
 
@@ -235,6 +282,7 @@ export function App() {
       value: password,
       autoComplete: "new-password",
       onChange: (event) => setPassword(event.currentTarget.value),
+      placeholder: "Leave blank to keep saved password",
     }),
   );
 
@@ -303,11 +351,22 @@ export function App() {
             {
               type: "button",
               className: "primary-button",
-              "aria-label": "Save profile",
+              "aria-label": "Create profile",
               disabled: profileState === "creating" || profileState === "created",
               onClick: () => void saveProfile(),
             },
-            profileState === "creating" ? "Saving..." : "Save",
+            profileState === "creating" ? "Working..." : "Create profile",
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "secondary-button",
+              "aria-label": "Unlock profile",
+              disabled: profileState === "creating",
+              onClick: () => void unlockExistingProfile(),
+            },
+            "Unlock profile",
           ),
           stremioInstallUrl
             ? h("a", { className: "secondary-button button-link", href: stremioInstallUrl }, "Install in Stremio")
@@ -413,7 +472,7 @@ export function App() {
                 disabled: !profileReady || indexState === "working",
                 onClick: () => void saveFtp(),
               },
-              "Save",
+              "Save FTP settings",
             ),
           ),
         ),

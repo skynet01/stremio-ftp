@@ -35,6 +35,10 @@ export type FtpConfigRequest = {
   roots: string[];
 };
 
+export type LoadedFtpConfig = FtpConfigRequest & {
+  passwordConfigured: boolean;
+};
+
 export type AuthenticatedFtpRequest = CreateProfileRequest & {
   ftpConfig: FtpConfigRequest;
 };
@@ -97,6 +101,15 @@ export async function saveFtpSettings(request: AuthenticatedFtpRequest): Promise
     body: JSON.stringify(request),
   });
   return readJson<{ ok: true }>(response);
+}
+
+export async function loadFtpSettings(request: CreateProfileRequest): Promise<{ ftpConfig: LoadedFtpConfig }> {
+  const response = await fetch("/api/profile/ftp/load", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<{ ftpConfig: LoadedFtpConfig }>(response);
 }
 
 export async function rescanIndex(request: CreateProfileRequest): Promise<RescanResponse> {

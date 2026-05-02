@@ -3,10 +3,11 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/web/App";
-import { createProfile, rescanIndex, saveFtpSettings, testFtpSettings, unlockProfile } from "../src/web/api";
+import { createProfile, loadFtpSettings, rescanIndex, saveFtpSettings, testFtpSettings, unlockProfile } from "../src/web/api";
 
 vi.mock("../src/web/api", () => ({
   createProfile: vi.fn(),
+  loadFtpSettings: vi.fn(),
   rescanIndex: vi.fn(),
   saveFtpSettings: vi.fn(),
   testFtpSettings: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock("../src/web/api", () => ({
 }));
 
 const createProfileMock = vi.mocked(createProfile);
+const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
 const rescanIndexMock = vi.mocked(rescanIndex);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
 const testFtpSettingsMock = vi.mocked(testFtpSettings);
@@ -22,6 +24,7 @@ const unlockProfileMock = vi.mocked(unlockProfile);
 describe("App", () => {
   beforeEach(() => {
     createProfileMock.mockReset();
+    loadFtpSettingsMock.mockReset();
     rescanIndexMock.mockReset();
     saveFtpSettingsMock.mockReset();
     testFtpSettingsMock.mockReset();
@@ -68,7 +71,7 @@ describe("App", () => {
 
     render(<App />);
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
 
     const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
     await waitFor(() => {
@@ -85,12 +88,23 @@ describe("App", () => {
   });
 
   it("unlocks an existing profile without inventing an install link", async () => {
-    createProfileMock.mockRejectedValue(new Error("Profile already exists"));
     unlockProfileMock.mockResolvedValue({ profileId: 1 });
+    loadFtpSettingsMock.mockResolvedValue({
+      ftpConfig: {
+        host: "ftp.example.test",
+        port: 2121,
+        username: "user",
+        password: "",
+        passwordConfigured: true,
+        tlsMode: "explicit",
+        allowInvalidCertificate: true,
+        roots: ["/Movies", "/TV"],
+      },
+    });
 
     render(<App />);
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unlock profile" }));
 
     const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
     await waitFor(() => {
@@ -100,9 +114,13 @@ describe("App", () => {
       });
     });
 
+    await waitFor(() => expect(loadFtpSettingsMock).toHaveBeenCalledWith({ browserUid: recoveryUid.value, passphrase: "passphrase" }));
     expect(screen.queryByRole("link", { name: "Install in Stremio" })).toBeNull();
     expect(screen.getByRole("button", { name: "Install in Stremio" })).toBeDisabled();
-    expect(screen.getByText("Profile unlocked. Create in this browser session to get an install link.")).toBeTruthy();
+    expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
+    expect(screen.getByDisplayValue("2121")).toBeTruthy();
+    expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/Movies\n/TV");
+    expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toBeTruthy();
   });
 
   it("keeps profile-dependent controls disabled before profile setup", () => {
@@ -135,7 +153,7 @@ describe("App", () => {
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
     fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/Movies" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
 
     await screen.findByRole("link", { name: "Install in Stremio" });
     fireEvent.click(screen.getByRole("button", { name: "Save FTP settings" }));
