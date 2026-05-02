@@ -192,7 +192,8 @@ textarea:focus-visible,
   background: var(--accent);
 }
 
-.profile-panel {
+.profile-panel,
+.install-panel {
   grid-column: 1 / -1;
 }
 
@@ -234,7 +235,28 @@ textarea:focus-visible,
 }
 
 .ftp-field-grid {
-  grid-template-columns: minmax(0, 3fr) minmax(112px, 0.7fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.host-field {
+  grid-column: span 4;
+}
+
+.port-field {
+  grid-column: span 2;
+}
+
+.username-field,
+.password-field {
+  grid-column: span 3;
+}
+
+.tls-field {
+  grid-column: span 2;
+}
+
+.root-paths-field {
+  grid-column: span 4;
 }
 
 .field-stack {
@@ -498,6 +520,15 @@ input:-webkit-autofill:active {
   }
 
   .span-2 {
+    grid-column: span 1;
+  }
+
+  .host-field,
+  .port-field,
+  .username-field,
+  .password-field,
+  .tls-field,
+  .root-paths-field {
     grid-column: span 1;
   }
 

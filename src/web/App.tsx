@@ -1,9 +1,15 @@
 import { Copy, RefreshCw } from "lucide-react";
-import { createElement as h, type ReactNode, useState } from "react";
+import { createElement as h, type ReactNode, useEffect, useState } from "react";
 import { createProfile, loadFtpSettings, rescanIndex, saveFtpSettings, testFtpSettings, unlockProfile } from "./api.js";
 import type { LoadedFtpConfig } from "./api.js";
 
 type StatusTone = "green" | "amber" | "red" | "gray";
+const STORAGE_KEYS = {
+  recoveryUid: "stremio-ftp-recovery-uid",
+  passphrase: "stremio-ftp-passphrase",
+  manifestUrl: "stremio-ftp-manifest-url",
+  stremioInstallUrl: "stremio-ftp-stremio-install-url",
+} as const;
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
   return h("span", { className: `badge badge-${tone}` }, children);
@@ -30,10 +36,10 @@ function browserUid() {
 
 export function App() {
   const [recoveryUid, setRecoveryUid] = useState(() => {
-    const stored = window.localStorage.getItem("stremio-ftp-recovery-uid");
+    const stored = window.localStorage.getItem(STORAGE_KEYS.recoveryUid);
     if (stored) return stored;
     const generated = browserUid();
-    window.localStorage.setItem("stremio-ftp-recovery-uid", generated);
+    window.localStorage.setItem(STORAGE_KEYS.recoveryUid, generated);
     return generated;
   });
   const [passphrase, setPassphrase] = useState("");
@@ -54,6 +60,27 @@ export function App() {
 
   const profileReady = profileState === "created" || profileState === "unlocked";
 
+  useEffect(() => {
+    const rememberedPassphrase = window.localStorage.getItem(STORAGE_KEYS.passphrase);
+    if (!rememberedPassphrase) return;
+    void restoreRememberedProfile(rememberedPassphrase);
+    // Restore once from this browser's persisted session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function rememberInstall(manifest: string, stremioInstall: string) {
+    setManifestUrl(manifest);
+    setStremioInstallUrl(stremioInstall);
+    window.localStorage.setItem(STORAGE_KEYS.manifestUrl, manifest);
+    window.localStorage.setItem(STORAGE_KEYS.stremioInstallUrl, stremioInstall);
+  }
+
+  function rememberSession(nextPassphrase: string, manifest: string, stremioInstall: string) {
+    window.localStorage.setItem(STORAGE_KEYS.recoveryUid, recoveryUid);
+    window.localStorage.setItem(STORAGE_KEYS.passphrase, nextPassphrase);
+    rememberInstall(manifest, stremioInstall);
+  }
+
   function applyLoadedFtpConfig(ftpConfig: LoadedFtpConfig) {
     setHost(ftpConfig.host);
     setPort(String(ftpConfig.port));
@@ -69,9 +96,9 @@ export function App() {
     );
   }
 
-  async function loadSavedFtpSettings() {
+  async function loadSavedFtpSettings(nextPassphrase = passphrase) {
     try {
-      const loaded = await loadFtpSettings({ browserUid: recoveryUid, passphrase });
+      const loaded = await loadFtpSettings({ browserUid: recoveryUid, passphrase: nextPassphrase });
       applyLoadedFtpConfig(loaded.ftpConfig);
       return true;
     } catch (error) {
@@ -84,13 +111,42 @@ export function App() {
     }
   }
 
+  async function restoreRememberedProfile(rememberedPassphrase: string) {
+    setPassphrase(rememberedPassphrase);
+    setProfileState("creating");
+    setProfileMessage("Loading saved profile...");
+
+    const rememberedManifest = window.localStorage.getItem(STORAGE_KEYS.manifestUrl);
+    const rememberedStremioInstall = window.localStorage.getItem(STORAGE_KEYS.stremioInstallUrl);
+
+    try {
+      if (rememberedManifest && rememberedStremioInstall) {
+        setManifestUrl(rememberedManifest);
+        setStremioInstallUrl(rememberedStremioInstall);
+        setProfileState("unlocked");
+        const loaded = await loadSavedFtpSettings(rememberedPassphrase);
+        setProfileMessage(loaded ? "Profile loaded. Saved FTP settings loaded." : "Profile loaded.");
+        return;
+      }
+
+      const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase: rememberedPassphrase });
+      rememberSession(rememberedPassphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
+      setProfileState("unlocked");
+      const loaded = await loadSavedFtpSettings(rememberedPassphrase);
+      setProfileMessage(loaded ? "Profile loaded. Saved FTP settings loaded." : "Profile loaded.");
+    } catch {
+      window.localStorage.removeItem(STORAGE_KEYS.passphrase);
+      setProfileState("new");
+      setProfileMessage("Enter your passphrase to unlock this browser profile.");
+    }
+  }
+
   async function saveProfile() {
     setProfileState("creating");
     setProfileMessage(hasCompleteFtpConfig() ? "Creating profile and saving FTP settings..." : "Creating profile...");
     try {
       const created = await createProfile({ browserUid: recoveryUid, passphrase });
-      setManifestUrl(created.manifestUrl);
-      setStremioInstallUrl(created.stremioInstallUrl);
+      rememberSession(passphrase, created.manifestUrl, created.stremioInstallUrl);
       setProfileState("created");
       if (hasCompleteFtpConfig()) {
         setIndexState("working");
@@ -110,11 +166,11 @@ export function App() {
     } catch (error) {
       if (error instanceof Error && error.message === "Profile already exists") {
         try {
-          await unlockProfile({ browserUid: recoveryUid, passphrase });
-          setManifestUrl(null);
-          setStremioInstallUrl(null);
+          const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase });
+          rememberSession(passphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
           setProfileState("unlocked");
-          setProfileMessage("Profile unlocked. Create in this browser session to get an install link.");
+          const loaded = await loadSavedFtpSettings();
+          setProfileMessage(loaded ? "Profile unlocked. Saved FTP settings loaded." : "Profile unlocked.");
           return;
         } catch (unlockError) {
           setProfileState("error");
@@ -131,9 +187,8 @@ export function App() {
     setProfileState("creating");
     setProfileMessage("Unlocking profile...");
     try {
-      await unlockProfile({ browserUid: recoveryUid, passphrase });
-      setManifestUrl(null);
-      setStremioInstallUrl(null);
+      const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase });
+      rememberSession(passphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
       setProfileState("unlocked");
       const loaded = await loadSavedFtpSettings();
       setProfileMessage(loaded ? "Profile unlocked. Saved FTP settings loaded." : "Profile unlocked.");
@@ -227,7 +282,7 @@ export function App() {
         value: recoveryUid,
         onChange: (event) => {
           setRecoveryUid(event.currentTarget.value);
-          window.localStorage.setItem("stremio-ftp-recovery-uid", event.currentTarget.value);
+          window.localStorage.setItem(STORAGE_KEYS.recoveryUid, event.currentTarget.value);
         },
       }),
       h(
@@ -264,6 +319,7 @@ export function App() {
       value: port,
       onChange: (event) => setPort(event.currentTarget.value),
     }),
+    "field-stack port-field",
   );
 
   const usernameField = field(
@@ -275,6 +331,7 @@ export function App() {
       autoComplete: "username",
       onChange: (event) => setUsername(event.currentTarget.value),
     }),
+    "field-stack username-field",
   );
 
   const passwordField = field(
@@ -288,6 +345,7 @@ export function App() {
       onChange: (event) => setPassword(event.currentTarget.value),
       placeholder: "Leave blank to keep saved password",
     }),
+    "field-stack password-field",
   );
 
   const tlsModeField = field(
@@ -304,6 +362,7 @@ export function App() {
       h("option", { value: "explicit" }, "Explicit TLS"),
       h("option", { value: "implicit" }, "Implicit TLS"),
     ),
+    "field-stack tls-field",
   );
 
   const rootPathsField = field(
@@ -315,7 +374,69 @@ export function App() {
       onChange: (event) => setRootPaths((event.currentTarget as HTMLTextAreaElement).value),
       rows: 4,
     }),
-    "field-stack span-2",
+    "field-stack root-paths-field",
+  );
+
+  const installPanel = h(
+    "section",
+    { className: "panel install-panel", "aria-labelledby": "install-heading" },
+    h(
+      "div",
+      { className: "panel-header" },
+      h(
+        "div",
+        null,
+        h("span", { className: "section-label" }, "Install"),
+        h("h2", { id: "install-heading" }, profileReady ? "Manifest" : "Profile setup"),
+        h(
+          "p",
+          null,
+          profileReady
+            ? "Use this private manifest URL in Stremio."
+            : "Enter your passphrase once. This browser will load the profile automatically next time.",
+        ),
+      ),
+    ),
+    profileReady
+      ? [
+          h("p", { key: "message", className: "notice", role: "status" }, profileMessage),
+          manifestUrl ? h("p", { key: "manifest", className: "manifest-url" }, h("span", null, "Manifest URL"), h("code", null, manifestUrl)) : null,
+          h(
+            "div",
+            { key: "actions", className: "button-row" },
+            stremioInstallUrl ? h("a", { className: "primary-button button-link", href: stremioInstallUrl }, "Install in Stremio") : null,
+          ),
+        ]
+      : [
+          h("div", { key: "fields", className: "profile-grid" }, passphraseField, recoveryField),
+          h("p", { key: "message", className: "notice", role: "status" }, profileMessage),
+          h(
+            "div",
+            { key: "actions", className: "button-row" },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "primary-button",
+                "aria-label": "Create profile",
+                disabled: profileState === "creating",
+                onClick: () => void saveProfile(),
+              },
+              profileState === "creating" ? "Working..." : "Create profile",
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "secondary-button",
+                "aria-label": "Unlock profile",
+                disabled: profileState === "creating",
+                onClick: () => void unlockExistingProfile(),
+              },
+              "Unlock profile",
+            ),
+          ),
+        ],
   );
 
   return h(
@@ -424,62 +545,7 @@ export function App() {
           ),
         ),
       ),
-      h(
-        "section",
-        { className: "panel profile-panel", "aria-labelledby": "profile-heading" },
-        h(
-          "div",
-          { className: "panel-header" },
-          h(
-            "div",
-            null,
-            h("span", { className: "section-label" }, "Install"),
-            h("h2", { id: "profile-heading" }, "Profile setup"),
-            h("p", null, "Create or unlock the encrypted browser profile that stores these settings."),
-          ),
-        ),
-        h("div", { className: "profile-grid" }, passphraseField, recoveryField),
-        h("p", { className: "notice", role: "status" }, profileMessage),
-        manifestUrl ? h("p", { className: "manifest-url" }, h("span", null, "Manifest"), h("code", null, manifestUrl)) : null,
-        h(
-          "div",
-          { className: "button-row" },
-          h(
-            "button",
-            {
-              type: "button",
-              className: "primary-button",
-              "aria-label": "Create profile",
-              disabled: profileState === "creating" || profileState === "created",
-              onClick: () => void saveProfile(),
-            },
-            profileState === "creating" ? "Working..." : "Create profile",
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "secondary-button",
-              "aria-label": "Unlock profile",
-              disabled: profileState === "creating",
-              onClick: () => void unlockExistingProfile(),
-            },
-            "Unlock profile",
-          ),
-          stremioInstallUrl
-            ? h("a", { className: "secondary-button button-link", href: stremioInstallUrl }, "Install in Stremio")
-            : h(
-                "button",
-                {
-                  type: "button",
-                  className: "secondary-button",
-                  disabled: true,
-                  title: "Create this profile first",
-                },
-                "Install in Stremio",
-              ),
-        ),
-      ),
+      installPanel,
     ),
   );
 }

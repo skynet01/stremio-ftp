@@ -23,6 +23,7 @@ const unlockProfileMock = vi.mocked(unlockProfile);
 
 describe("App", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     createProfileMock.mockReset();
     loadFtpSettingsMock.mockReset();
     rescanIndexMock.mockReset();
@@ -85,11 +86,19 @@ describe("App", () => {
     const installLink = await screen.findByRole("link", { name: "Install in Stremio" });
     expect(installLink.getAttribute("href")).toBe("stremio://addon.example.test/u/token/manifest.json");
     expect(screen.getByText("https://addon.example.test/u/token/manifest.json")).toBeTruthy();
+    expect(window.localStorage.getItem("stremio-ftp-manifest-url")).toBe("https://addon.example.test/u/token/manifest.json");
+    expect(window.localStorage.getItem("stremio-ftp-passphrase")).toBe("passphrase");
+    expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unlock profile" })).toBeNull();
     expect(unlockProfileMock).not.toHaveBeenCalled();
   });
 
-  it("unlocks an existing profile without inventing an install link", async () => {
-    unlockProfileMock.mockResolvedValue({ profileId: 1 });
+  it("unlocks an existing profile and shows the issued install link", async () => {
+    unlockProfileMock.mockResolvedValue({
+      profileId: 1,
+      manifestUrl: "https://addon.example.test/u/unlocked/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/unlocked/manifest.json",
+    });
     loadFtpSettingsMock.mockResolvedValue({
       ftpConfig: {
         host: "ftp.example.test",
@@ -116,12 +125,47 @@ describe("App", () => {
     });
 
     await waitFor(() => expect(loadFtpSettingsMock).toHaveBeenCalledWith({ browserUid: recoveryUid.value, passphrase: "passphrase" }));
-    expect(screen.queryByRole("link", { name: "Install in Stremio" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Install in Stremio" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Install in Stremio" }).getAttribute("href")).toBe(
+      "stremio://addon.example.test/u/unlocked/manifest.json",
+    );
+    expect(screen.getByText("https://addon.example.test/u/unlocked/manifest.json")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unlock profile" })).toBeNull();
     expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
     expect(screen.getByDisplayValue("2121")).toBeTruthy();
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/Movies\n/TV");
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toBeTruthy();
+  });
+
+  it("automatically loads a remembered profile in the same browser", async () => {
+    window.localStorage.setItem("stremio-ftp-recovery-uid", "remembered-browser");
+    window.localStorage.setItem("stremio-ftp-passphrase", "passphrase");
+    window.localStorage.setItem("stremio-ftp-manifest-url", "https://addon.example.test/u/remembered/manifest.json");
+    window.localStorage.setItem("stremio-ftp-stremio-install-url", "stremio://addon.example.test/u/remembered/manifest.json");
+    loadFtpSettingsMock.mockResolvedValue({
+      ftpConfig: {
+        host: "ftp.example.test",
+        port: 13017,
+        username: "user",
+        password: "",
+        passwordConfigured: true,
+        tlsMode: "explicit",
+        allowInvalidCertificate: true,
+        roots: ["/"],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(loadFtpSettingsMock).toHaveBeenCalledWith({ browserUid: "remembered-browser", passphrase: "passphrase" }));
+    expect(screen.getByRole("link", { name: "Install in Stremio" }).getAttribute("href")).toBe(
+      "stremio://addon.example.test/u/remembered/manifest.json",
+    );
+    expect(screen.getByText("https://addon.example.test/u/remembered/manifest.json")).toBeTruthy();
+    expect(screen.queryByLabelText("Passphrase")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unlock profile" })).toBeNull();
+    expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
   });
 
   it("keeps profile-dependent controls disabled before profile setup", () => {
@@ -154,15 +198,16 @@ describe("App", () => {
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
     fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/Movies" } });
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    const recoveryUidValue = recoveryUid.value;
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
 
     await screen.findByRole("link", { name: "Install in Stremio" });
     fireEvent.click(screen.getByRole("button", { name: "Save FTP settings" }));
 
-    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
     await waitFor(() => {
       expect(saveFtpSettingsMock).toHaveBeenCalledWith({
-        browserUid: recoveryUid.value,
+        browserUid: recoveryUidValue,
         passphrase: "passphrase",
         ftpConfig: {
           host: "ftp.example.test",
@@ -177,7 +222,7 @@ describe("App", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
-    await waitFor(() => expect(rescanIndexMock).toHaveBeenCalledWith({ browserUid: recoveryUid.value, passphrase: "passphrase" }));
+    await waitFor(() => expect(rescanIndexMock).toHaveBeenCalledWith({ browserUid: recoveryUidValue, passphrase: "passphrase" }));
     expect(await screen.findByText("Indexed 3 media files.")).toBeTruthy();
   });
 

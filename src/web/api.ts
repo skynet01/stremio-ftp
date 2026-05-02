@@ -14,6 +14,8 @@ export type CreateProfileResponse = {
 
 export type UnlockProfileResponse = {
   profileId: number;
+  manifestUrl: string;
+  stremioInstallUrl: string;
 };
 
 const setupToken = new URLSearchParams(window.location.search).get("setup") || "";

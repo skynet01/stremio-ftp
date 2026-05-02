@@ -62,7 +62,11 @@ export function profileRoutes(
     if (!parsed.success) return res.status(400).json({ error: "Invalid unlock request" });
     try {
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      res.json(unlocked);
+      const issued = service.issueInstallToken(unlocked.profileId);
+      res.json({
+        ...unlocked,
+        ...urls(config.baseUrl, issued.installUrlToken),
+      });
     } catch {
       res.status(401).json({ error: "Invalid passphrase" });
     }

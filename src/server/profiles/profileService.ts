@@ -89,10 +89,26 @@ export class ProfileService {
     return { installUrlToken: token };
   }
 
+  issueInstallToken(profileId: number) {
+    const exists = this.db.prepare("select id from profiles where id = ?").get(profileId);
+    if (!exists) throw new ProfileNotFoundError();
+    const token = randomToken();
+    this.db
+      .prepare("insert into profile_install_tokens (profile_id, token_hash, created_at) values (?, ?, ?)")
+      .run(profileId, hashToken(token), new Date().toISOString());
+    return { installUrlToken: token };
+  }
+
   profileIdForInstallToken(token: string): number | null {
-    const row = this.db.prepare("select id from profiles where install_token_hash = ?").get(hashToken(token)) as
+    const tokenHash = hashToken(token);
+    const profileRow = this.db.prepare("select id from profiles where install_token_hash = ?").get(tokenHash) as
       | { id: number }
       | undefined;
-    return row?.id ?? null;
+    if (profileRow) return profileRow.id;
+
+    const issuedRow = this.db.prepare("select profile_id from profile_install_tokens where token_hash = ?").get(tokenHash) as
+      | { profile_id: number }
+      | undefined;
+    return issuedRow?.profile_id ?? null;
   }
 }

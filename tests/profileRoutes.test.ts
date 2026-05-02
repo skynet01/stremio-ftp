@@ -88,7 +88,37 @@ describe("profile routes", () => {
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(200);
 
-    expect(response.body).toEqual({ profileId: created.body.profileId });
+    expect(response.body.profileId).toBe(created.body.profileId);
+    expect(response.body.manifestUrl).toMatch(/^https:\/\/addon\.example\.test\/u\/.+\/manifest\.json$/);
+    expect(response.body.stremioInstallUrl).toMatch(/^stremio:\/\/addon\.example\.test\/u\/.+\/manifest\.json$/);
+  });
+
+  it("keeps the previous install token valid after unlocking a profile", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    const created = await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const originalToken = String(created.body.manifestUrl).match(/\/u\/([^/]+)\/manifest\.json$/)?.[1];
+    expect(originalToken).toBeTruthy();
+
+    const unlocked = await request(app)
+      .post("/api/profile/unlock")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+    const unlockedToken = String(unlocked.body.manifestUrl).match(/\/u\/([^/]+)\/manifest\.json$/)?.[1];
+    expect(unlockedToken).toBeTruthy();
+    expect(unlockedToken).not.toBe(originalToken);
+
+    const originalManifest = await request(app).get(`/u/${originalToken}/manifest.json`).expect(200);
+    const unlockedManifest = await request(app).get(`/u/${unlockedToken}/manifest.json`).expect(200);
+    expect(originalManifest.body.name).toBe("FTP Streams");
+    expect(unlockedManifest.body.name).toBe("FTP Streams");
   });
 
   it("returns 401 for an incorrect unlock passphrase", async () => {

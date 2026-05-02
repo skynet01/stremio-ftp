@@ -129,6 +129,8 @@ For an existing browser profile:
 4. Saved FTP settings load into the form. The saved password is not shown.
 5. Leave the password field blank to keep the saved password when testing or saving.
 
+The portal remembers the last browser UID, passphrase, and manifest URL in that browser's local storage so repeat visits load the profile automatically. Use this only on trusted devices.
+
 ## FTP Root Paths
 
 Root paths can be newline- or comma-separated.

@@ -76,7 +76,7 @@ describe("schema", () => {
     const tables = db
       .prepare("select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name")
       .all() as { name: string }[];
-    expect(tables.map((row) => row.name)).toEqual(["media_files", "profiles"]);
+    expect(tables.map((row) => row.name)).toEqual(["media_files", "profile_install_tokens", "profiles"]);
   });
 
   it("creates media lookup indexes", () => {
@@ -118,6 +118,22 @@ describe("schema", () => {
 
     const mediaCount = db.prepare("select count(*) as count from media_files").get() as { count: number };
     expect(mediaCount.count).toBe(0);
+  });
+
+  it("cascades profile deletes to issued install tokens", () => {
+    const db = createDb();
+    const profileId = insertProfile(db);
+    db.prepare(
+      `
+        insert into profile_install_tokens (profile_id, token_hash, created_at)
+        values (?, 'issued-token', '2026-05-02T00:00:00.000Z')
+      `,
+    ).run(profileId);
+
+    db.prepare("delete from profiles where id = ?").run(profileId);
+
+    const tokenCount = db.prepare("select count(*) as count from profile_install_tokens").get() as { count: number };
+    expect(tokenCount.count).toBe(0);
   });
 
   it("rejects invalid media domain values", () => {

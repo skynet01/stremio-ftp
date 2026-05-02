@@ -13,6 +13,13 @@ export function migrate(db: Database.Database) {
       last_unlocked_at text
     );
 
+    create table if not exists profile_install_tokens (
+      id integer primary key autoincrement,
+      profile_id integer not null references profiles(id) on delete cascade,
+      token_hash text not null unique,
+      created_at text not null
+    );
+
     create table if not exists media_files (
       id integer primary key autoincrement,
       profile_id integer not null references profiles(id) on delete cascade,
@@ -36,6 +43,7 @@ export function migrate(db: Database.Database) {
 
     create index if not exists idx_media_episode on media_files(profile_id, media_kind, parsed_title, season, episode);
     create index if not exists idx_media_movie on media_files(profile_id, media_kind, imdb_id, parsed_title, parsed_year);
+    create index if not exists idx_profile_install_tokens_profile_id on profile_install_tokens(profile_id);
 
   `);
 }
