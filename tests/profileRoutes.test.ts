@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { Readable } from "node:stream";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/server/app";
@@ -107,5 +108,103 @@ describe("profile routes", () => {
       .expect(429);
 
     expect(response.body).toEqual({ error: "Too many profile attempts" });
+  });
+
+  it("saves FTP settings and refreshes the media index", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db, {
+      ftpClientFactory: async () => ({
+        list: async (path) =>
+          path === "/Movies"
+            ? [
+                {
+                  name: "The.Matrix.1999.1080p.mkv",
+                  path: "/Movies/The.Matrix.1999.1080p.mkv",
+                  type: "file",
+                  size: 1024,
+                },
+              ]
+            : [],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+    });
+
+    await request(app).post("/api/profile").send({ browserUid: "browser-uid", passphrase: "passphrase" }).expect(201);
+    const ftpConfig = {
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "explicit",
+      allowInvalidCertificate: true,
+      roots: ["/Movies"],
+    };
+
+    await request(app)
+      .post("/api/profile/ftp")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", ftpConfig })
+      .expect(200);
+    const response = await request(app)
+      .post("/api/profile/index/rescan")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(response.body).toEqual({ filesSeen: 1 });
+  });
+
+  it("proxies indexed FTP files for the matching install token", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db, {
+      ftpClientFactory: async () => ({
+        list: async () => [],
+        openReadStream: async (_path, { start, end }) => Readable.from(Buffer.from("0123456789").subarray(start, end + 1)),
+        close: async () => undefined,
+      }),
+    });
+
+    const created = await request(app)
+      .post("/api/profile")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const token = String(created.body.manifestUrl).match(/\/u\/([^/]+)\/manifest\.json$/)?.[1];
+    expect(token).toBeTruthy();
+
+    await request(app)
+      .post("/api/profile/ftp")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp.example.test",
+          port: 21,
+          username: "user",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: true,
+          roots: ["/Movies"],
+        },
+      })
+      .expect(200);
+
+    const fileId = Number(
+      db
+        .prepare(
+          `
+          insert into media_files (
+            profile_id, ftp_path, filename, normalized_filename, extension, media_kind, parsed_title,
+            parsed_year, season, episode, imdb_id, quality, confidence, size_bytes, last_seen_at
+          ) values (1, '/Movies/video.mkv', 'video.mkv', 'video', 'mkv', 'movie', 'video',
+            null, null, null, null, null, 90, 10, 'now')
+        `,
+        )
+        .run().lastInsertRowid,
+    );
+
+    const response = await request(app).get(`/proxy/${token}/${fileId}`).set("Range", "bytes=2-5").expect(206);
+
+    expect(response.text ?? Buffer.from(response.body).toString("utf8")).toBe("2345");
   });
 });

@@ -6,14 +6,18 @@ import { fileURLToPath } from "node:url";
 import helmet from "helmet";
 import type { AppConfig } from "./config.js";
 import { openDatabase } from "./db/database.js";
+import { createBasicFtpClient } from "./ftp/basicFtpClient.js";
+import type { FtpClientFactory } from "./ftp/ftpTypes.js";
 import { MediaRepository } from "./media/mediaRepository.js";
 import { ProfileService } from "./profiles/profileService.js";
 import { profileRoutes } from "./profiles/profileRoutes.js";
+import { createFtpProxyResolver } from "./proxy/ftpProxyResolver.js";
 import { createProxyRouter } from "./proxy/proxyRoutes.js";
 import { stremioRoutes } from "./stremio/routes.js";
 
 type AppOptions = {
   publicDir?: string;
+  ftpClientFactory?: FtpClientFactory;
 };
 
 export function createApp(
@@ -31,8 +35,9 @@ export function createApp(
 
   const profileService = new ProfileService(db, config.encryptionKey);
   const mediaRepository = new MediaRepository(db);
-  app.use("/api", profileRoutes(config, profileService));
-  app.use(createProxyRouter({ resolve: async () => null }));
+  const ftpClientFactory = options.ftpClientFactory ?? createBasicFtpClient;
+  app.use("/api", profileRoutes(config, profileService, mediaRepository, ftpClientFactory));
+  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 
   app.get("/health", (_req, res) => {

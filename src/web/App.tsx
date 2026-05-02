@@ -1,9 +1,9 @@
 import { Copy, Pause, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { createElement as h, type ReactNode, useState } from "react";
-import { createProfile, unlockProfile } from "./api.js";
+import { createProfile, rescanIndex, saveFtpSettings, testFtpSettings, unlockProfile } from "./api.js";
 
 type StatusTone = "green" | "amber" | "red" | "gray";
-const unavailableReason = "Backend endpoint not available yet";
+const unavailableReason = "This action is not available in this build";
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
   return h("span", { className: `badge badge-${tone}` }, children);
@@ -54,8 +54,13 @@ export function App() {
   const [rootPaths, setRootPaths] = useState("/media");
   const [profileState, setProfileState] = useState<"new" | "creating" | "created" | "unlocked" | "error">("new");
   const [profileMessage, setProfileMessage] = useState("Create or unlock this browser profile to install the addon.");
+  const [ftpMessage, setFtpMessage] = useState("Save FTP settings, then refresh the index.");
+  const [indexState, setIndexState] = useState<"idle" | "working" | "ready" | "error">("idle");
+  const [mediaItems, setMediaItems] = useState<number | null>(null);
   const [manifestUrl, setManifestUrl] = useState<string | null>(null);
   const [stremioInstallUrl, setStremioInstallUrl] = useState<string | null>(null);
+
+  const profileReady = profileState === "created" || profileState === "unlocked";
 
   async function saveProfile() {
     setProfileState("creating");
@@ -83,6 +88,61 @@ export function App() {
       }
       setProfileState("error");
       setProfileMessage(error instanceof Error ? error.message : "Unable to save profile.");
+    }
+  }
+
+  function currentFtpConfig() {
+    return {
+      host: host.trim(),
+      port: Number(port),
+      username,
+      password,
+      tlsMode: tlsMode as "none" | "explicit" | "implicit",
+      allowInvalidCertificate,
+      roots: rootPaths
+        .split(/\r?\n|,/)
+        .map((root) => root.trim())
+        .filter(Boolean),
+    };
+  }
+
+  async function testConnection() {
+    setIndexState("working");
+    setFtpMessage("Testing FTP connection...");
+    try {
+      await testFtpSettings({ browserUid: recoveryUid, passphrase, ftpConfig: currentFtpConfig() });
+      setIndexState("ready");
+      setFtpMessage("FTP connection succeeded.");
+    } catch (error) {
+      setIndexState("error");
+      setFtpMessage(error instanceof Error ? error.message : "Unable to test FTP connection.");
+    }
+  }
+
+  async function saveFtp() {
+    setIndexState("working");
+    setFtpMessage("Saving FTP settings...");
+    try {
+      await saveFtpSettings({ browserUid: recoveryUid, passphrase, ftpConfig: currentFtpConfig() });
+      setIndexState("ready");
+      setFtpMessage("FTP settings saved. Refresh the index to find files.");
+    } catch (error) {
+      setIndexState("error");
+      setFtpMessage(error instanceof Error ? error.message : "Unable to save FTP settings.");
+    }
+  }
+
+  async function refreshIndex() {
+    setIndexState("working");
+    setFtpMessage("Refreshing FTP index...");
+    try {
+      const result = await rescanIndex({ browserUid: recoveryUid, passphrase });
+      setMediaItems(result.filesSeen);
+      setIndexState("ready");
+      setFtpMessage(`Indexed ${result.filesSeen} media file${result.filesSeen === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setIndexState("error");
+      setFtpMessage(error instanceof Error ? error.message : "Unable to refresh index.");
     }
   }
 
@@ -176,7 +236,7 @@ export function App() {
         value: tlsMode,
         onChange: (event) => setTlsMode((event.currentTarget as HTMLSelectElement).value),
       },
-      h("option", { value: "disabled" }, "Disabled"),
+      h("option", { value: "none" }, "Disabled"),
       h("option", { value: "explicit" }, "Explicit TLS"),
       h("option", { value: "implicit" }, "Implicit TLS"),
     ),
@@ -201,7 +261,7 @@ export function App() {
       "header",
       { className: "topbar" },
       h("div", null, h("h1", null, "FTP Streams"), h("p", null, "Self-hosted configuration portal")),
-      h(StatusBadge, { tone: profileState === "created" || profileState === "unlocked" ? "green" : "gray" }, profileState === "created" ? "Ready to install" : profileState === "unlocked" ? "Unlocked" : "Not installed"),
+      h(StatusBadge, { tone: profileReady ? "green" : "gray" }, profileState === "created" ? "Ready to install" : profileState === "unlocked" ? "Unlocked" : "Not installed"),
     ),
     h(
       "div",
@@ -263,13 +323,13 @@ export function App() {
             h("h2", { id: "status-heading" }, "Index status"),
             h("p", null, "Track scan health and control indexing."),
           ),
-          h(StatusBadge, { tone: "amber" }, "Idle"),
+          h(StatusBadge, { tone: indexState === "ready" ? "green" : indexState === "error" ? "red" : indexState === "working" ? "amber" : "gray" }, indexState === "working" ? "Scanning" : indexState === "ready" ? "Ready" : indexState === "error" ? "Needs attention" : "Idle"),
         ),
         h(
           "dl",
           { className: "status-list" },
           h("div", null, h("dt", null, "Last scan"), h("dd", null, "Never")),
-          h("div", null, h("dt", null, "Media items"), h("dd", null, "0")),
+          h("div", null, h("dt", null, "Media items"), h("dd", null, mediaItems === null ? "0" : String(mediaItems))),
           h(
             "div",
             null,
@@ -277,11 +337,20 @@ export function App() {
             h("dd", null, h(StatusBadge, { tone: host ? "gray" : "red" }, host ? "Untested" : "Missing host")),
           ),
         ),
-        h("p", { className: "notice", role: "status" }, "Index and FTP controls are visible but disabled until backend endpoints are added."),
+        h("p", { className: "notice", role: "status" }, ftpMessage),
         h(
           "div",
           { className: "button-grid" },
-          unavailableButton("secondary-button", [h(RefreshCw, { key: "icon", size: 17, "aria-hidden": true }), "Rescan"]),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "secondary-button",
+              disabled: !profileReady || indexState === "working",
+              onClick: () => void refreshIndex(),
+            },
+            [h(RefreshCw, { key: "icon", size: 17, "aria-hidden": true }), "Rescan"],
+          ),
           unavailableButton("secondary-button", [h(Pause, { key: "icon", size: 17, "aria-hidden": true }), "Pause"]),
           unavailableButton("secondary-button", [h(RotateCcw, { key: "icon", size: 17, "aria-hidden": true }), "Rotate"]),
           unavailableButton("danger-button", [h(Trash2, { key: "icon", size: 17, "aria-hidden": true }), "Delete"]),
@@ -320,10 +389,20 @@ export function App() {
             { className: "button-row" },
             h(
               "button",
-              { type: "button", className: "secondary-button", disabled: true, title: unavailableReason },
+              { type: "button", className: "secondary-button", disabled: !profileReady || indexState === "working", onClick: () => void testConnection() },
               "Test connection",
             ),
-            unavailableButton("primary-button", "Save", "Save FTP settings"),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "primary-button",
+                "aria-label": "Save FTP settings",
+                disabled: !profileReady || indexState === "working",
+                onClick: () => void saveFtp(),
+              },
+              "Save",
+            ),
           ),
         ),
       ),

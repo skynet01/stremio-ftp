@@ -13,7 +13,7 @@ export type FtpConfig = {
   port: number;
   username: string;
   password: string;
-  tlsMode: "none" | "explicit";
+  tlsMode: "none" | "explicit" | "implicit";
   allowInvalidCertificate: boolean;
   roots: string[];
 };

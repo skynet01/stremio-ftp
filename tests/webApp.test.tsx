@@ -3,19 +3,28 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/web/App";
-import { createProfile, unlockProfile } from "../src/web/api";
+import { createProfile, rescanIndex, saveFtpSettings, testFtpSettings, unlockProfile } from "../src/web/api";
 
 vi.mock("../src/web/api", () => ({
   createProfile: vi.fn(),
+  rescanIndex: vi.fn(),
+  saveFtpSettings: vi.fn(),
+  testFtpSettings: vi.fn(),
   unlockProfile: vi.fn(),
 }));
 
 const createProfileMock = vi.mocked(createProfile);
+const rescanIndexMock = vi.mocked(rescanIndex);
+const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
+const testFtpSettingsMock = vi.mocked(testFtpSettings);
 const unlockProfileMock = vi.mocked(unlockProfile);
 
 describe("App", () => {
   beforeEach(() => {
     createProfileMock.mockReset();
+    rescanIndexMock.mockReset();
+    saveFtpSettingsMock.mockReset();
+    testFtpSettingsMock.mockReset();
     unlockProfileMock.mockReset();
   });
 
@@ -96,13 +105,60 @@ describe("App", () => {
     expect(screen.getByText("Profile unlocked. Create in this browser session to get an install link.")).toBeTruthy();
   });
 
-  it("keeps backend-only FTP and index controls disabled until endpoints exist", () => {
+  it("keeps profile-dependent controls disabled before profile setup", () => {
     render(<App />);
 
-    for (const name of ["Test connection", "Save FTP settings", "Rescan", "Pause", "Rotate", "Delete"]) {
+    for (const name of ["Test connection", "Save FTP settings", "Rescan"]) {
       const control = screen.getByRole("button", { name });
       expect(control).toBeDisabled();
-      expect(control.getAttribute("title")).toBe("Backend endpoint not available yet");
     }
+
+    for (const name of ["Pause", "Rotate", "Delete"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+  });
+
+  it("saves FTP settings and refreshes the index after profile creation", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: "profile-1",
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveFtpSettingsMock.mockResolvedValue({ ok: true });
+    testFtpSettingsMock.mockResolvedValue({ ok: true });
+    rescanIndexMock.mockResolvedValue({ filesSeen: 3 });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.change(screen.getByLabelText("Host"), { target: { value: "ftp.example.test" } });
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
+    fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/Movies" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+
+    await screen.findByRole("link", { name: "Install in Stremio" });
+    fireEvent.click(screen.getByRole("button", { name: "Save FTP settings" }));
+
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    await waitFor(() => {
+      expect(saveFtpSettingsMock).toHaveBeenCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp.example.test",
+          port: 21,
+          username: "user",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: false,
+          roots: ["/Movies"],
+        },
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
+    await waitFor(() => expect(rescanIndexMock).toHaveBeenCalledWith({ browserUid: recoveryUid.value, passphrase: "passphrase" }));
+    expect(await screen.findByText("Indexed 3 media files.")).toBeTruthy();
   });
 });

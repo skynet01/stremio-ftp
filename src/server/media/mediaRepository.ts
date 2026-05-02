@@ -157,6 +157,20 @@ export class MediaRepository {
     return rows.map(toMediaMatch);
   }
 
+  getFileForProfile(profileId: number, fileId: number): MediaMatch | null {
+    const row = this.db
+      .prepare(
+        `
+        select id, ftp_path, filename, quality, size_bytes
+        from media_files
+        where profile_id = ?
+          and id = ?
+      `,
+      )
+      .get(profileId, fileId) as MediaFileRow | undefined;
+    return row ? toMediaMatch(row) : null;
+  }
+
   setNegativeCache(profileId: number, type: "movie" | "series", stremioId: string, expiresAt: string) {
     this.db
       .prepare(

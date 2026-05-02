@@ -10,6 +10,7 @@ export type FtpEntry = {
 
 export type FtpClient = {
   list(path: string): Promise<FtpEntry[]>;
+  openReadStream(path: string, input: { start: number; end: number }): Promise<NodeJS.ReadableStream>;
   close(): Promise<void>;
 };
 

@@ -16,6 +16,24 @@ export type UnlockProfileResponse = {
   profileId: string;
 };
 
+export type FtpConfigRequest = {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  tlsMode: "none" | "explicit" | "implicit";
+  allowInvalidCertificate: boolean;
+  roots: string[];
+};
+
+export type AuthenticatedFtpRequest = CreateProfileRequest & {
+  ftpConfig: FtpConfigRequest;
+};
+
+export type RescanResponse = {
+  filesSeen: number;
+};
+
 async function readJson<T extends object>(response: Response): Promise<T> {
   const text = await response.text();
   let body: T | ApiError | undefined;
@@ -52,4 +70,31 @@ export async function unlockProfile(request: CreateProfileRequest): Promise<Unlo
     body: JSON.stringify(request),
   });
   return readJson<UnlockProfileResponse>(response);
+}
+
+export async function testFtpSettings(request: AuthenticatedFtpRequest): Promise<{ ok: true }> {
+  const response = await fetch("/api/profile/ftp/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return readJson<{ ok: true }>(response);
+}
+
+export async function saveFtpSettings(request: AuthenticatedFtpRequest): Promise<{ ok: true }> {
+  const response = await fetch("/api/profile/ftp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return readJson<{ ok: true }>(response);
+}
+
+export async function rescanIndex(request: CreateProfileRequest): Promise<RescanResponse> {
+  const response = await fetch("/api/profile/index/rescan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return readJson<RescanResponse>(response);
 }

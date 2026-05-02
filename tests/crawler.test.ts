@@ -36,6 +36,9 @@ describe("crawler", () => {
         path === "/"
           ? [{ name: "TV", path: "/TV", type: "directory" }]
           : [{ name: "Show.Name.S02E05.1080p.mkv", path: "/TV/Show.Name.S02E05.1080p.mkv", type: "file", size: 1000 }],
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
       close: async () => undefined,
     });
 
@@ -90,6 +93,9 @@ describe("crawler", () => {
       list: async () => [
         { name: "Current.Show.S01E01.mkv", path: "/TV/Current.Show.S01E01.mkv", type: "file", size: 1000 },
       ],
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
       close: async () => undefined,
     });
 
@@ -122,6 +128,9 @@ describe("crawler", () => {
         }
         throw new Error(`unexpected path ${path}`);
       },
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
       close: async () => undefined,
     });
 
@@ -140,6 +149,9 @@ describe("crawler", () => {
     const factory: FtpClientFactory = async () => ({
       list: async () => {
         throw new Error("list failed");
+      },
+      openReadStream: async () => {
+        throw new Error("not used");
       },
       close: async () => {
         closed = true;
@@ -160,6 +172,9 @@ describe("crawler", () => {
       list: async (path) => {
         const next = path === "/" ? "/d1" : `${path}/d`;
         return [{ name: "d", path: next, type: "directory" }];
+      },
+      openReadStream: async () => {
+        throw new Error("not used");
       },
       close: async () => {
         closed = true;

@@ -1,8 +1,8 @@
 # stremio-ftp
 
-Stremio FTP is a self-hosted Stremio addon for streaming media from an FTP or FTPS server through per-user Stremio manifest URLs. The current implementation includes the service scaffold, encrypted profile creation, manifest and stream lookup routes, a range-capable HTTP proxy shell, and a configuration portal.
+Stremio FTP is a self-hosted Stremio addon for streaming media from an FTP or FTPS server through per-user Stremio manifest URLs. The implementation includes encrypted profile creation, FTP credential storage, connection testing, on-demand index refreshes, manifest and stream lookup routes, range-capable HTTP proxy streaming, and a configuration portal.
 
-Important current limitation: FTP settings, FTP connection testing, index refresh controls, and the production proxy resolver are not wired to backend endpoints yet. The portal shows those controls as disabled until the remaining FTP/index/proxy integration is implemented.
+Current limitation: scans are triggered manually from the portal. Background refresh scheduling, token rotation, pause controls, and profile deletion are not implemented yet.
 
 ## Legal Content And Access
 
@@ -61,10 +61,11 @@ The manifest and stream URLs are generated from `BASE_URL`, so it must match the
 
 1. Open the configuration portal at `/configure` on your addon host.
 2. Create a profile with the browser-generated recovery UID and a passphrase.
-3. Copy the generated manifest URL or use the Stremio install link.
-4. Keep the recovery UID and passphrase. Unlocking an existing profile does not reveal a previously generated install token.
+3. Save and test FTP settings, then refresh the index.
+4. Copy the generated manifest URL or use the Stremio install link.
+5. Keep the recovery UID and passphrase. Unlocking an existing profile does not reveal a previously generated install token.
 
-FTP connection fields, connection testing, indexing controls, token rotation, and profile deletion are visible in the UI but disabled in this build because their backend endpoints are not implemented yet.
+FTP credentials are encrypted at rest. The manifest token can stream files indexed for that profile, so keep generated install URLs private.
 
 ## Manifest URL
 
@@ -74,7 +75,7 @@ Generated manifest URLs include a per-profile token:
 https://stremio-ftp.example.com/u/profile-install-token/manifest.json
 ```
 
-Keep profile URLs private. The current stream lookup route can return proxy URLs for rows already present in the media index, but the production proxy resolver is still a placeholder and returns `404` until FTP-backed proxy streaming is connected.
+Keep profile URLs private. Stream URLs proxy matching FTP files through the addon and support HTTP range requests for Stremio playback.
 
 ## Environment Variables
 
@@ -98,8 +99,8 @@ PROFILE_RATE_LIMIT_MAX=20
 
 ## Troubleshooting
 
-FTP TLS or certificate errors usually mean the server certificate is expired, self-signed, missing an intermediate certificate, or the configured FTP security mode does not match the server. Verify the server with a standard FTP client, confirm whether it expects plain FTP, explicit FTPS, or implicit FTPS, and check that the hostname in the profile matches the certificate when certificate verification is enabled. FTP connection testing is not wired to the portal backend in this build.
+FTP TLS or certificate errors usually mean the server certificate is expired, self-signed, missing an intermediate certificate, or the configured FTP security mode does not match the server. Verify the server with a standard FTP client, confirm whether it expects plain FTP, explicit FTPS, or implicit FTPS, and check that the hostname in the profile matches the certificate when certificate verification is enabled.
 
-An empty index usually means the crawler could not find supported media files, could not enter the configured root path, or filenames could not be matched to movie or series metadata. Check the configured FTP path, credentials, file permissions, and file extensions before enabling the remaining index controls.
+An empty index usually means the crawler could not find supported media files, could not enter the configured root path, or filenames could not be matched to movie or series metadata. Check the configured FTP path, credentials, file permissions, and file extensions before refreshing the index again.
 
 If Stremio installs the addon but streams fail remotely, check that `BASE_URL` uses the public HTTPS origin, the reverse proxy forwards to the addon, and `/health` is reachable from outside the host network.
