@@ -1,0 +1,13 @@
+services:
+  stremio-ftp:
+    build: .
+    ports:
+      - "7000:7000"
+    environment:
+      BASE_URL: "${BASE_URL:?set BASE_URL}"
+      CONFIG_ENCRYPTION_KEY: "${CONFIG_ENCRYPTION_KEY:?set CONFIG_ENCRYPTION_KEY}"
+      PORT: "7000"
+      CONFIG_DIR: "/config"
+    volumes:
+      - ./config:/config
+    restart: unless-stopped
