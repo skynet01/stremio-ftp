@@ -17,7 +17,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
 
   router.get("/u/:installToken/manifest.json", (req, res) => {
     const profileId = profiles.profileIdForInstallToken(req.params.installToken);
-    res.json(profileId ? tokenManifest() : publicManifest());
+    res.json(profileId ? tokenManifest(profiles.getAddonCustomization(profileId)) : publicManifest());
   });
 
   router.get("/u/:installToken/stream/:type/:id.json", async (req, res) => {

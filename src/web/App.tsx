@@ -1,7 +1,16 @@
 import { Copy, RefreshCw } from "lucide-react";
 import { createElement as h, type ReactNode, useEffect, useState } from "react";
-import { createProfile, loadFtpSettings, rescanIndex, saveFtpSettings, testFtpSettings, unlockProfile } from "./api.js";
-import type { LoadedFtpConfig } from "./api.js";
+import {
+  createProfile,
+  loadCustomization,
+  loadFtpSettings,
+  rescanIndex,
+  saveCustomization,
+  saveFtpSettings,
+  testFtpSettings,
+  unlockProfile,
+} from "./api.js";
+import type { AddonCustomization, LoadedFtpConfig } from "./api.js";
 
 type StatusTone = "green" | "amber" | "red" | "gray";
 const STORAGE_KEYS = {
@@ -10,6 +19,10 @@ const STORAGE_KEYS = {
   manifestUrl: "stremio-ftp-manifest-url",
   stremioInstallUrl: "stremio-ftp-stremio-install-url",
 } as const;
+const DEFAULT_CUSTOMIZATION: AddonCustomization = {
+  addonName: "Stremio FTP Addon",
+  addonLogoUrl: "",
+};
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
   return h("span", { className: `badge badge-${tone}` }, children);
@@ -59,6 +72,11 @@ export function App() {
   const [mediaItems, setMediaItems] = useState<number | null>(null);
   const [manifestUrl, setManifestUrl] = useState<string | null>(null);
   const [stremioInstallUrl, setStremioInstallUrl] = useState<string | null>(null);
+  const [addonName, setAddonName] = useState(DEFAULT_CUSTOMIZATION.addonName);
+  const [addonLogoUrl, setAddonLogoUrl] = useState(DEFAULT_CUSTOMIZATION.addonLogoUrl);
+  const [editingName, setEditingName] = useState(false);
+  const [editingLogo, setEditingLogo] = useState(false);
+  const [customizationMessage, setCustomizationMessage] = useState("Click the title or avatar to customize the Stremio addon.");
 
   const profileReady = profileState === "created" || profileState === "unlocked";
 
@@ -99,6 +117,25 @@ export function App() {
     );
   }
 
+  function applyCustomization(customization: AddonCustomization) {
+    setAddonName(customization.addonName || DEFAULT_CUSTOMIZATION.addonName);
+    setAddonLogoUrl(customization.addonLogoUrl || "");
+  }
+
+  function normalizedCustomization(): AddonCustomization {
+    return {
+      addonName: addonName.trim() || DEFAULT_CUSTOMIZATION.addonName,
+      addonLogoUrl: addonLogoUrl.trim(),
+    };
+  }
+
+  function hasCustomBranding(customization = normalizedCustomization()) {
+    return (
+      customization.addonName !== DEFAULT_CUSTOMIZATION.addonName ||
+      customization.addonLogoUrl !== DEFAULT_CUSTOMIZATION.addonLogoUrl
+    );
+  }
+
   async function loadSavedFtpSettings(nextPassphrase = passphrase) {
     try {
       const loaded = await loadFtpSettings({ browserUid: recoveryUid, passphrase: nextPassphrase });
@@ -114,6 +151,12 @@ export function App() {
     }
   }
 
+  async function loadSavedCustomization(nextPassphrase = passphrase) {
+    const loaded = await loadCustomization({ browserUid: recoveryUid, passphrase: nextPassphrase });
+    applyCustomization(loaded.customization);
+    return loaded.customization;
+  }
+
   async function restoreRememberedProfile(rememberedPassphrase: string) {
     setPassphrase(rememberedPassphrase);
     setProfileState("creating");
@@ -127,6 +170,7 @@ export function App() {
         setManifestUrl(rememberedManifest);
         setStremioInstallUrl(rememberedStremioInstall);
         setProfileState("unlocked");
+        await loadSavedCustomization(rememberedPassphrase);
         const loaded = await loadSavedFtpSettings(rememberedPassphrase);
         setProfileMessage(loaded ? "Profile loaded. Saved FTP settings loaded." : "Profile loaded.");
         return;
@@ -135,6 +179,7 @@ export function App() {
       const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase: rememberedPassphrase });
       rememberSession(rememberedPassphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
       setProfileState("unlocked");
+      await loadSavedCustomization(rememberedPassphrase);
       const loaded = await loadSavedFtpSettings(rememberedPassphrase);
       setProfileMessage(loaded ? "Profile loaded. Saved FTP settings loaded." : "Profile loaded.");
     } catch {
@@ -151,6 +196,15 @@ export function App() {
       const created = await createProfile({ browserUid: recoveryUid, passphrase });
       rememberSession(passphrase, created.manifestUrl, created.stremioInstallUrl);
       setProfileState("created");
+      const profileCustomization = normalizedCustomization();
+      if (hasCustomBranding(profileCustomization)) {
+        try {
+          await saveCustomization({ browserUid: recoveryUid, passphrase, customization: profileCustomization });
+          setCustomizationMessage("Addon branding saved. Reinstall or refresh the addon in Stremio to see it there.");
+        } catch (customizationError) {
+          setCustomizationMessage(customizationError instanceof Error ? customizationError.message : "Unable to save addon branding.");
+        }
+      }
       if (hasCompleteFtpConfig()) {
         setIndexState("working");
         try {
@@ -172,6 +226,7 @@ export function App() {
           const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase });
           rememberSession(passphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
           setProfileState("unlocked");
+          await loadSavedCustomization();
           const loaded = await loadSavedFtpSettings();
           setProfileMessage(loaded ? "Profile unlocked. Saved FTP settings loaded." : "Profile unlocked.");
           return;
@@ -193,6 +248,7 @@ export function App() {
       const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase });
       rememberSession(passphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
       setProfileState("unlocked");
+      await loadSavedCustomization();
       const loaded = await loadSavedFtpSettings();
       setProfileMessage(loaded ? "Profile unlocked. Saved FTP settings loaded." : "Profile unlocked.");
     } catch (error) {
@@ -259,6 +315,30 @@ export function App() {
       setIndexState("error");
       setFtpMessage(error instanceof Error ? error.message : "Unable to refresh index.");
     }
+  }
+
+  async function saveAddonBranding(nextCustomization: AddonCustomization) {
+    applyCustomization(nextCustomization);
+    if (!profileReady) {
+      setCustomizationMessage("Create or unlock your profile to save this branding.");
+      return;
+    }
+    try {
+      await saveCustomization({ browserUid: recoveryUid, passphrase, customization: nextCustomization });
+      setCustomizationMessage("Addon branding saved. Reinstall or refresh the addon in Stremio to see it there.");
+    } catch (error) {
+      setCustomizationMessage(error instanceof Error ? error.message : "Unable to save addon branding.");
+    }
+  }
+
+  function commitAddonName() {
+    setEditingName(false);
+    void saveAddonBranding(normalizedCustomization());
+  }
+
+  function commitAddonLogo() {
+    setEditingLogo(false);
+    void saveAddonBranding(normalizedCustomization());
   }
 
   const passphraseField = field(
@@ -351,9 +431,10 @@ export function App() {
     "field-stack password-field",
   );
 
-  const tlsModeField = field(
-    "TLS mode",
-    "tlsMode",
+  const securityField = h(
+    "div",
+    { className: "field-stack tls-field" },
+    h("label", { htmlFor: "tlsMode" }, "TLS mode"),
     h(
       "select",
       {
@@ -365,7 +446,17 @@ export function App() {
       h("option", { value: "explicit" }, "Explicit TLS"),
       h("option", { value: "implicit" }, "Implicit TLS"),
     ),
-    "field-stack tls-field",
+    h(
+      "label",
+      { className: "toggle-row compact-toggle-row", htmlFor: "allowInvalidCertificate" },
+      h("input", {
+        id: "allowInvalidCertificate",
+        type: "checkbox",
+        checked: allowInvalidCertificate,
+        onChange: (event) => setAllowInvalidCertificate(event.currentTarget.checked),
+      }),
+      "Allow invalid certificate",
+    ),
   );
 
   const rootPathsField = field(
@@ -467,12 +558,58 @@ export function App() {
     "section",
     { className: "hero" },
     h("span", { className: "section-label" }, "Private source addon"),
-    h("h1", null, "Stremio FTP Addon"),
+    editingName
+      ? h("input", {
+          className: "hero-title-input",
+          "aria-label": "Addon name",
+          value: addonName,
+          autoFocus: true,
+          maxLength: 80,
+          onChange: (event) => setAddonName(event.currentTarget.value),
+          onBlur: commitAddonName,
+          onKeyDown: (event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              setAddonName(addonName.trim() || DEFAULT_CUSTOMIZATION.addonName);
+              setEditingName(false);
+            }
+          },
+        })
+      : h(
+          "button",
+          {
+            type: "button",
+            className: "editable-title",
+            "aria-label": "Edit addon name",
+            onClick: () => setEditingName(true),
+          },
+          h("h1", null, addonName),
+        ),
     h(
       "p",
       null,
       "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
     ),
+    h("p", { className: "customization-notice", role: "status" }, customizationMessage),
+    editingLogo
+      ? h(
+          "div",
+          { className: "avatar-editor" },
+          h("label", { htmlFor: "addonLogoUrl" }, "Addon avatar URL"),
+          h("input", {
+            id: "addonLogoUrl",
+            value: addonLogoUrl,
+            autoFocus: true,
+            placeholder: "https://example.com/logo.png",
+            onChange: (event) => setAddonLogoUrl(event.currentTarget.value),
+            onBlur: commitAddonLogo,
+            onKeyDown: (event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") setEditingLogo(false);
+            },
+          }),
+        )
+      : null,
   );
 
   const setupTokenPanel = h(
@@ -489,7 +626,22 @@ export function App() {
     h(
       "header",
       { className: "topbar" },
-      h("div", { className: "brand-lockup" }, h("span", { className: "brand-mark" }, "TVA"), h("div", null, h("p", { className: "brand-title" }, "FTP Streams"), h("p", null, "Configure your private Stremio source"))),
+      h(
+        "div",
+        { className: "brand-lockup" },
+        h(
+          "button",
+          {
+            type: "button",
+            className: "brand-mark",
+            "aria-label": "Edit addon avatar",
+            style: addonLogoUrl ? { backgroundImage: `url(${addonLogoUrl})` } : undefined,
+            onClick: () => setEditingLogo(true),
+          },
+          addonLogoUrl ? h("span", { className: "visually-hidden" }, "Addon avatar") : "TVA",
+        ),
+        h("div", null, h("p", { className: "brand-title" }, addonName), h("p", null, "Configure your private Stremio source")),
+      ),
       h(StatusBadge, { tone: profileReady ? "green" : "gray" }, profileState === "created" ? "Ready to install" : profileState === "unlocked" ? "Unlocked" : "Not installed"),
     ),
     hero,
@@ -516,18 +668,7 @@ export function App() {
         h(
           "form",
           { className: "ftp-form" },
-          h("div", { className: "field-grid ftp-field-grid" }, hostField, portField, usernameField, passwordField, tlsModeField, rootPathsField),
-          h(
-            "label",
-            { className: "toggle-row", htmlFor: "allowInvalidCertificate" },
-            h("input", {
-              id: "allowInvalidCertificate",
-              type: "checkbox",
-              checked: allowInvalidCertificate,
-              onChange: (event) => setAllowInvalidCertificate(event.currentTarget.checked),
-            }),
-            "Allow invalid certificate",
-          ),
+          h("div", { className: "field-grid ftp-field-grid" }, hostField, portField, usernameField, passwordField, securityField, rootPathsField),
           h(
             "div",
             { className: "button-row" },

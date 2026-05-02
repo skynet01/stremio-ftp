@@ -7,6 +7,8 @@ export function migrate(db: Database.Database) {
       browser_uid text not null unique,
       passphrase_verifier text not null,
       encrypted_ftp_config text,
+      addon_name text,
+      addon_logo_url text,
       install_token_hash text not null unique,
       created_at text not null,
       updated_at text not null,
@@ -46,4 +48,12 @@ export function migrate(db: Database.Database) {
     create index if not exists idx_profile_install_tokens_profile_id on profile_install_tokens(profile_id);
 
   `);
+  ensureProfileColumn(db, "addon_name", "text");
+  ensureProfileColumn(db, "addon_logo_url", "text");
+}
+
+function ensureProfileColumn(db: Database.Database, name: string, definition: string) {
+  const columns = db.prepare("pragma table_info(profiles)").all() as { name: string }[];
+  if (columns.some((column) => column.name === name)) return;
+  db.prepare(`alter table profiles add column ${name} ${definition}`).run();
 }

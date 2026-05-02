@@ -117,8 +117,8 @@ describe("profile routes", () => {
 
     const originalManifest = await request(app).get(`/u/${originalToken}/manifest.json`).expect(200);
     const unlockedManifest = await request(app).get(`/u/${unlockedToken}/manifest.json`).expect(200);
-    expect(originalManifest.body.name).toBe("FTP Streams");
-    expect(unlockedManifest.body.name).toBe("FTP Streams");
+    expect(originalManifest.body.name).toBe("Stremio FTP Addon");
+    expect(unlockedManifest.body.name).toBe("Stremio FTP Addon");
   });
 
   it("returns 401 for an incorrect unlock passphrase", async () => {
@@ -381,6 +381,44 @@ describe("profile routes", () => {
         },
       })
       .expect(200);
+  });
+
+  it("saves and loads profile addon customization", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    await request(app)
+      .post("/api/profile/customization")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Archive 3D",
+          addonLogoUrl: "https://cdn.example.test/logo.png",
+        },
+      })
+      .expect(200);
+
+    const response = await request(app)
+      .post("/api/profile/customization/load")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(response.body).toEqual({
+      customization: {
+        addonName: "Archive 3D",
+        addonLogoUrl: "https://cdn.example.test/logo.png",
+      },
+    });
   });
 
   it("returns the FTP list error when testing an invalid root path", async () => {

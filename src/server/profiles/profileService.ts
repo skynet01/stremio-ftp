@@ -18,6 +18,16 @@ export type FtpConfig = {
   roots: string[];
 };
 
+export type AddonCustomization = {
+  addonName: string;
+  addonLogoUrl: string;
+};
+
+export const DEFAULT_ADDON_CUSTOMIZATION: AddonCustomization = {
+  addonName: "Stremio FTP Addon",
+  addonLogoUrl: "",
+};
+
 export class DuplicateProfileError extends Error {
   constructor() {
     super("Profile already exists");
@@ -78,6 +88,24 @@ export class ProfileService {
       | undefined;
     if (!row?.encrypted_ftp_config) return null;
     return decryptJson<FtpConfig>(row.encrypted_ftp_config, this.encryptionKey);
+  }
+
+  getAddonCustomization(profileId: number): AddonCustomization {
+    const row = this.db.prepare("select addon_name, addon_logo_url from profiles where id = ?").get(profileId) as
+      | { addon_name: string | null; addon_logo_url: string | null }
+      | undefined;
+    if (!row) throw new ProfileNotFoundError();
+    return {
+      addonName: row.addon_name?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonName,
+      addonLogoUrl: row.addon_logo_url?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonLogoUrl,
+    };
+  }
+
+  saveAddonCustomization(profileId: number, customization: AddonCustomization) {
+    const result = this.db
+      .prepare("update profiles set addon_name = ?, addon_logo_url = ?, updated_at = ? where id = ?")
+      .run(customization.addonName, customization.addonLogoUrl, new Date().toISOString(), profileId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
   }
 
   rotateInstallToken(profileId: number) {

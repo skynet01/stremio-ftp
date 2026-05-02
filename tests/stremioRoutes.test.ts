@@ -47,6 +47,23 @@ describe("stremio routes", () => {
     expect(response.header["cross-origin-resource-policy"]).toBe("cross-origin");
   });
 
+  it("uses saved profile branding in the token manifest", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "https://cdn.example.test/logo.png",
+    });
+    const app = createApp(config, db);
+
+    const response = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
+
+    expect(response.body.name).toBe("Archive 3D");
+    expect(response.body.logo).toBe("https://cdn.example.test/logo.png");
+  });
+
   it("returns CORS headers for public manifest and stream routes", async () => {
     const db = new Database(":memory:");
     migrate(db);

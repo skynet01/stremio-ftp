@@ -3,20 +3,33 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/web/App";
-import { createProfile, loadFtpSettings, rescanIndex, saveFtpSettings, testFtpSettings, unlockProfile } from "../src/web/api";
+import {
+  createProfile,
+  loadCustomization,
+  loadFtpSettings,
+  rescanIndex,
+  saveCustomization,
+  saveFtpSettings,
+  testFtpSettings,
+  unlockProfile,
+} from "../src/web/api";
 
 vi.mock("../src/web/api", () => ({
   createProfile: vi.fn(),
+  loadCustomization: vi.fn(),
   loadFtpSettings: vi.fn(),
   rescanIndex: vi.fn(),
+  saveCustomization: vi.fn(),
   saveFtpSettings: vi.fn(),
   testFtpSettings: vi.fn(),
   unlockProfile: vi.fn(),
 }));
 
 const createProfileMock = vi.mocked(createProfile);
+const loadCustomizationMock = vi.mocked(loadCustomization);
 const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
 const rescanIndexMock = vi.mocked(rescanIndex);
+const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
 const testFtpSettingsMock = vi.mocked(testFtpSettings);
 const unlockProfileMock = vi.mocked(unlockProfile);
@@ -26,8 +39,10 @@ describe("App", () => {
     window.localStorage.clear();
     window.history.pushState({}, "", "/");
     createProfileMock.mockReset();
+    loadCustomizationMock.mockReset();
     loadFtpSettingsMock.mockReset();
     rescanIndexMock.mockReset();
+    saveCustomizationMock.mockReset();
     saveFtpSettingsMock.mockReset();
     testFtpSettingsMock.mockReset();
     unlockProfileMock.mockReset();
@@ -36,6 +51,8 @@ describe("App", () => {
   it("renders the FTP configuration portal", () => {
     render(<App />);
     expect(screen.getByRole("heading", { name: "Stremio FTP Addon" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit addon name" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit addon avatar" })).toBeTruthy();
     expect(screen.getByLabelText("Host")).toBeTruthy();
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/");
     expect(screen.getByRole("button", { name: "Test connection" })).toBeTruthy();
@@ -112,6 +129,12 @@ describe("App", () => {
         roots: ["/Movies", "/TV"],
       },
     });
+    loadCustomizationMock.mockResolvedValue({
+      customization: {
+        addonName: "Archive 3D",
+        addonLogoUrl: "https://cdn.example.test/logo.png",
+      },
+    });
 
     render(<App />);
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
@@ -126,6 +149,8 @@ describe("App", () => {
     });
 
     await waitFor(() => expect(loadFtpSettingsMock).toHaveBeenCalledWith({ browserUid: recoveryUid.value, passphrase: "passphrase" }));
+    await waitFor(() => expect(loadCustomizationMock).toHaveBeenCalledWith({ browserUid: recoveryUid.value, passphrase: "passphrase" }));
+    expect(screen.getByRole("heading", { name: "Archive 3D" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Install in Stremio" }).getAttribute("href")).toBe(
       "stremio://addon.example.test/u/unlocked/manifest.json",
     );
@@ -139,11 +164,96 @@ describe("App", () => {
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toBeTruthy();
   });
 
+  it("saves edited addon name and avatar after profile setup", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("link", { name: "Install in Stremio" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit addon name" }));
+    fireEvent.change(screen.getByLabelText("Addon name"), { target: { value: "Archive 3D" } });
+    fireEvent.blur(screen.getByLabelText("Addon name"));
+
+    await waitFor(() =>
+      expect(saveCustomizationMock).toHaveBeenCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Archive 3D",
+          addonLogoUrl: "",
+        },
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit addon avatar" }));
+    fireEvent.change(screen.getByLabelText("Addon avatar URL"), { target: { value: "https://cdn.example.test/logo.png" } });
+    fireEvent.blur(screen.getByLabelText("Addon avatar URL"));
+
+    await waitFor(() =>
+      expect(saveCustomizationMock).toHaveBeenLastCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Archive 3D",
+          addonLogoUrl: "https://cdn.example.test/logo.png",
+        },
+      }),
+    );
+  });
+
+  it("persists addon branding chosen before profile creation", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit addon name" }));
+    fireEvent.change(screen.getByLabelText("Addon name"), { target: { value: "Archive 3D" } });
+    fireEvent.blur(screen.getByLabelText("Addon name"));
+    fireEvent.click(screen.getByRole("button", { name: "Edit addon avatar" }));
+    fireEvent.change(screen.getByLabelText("Addon avatar URL"), { target: { value: "https://cdn.example.test/logo.png" } });
+    fireEvent.blur(screen.getByLabelText("Addon avatar URL"));
+
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    await waitFor(() =>
+      expect(saveCustomizationMock).toHaveBeenCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Archive 3D",
+          addonLogoUrl: "https://cdn.example.test/logo.png",
+        },
+      }),
+    );
+  });
+
   it("automatically loads a remembered profile in the same browser", async () => {
     window.localStorage.setItem("stremio-ftp-recovery-uid", "remembered-browser");
     window.localStorage.setItem("stremio-ftp-passphrase", "passphrase");
     window.localStorage.setItem("stremio-ftp-manifest-url", "https://addon.example.test/u/remembered/manifest.json");
     window.localStorage.setItem("stremio-ftp-stremio-install-url", "stremio://addon.example.test/u/remembered/manifest.json");
+    loadCustomizationMock.mockResolvedValue({
+      customization: {
+        addonName: "Stremio FTP Addon",
+        addonLogoUrl: "",
+      },
+    });
     loadFtpSettingsMock.mockResolvedValue({
       ftpConfig: {
         host: "ftp.example.test",

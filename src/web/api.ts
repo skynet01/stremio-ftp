@@ -18,6 +18,11 @@ export type UnlockProfileResponse = {
   stremioInstallUrl: string;
 };
 
+export type AddonCustomization = {
+  addonName: string;
+  addonLogoUrl: string;
+};
+
 const setupToken = new URLSearchParams(window.location.search).get("setup") || "";
 
 function authHeaders() {
@@ -43,6 +48,10 @@ export type LoadedFtpConfig = FtpConfigRequest & {
 
 export type AuthenticatedFtpRequest = CreateProfileRequest & {
   ftpConfig: FtpConfigRequest;
+};
+
+export type AuthenticatedCustomizationRequest = CreateProfileRequest & {
+  customization: AddonCustomization;
 };
 
 export type RescanResponse = {
@@ -112,6 +121,24 @@ export async function loadFtpSettings(request: CreateProfileRequest): Promise<{ 
     body: JSON.stringify(request),
   });
   return readJson<{ ftpConfig: LoadedFtpConfig }>(response);
+}
+
+export async function loadCustomization(request: CreateProfileRequest): Promise<{ customization: AddonCustomization }> {
+  const response = await fetch("/api/profile/customization/load", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<{ customization: AddonCustomization }>(response);
+}
+
+export async function saveCustomization(request: AuthenticatedCustomizationRequest): Promise<{ ok: true }> {
+  const response = await fetch("/api/profile/customization", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<{ ok: true }>(response);
 }
 
 export async function rescanIndex(request: CreateProfileRequest): Promise<RescanResponse> {

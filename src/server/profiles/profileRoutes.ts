@@ -23,6 +23,15 @@ const ftpConfigSchema = z.object({
 
 const authenticatedSchema = createSchema;
 const saveFtpSchema = createSchema.extend({ ftpConfig: ftpConfigSchema });
+const customizationSchema = z.object({
+  addonName: z.string().trim().min(1).max(80),
+  addonLogoUrl: z
+    .string()
+    .trim()
+    .max(2048)
+    .refine((value) => !value || /^https?:\/\//i.test(value), "Logo URL must start with http:// or https://"),
+});
+const saveCustomizationSchema = createSchema.extend({ customization: customizationSchema });
 
 function urls(baseUrl: string, token: string) {
   const manifestUrl = `${baseUrl}/u/${token}/manifest.json`;
@@ -138,6 +147,31 @@ export function profileRoutes(
           roots: ftpConfig.roots,
         },
       });
+    } catch {
+      res.status(401).json({ error: "Invalid passphrase" });
+    }
+  });
+
+  router.post("/profile/customization/load", rateLimitProfiles, async (req, res) => {
+    const parsed = authenticatedSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid customization request" });
+
+    try {
+      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      res.json({ customization: service.getAddonCustomization(unlocked.profileId) });
+    } catch {
+      res.status(401).json({ error: "Invalid passphrase" });
+    }
+  });
+
+  router.post("/profile/customization", rateLimitProfiles, async (req, res) => {
+    const parsed = saveCustomizationSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid customization request" });
+
+    try {
+      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      service.saveAddonCustomization(unlocked.profileId, parsed.data.customization);
+      res.json({ ok: true });
     } catch {
       res.status(401).json({ error: "Invalid passphrase" });
     }

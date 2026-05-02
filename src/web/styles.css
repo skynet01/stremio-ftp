@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Fraunces:opsz,wght,SOFT@9..144,500..700,20..80&family=JetBrains+Mono:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
 :root {
   --ink: #11120d;
@@ -129,13 +129,18 @@ textarea:focus-visible,
   flex: 0 0 auto;
   width: 46px;
   height: 46px;
+  min-height: 46px;
+  min-width: 46px;
   border: 1px solid var(--line);
   border-radius: 50%;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--accent);
   background: rgba(255, 255, 255, 0.025);
+  background-position: center;
+  background-size: cover;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.72rem;
   font-weight: 600;
@@ -143,13 +148,17 @@ textarea:focus-visible,
   box-shadow: 0 20px 44px -28px rgba(0, 0, 0, 0.85);
 }
 
+.brand-mark:hover {
+  border-color: var(--accent);
+  background-color: rgba(168, 224, 99, 0.06);
+}
+
 .brand-title {
   margin: 0;
   color: var(--cream);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "DM Sans", system-ui, sans-serif;
   font-size: 1.25rem;
-  font-variation-settings: "SOFT" 45;
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: 0;
   line-height: 1;
 }
@@ -158,7 +167,9 @@ textarea:focus-visible,
 .panel-header p {
   margin: 7px 0 0;
   color: var(--cream-dim);
-  font-size: 0.95rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.035em;
   line-height: 1.55;
 }
 
@@ -173,20 +184,71 @@ textarea:focus-visible,
   max-width: 780px;
   margin: 0;
   color: var(--cream);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "DM Sans", system-ui, sans-serif;
   font-size: clamp(3rem, 8vw, 6.4rem);
-  font-variation-settings: "SOFT" 28;
-  font-weight: 620;
+  font-weight: 650;
   letter-spacing: 0;
-  line-height: 0.92;
+  line-height: 0.9;
 }
 
 .hero p {
   max-width: 680px;
   margin: 18px 0 0;
   color: var(--cream-dim);
-  font-size: clamp(1rem, 1.4vw, 1.16rem);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: clamp(0.86rem, 1.1vw, 1rem);
+  letter-spacing: 0.035em;
   line-height: 1.5;
+}
+
+.editable-title {
+  display: block;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  box-shadow: none;
+}
+
+.editable-title:hover h1 {
+  color: var(--accent-2);
+}
+
+.hero-title-input {
+  max-width: min(780px, 100%);
+  border-bottom-color: var(--accent);
+  color: var(--cream);
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: clamp(3rem, 8vw, 6.4rem);
+  font-weight: 650;
+  line-height: 0.9;
+}
+
+.customization-notice {
+  min-height: 18px;
+  margin-top: 12px !important;
+  color: var(--muted) !important;
+  font-size: 0.72rem !important;
+}
+
+.avatar-editor {
+  display: grid;
+  max-width: 520px;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.avatar-editor label {
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 .portal-grid {
@@ -266,10 +328,9 @@ textarea:focus-visible,
 .panel-header h2 {
   margin: 0;
   color: var(--cream);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "DM Sans", system-ui, sans-serif;
   font-size: clamp(1.55rem, 2.6vw, 2.35rem);
-  font-variation-settings: "SOFT" 35;
-  font-weight: 600;
+  font-weight: 650;
   letter-spacing: 0;
   line-height: 1.04;
 }
@@ -300,6 +361,7 @@ textarea:focus-visible,
 
 .tls-field {
   grid-column: span 2;
+  align-self: start;
 }
 
 .root-paths-field {
@@ -344,6 +406,11 @@ textarea {
 input,
 select {
   min-height: 46px;
+}
+
+.tls-field select {
+  min-height: 38px;
+  padding: 8px 0 9px;
 }
 
 select {
@@ -547,11 +614,26 @@ input:-webkit-autofill:active {
   margin-top: 18px;
 }
 
+.compact-toggle-row {
+  align-items: flex-start;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
 .toggle-row input {
   width: 17px;
   height: 17px;
   min-height: auto;
   accent-color: var(--accent);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 @media (max-width: 860px) {
