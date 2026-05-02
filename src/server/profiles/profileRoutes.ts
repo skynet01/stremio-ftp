@@ -72,11 +72,21 @@ export function profileRoutes(
     const parsed = saveFtpSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid FTP settings request" });
 
+    let unlocked: { profileId: number };
     try {
-      await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      const client = await ftpClientFactory(parsed.data.ftpConfig);
+      unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+    } catch {
+      return res.status(401).json({ error: "Invalid passphrase" });
+    }
+
+    const existingConfig = service.getFtpConfig(unlocked.profileId);
+    const ftpConfig = ftpConfigWithStoredPassword(parsed.data.ftpConfig, existingConfig);
+    if (!ftpConfig.password) return res.status(400).json({ error: "FTP password is required" });
+
+    try {
+      const client = await ftpClientFactory(ftpConfig);
       try {
-        for (const root of parsed.data.ftpConfig.roots) {
+        for (const root of ftpConfig.roots) {
           await client.list(root);
         }
       } finally {
@@ -95,13 +105,9 @@ export function profileRoutes(
     try {
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
       const existingConfig = service.getFtpConfig(unlocked.profileId);
-      if (!parsed.data.ftpConfig.password && !existingConfig) {
-        return res.status(400).json({ error: "FTP password is required" });
-      }
-      service.saveFtpConfig(unlocked.profileId, {
-        ...parsed.data.ftpConfig,
-        password: parsed.data.ftpConfig.password || existingConfig?.password || "",
-      });
+      const ftpConfig = ftpConfigWithStoredPassword(parsed.data.ftpConfig, existingConfig);
+      if (!ftpConfig.password) return res.status(400).json({ error: "FTP password is required" });
+      service.saveFtpConfig(unlocked.profileId, ftpConfig);
       res.json({ ok: true });
     } catch {
       res.status(401).json({ error: "Invalid passphrase" });
@@ -160,6 +166,16 @@ export function profileRoutes(
   });
 
   return router;
+}
+
+function ftpConfigWithStoredPassword(
+  incoming: z.infer<typeof ftpConfigSchema>,
+  existing: z.infer<typeof ftpConfigSchema> | null,
+) {
+  return {
+    ...incoming,
+    password: incoming.password || existing?.password || "",
+  };
 }
 
 function profileRateLimiter(windowMs: number, maxAttempts: number): RequestHandler {

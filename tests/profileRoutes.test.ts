@@ -296,6 +296,63 @@ describe("profile routes", () => {
     });
   });
 
+  it("tests FTP settings with the stored password when the password field is blank", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db, {
+      ftpClientFactory: async (ftpConfig) => {
+        if (ftpConfig.password !== "secret") throw new Error("Expected saved password");
+        return {
+          list: async () => [],
+          openReadStream: async () => Readable.from("not used"),
+          close: async () => undefined,
+        };
+      },
+    });
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    await request(app)
+      .post("/api/profile/ftp")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp.example.test",
+          port: 21,
+          username: "user",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: true,
+          roots: ["/Movies"],
+        },
+      })
+      .expect(200);
+
+    await request(app)
+      .post("/api/profile/ftp/test")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp.example.test",
+          port: 21,
+          username: "user",
+          password: "",
+          tlsMode: "explicit",
+          allowInvalidCertificate: true,
+          roots: ["/Movies"],
+        },
+      })
+      .expect(200);
+  });
+
   it("proxies indexed FTP files for the matching install token", async () => {
     const db = new Database(":memory:");
     migrate(db);

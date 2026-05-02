@@ -1,10 +1,9 @@
-import { Copy, Pause, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, RefreshCw } from "lucide-react";
 import { createElement as h, type ReactNode, useState } from "react";
 import { createProfile, loadFtpSettings, rescanIndex, saveFtpSettings, testFtpSettings, unlockProfile } from "./api.js";
 import type { LoadedFtpConfig } from "./api.js";
 
 type StatusTone = "green" | "amber" | "red" | "gray";
-const unavailableReason = "This action is not available in this build";
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
   return h("span", { className: `badge badge-${tone}` }, children);
@@ -12,20 +11,6 @@ function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNod
 
 function field(label: string, id: string, control: ReactNode, className = "field-stack") {
   return h("div", { className }, h("label", { htmlFor: id }, label), control);
-}
-
-function unavailableButton(className: string, children: ReactNode, ariaLabel?: string) {
-  return h(
-    "button",
-    {
-      type: "button",
-      className,
-      disabled: true,
-      title: unavailableReason,
-      "aria-label": ariaLabel,
-    },
-    children,
-  );
 }
 
 function browserUid() {
@@ -101,13 +86,27 @@ export function App() {
 
   async function saveProfile() {
     setProfileState("creating");
-    setProfileMessage("Creating profile...");
+    setProfileMessage(hasCompleteFtpConfig() ? "Creating profile and saving FTP settings..." : "Creating profile...");
     try {
       const created = await createProfile({ browserUid: recoveryUid, passphrase });
       setManifestUrl(created.manifestUrl);
       setStremioInstallUrl(created.stremioInstallUrl);
       setProfileState("created");
-      setProfileMessage("Profile created. Install link is ready.");
+      if (hasCompleteFtpConfig()) {
+        setIndexState("working");
+        try {
+          await saveFtpSettings({ browserUid: recoveryUid, passphrase, ftpConfig: currentFtpConfig() });
+          setIndexState("ready");
+          setFtpMessage("FTP settings saved. Refresh the index to find files.");
+          setProfileMessage("Profile created. FTP settings saved. Install link is ready.");
+        } catch (saveError) {
+          setIndexState("error");
+          setFtpMessage(saveError instanceof Error ? saveError.message : "Unable to save FTP settings.");
+          setProfileMessage("Profile created. Install link is ready, but FTP settings were not saved.");
+        }
+      } else {
+        setProfileMessage("Profile created. Install link is ready.");
+      }
     } catch (error) {
       if (error instanceof Error && error.message === "Profile already exists") {
         try {
@@ -157,6 +156,11 @@ export function App() {
         .map((root) => root.trim())
         .filter(Boolean),
     };
+  }
+
+  function hasCompleteFtpConfig() {
+    const ftpConfig = currentFtpConfig();
+    return Boolean(ftpConfig.host && ftpConfig.username && ftpConfig.password && Number.isFinite(ftpConfig.port) && ftpConfig.roots.length > 0);
   }
 
   async function testConnection() {
@@ -248,7 +252,7 @@ export function App() {
       onChange: (event) => setHost(event.currentTarget.value),
       placeholder: "ftp.example.com",
     }),
-    "field-stack span-2",
+    "field-stack host-field",
   );
 
   const portField = field(
@@ -320,12 +324,106 @@ export function App() {
     h(
       "header",
       { className: "topbar" },
-      h("div", null, h("h1", null, "FTP Streams"), h("p", null, "Self-hosted configuration portal")),
+      h("div", { className: "brand-lockup" }, h("span", { className: "brand-mark" }, "FS"), h("div", null, h("h1", null, "FTP Streams"), h("p", null, "Configure your private Stremio source"))),
       h(StatusBadge, { tone: profileReady ? "green" : "gray" }, profileState === "created" ? "Ready to install" : profileState === "unlocked" ? "Unlocked" : "Not installed"),
     ),
     h(
       "div",
       { className: "portal-grid" },
+      h(
+        "section",
+        { className: "panel ftp-panel", "aria-labelledby": "ftp-heading" },
+        h(
+          "div",
+          { className: "panel-header" },
+          h(
+            "div",
+            null,
+            h("span", { className: "section-label" }, "Source"),
+            h("h2", { id: "ftp-heading" }, "FTP settings"),
+            h("p", null, "Add the server, choose the folders to scan, then save it to your profile."),
+          ),
+        ),
+        h(
+          "form",
+          { className: "ftp-form" },
+          h("div", { className: "field-grid ftp-field-grid" }, hostField, portField, usernameField, passwordField, tlsModeField, rootPathsField),
+          h(
+            "label",
+            { className: "toggle-row", htmlFor: "allowInvalidCertificate" },
+            h("input", {
+              id: "allowInvalidCertificate",
+              type: "checkbox",
+              checked: allowInvalidCertificate,
+              onChange: (event) => setAllowInvalidCertificate(event.currentTarget.checked),
+            }),
+            "Allow invalid certificate",
+          ),
+          h(
+            "div",
+            { className: "button-row" },
+            h(
+              "button",
+              { type: "button", className: "secondary-button", disabled: !profileReady || indexState === "working", onClick: () => void testConnection() },
+              "Test connection",
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "primary-button",
+                "aria-label": "Save FTP settings",
+                disabled: !profileReady || indexState === "working",
+                onClick: () => void saveFtp(),
+              },
+              "Save FTP settings",
+            ),
+          ),
+        ),
+      ),
+      h(
+        "section",
+        { className: "panel status-panel", "aria-labelledby": "status-heading" },
+        h(
+          "div",
+          { className: "panel-header" },
+          h(
+            "div",
+            null,
+            h("span", { className: "section-label" }, "Library"),
+            h("h2", { id: "status-heading" }, "Index status"),
+            h("p", null, "Refresh after changing FTP folders."),
+          ),
+          h(StatusBadge, { tone: indexState === "ready" ? "green" : indexState === "error" ? "red" : indexState === "working" ? "amber" : "gray" }, indexState === "working" ? "Scanning" : indexState === "ready" ? "Ready" : indexState === "error" ? "Needs attention" : "Idle"),
+        ),
+        h(
+          "dl",
+          { className: "status-list" },
+          h("div", null, h("dt", null, "Last scan"), h("dd", null, "Never")),
+          h("div", null, h("dt", null, "Media items"), h("dd", null, mediaItems === null ? "0" : String(mediaItems))),
+          h(
+            "div",
+            null,
+            h("dt", null, "Connection"),
+            h("dd", null, h(StatusBadge, { tone: host ? "gray" : "red" }, host ? "Untested" : "Missing host")),
+          ),
+        ),
+        h("p", { className: "notice", role: "status" }, ftpMessage),
+        h(
+          "div",
+          { className: "button-grid" },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "secondary-button",
+              disabled: !profileReady || indexState === "working",
+              onClick: () => void refreshIndex(),
+            },
+            [h(RefreshCw, { key: "icon", size: 17, "aria-hidden": true }), "Rescan"],
+          ),
+        ),
+      ),
       h(
         "section",
         { className: "panel profile-panel", "aria-labelledby": "profile-heading" },
@@ -335,12 +433,12 @@ export function App() {
           h(
             "div",
             null,
-            h("h2", { id: "profile-heading" }, "First-run profile"),
-            h("p", null, "Create or unlock the local encrypted profile."),
+            h("span", { className: "section-label" }, "Install"),
+            h("h2", { id: "profile-heading" }, "Profile setup"),
+            h("p", null, "Create or unlock the encrypted browser profile that stores these settings."),
           ),
         ),
-        passphraseField,
-        recoveryField,
+        h("div", { className: "profile-grid" }, passphraseField, recoveryField),
         h("p", { className: "notice", role: "status" }, profileMessage),
         manifestUrl ? h("p", { className: "manifest-url" }, h("span", null, "Manifest"), h("code", null, manifestUrl)) : null,
         h(
@@ -380,101 +478,6 @@ export function App() {
                 },
                 "Install in Stremio",
               ),
-        ),
-      ),
-      h(
-        "section",
-        { className: "panel status-panel", "aria-labelledby": "status-heading" },
-        h(
-          "div",
-          { className: "panel-header" },
-          h(
-            "div",
-            null,
-            h("h2", { id: "status-heading" }, "Index status"),
-            h("p", null, "Track scan health and control indexing."),
-          ),
-          h(StatusBadge, { tone: indexState === "ready" ? "green" : indexState === "error" ? "red" : indexState === "working" ? "amber" : "gray" }, indexState === "working" ? "Scanning" : indexState === "ready" ? "Ready" : indexState === "error" ? "Needs attention" : "Idle"),
-        ),
-        h(
-          "dl",
-          { className: "status-list" },
-          h("div", null, h("dt", null, "Last scan"), h("dd", null, "Never")),
-          h("div", null, h("dt", null, "Media items"), h("dd", null, mediaItems === null ? "0" : String(mediaItems))),
-          h(
-            "div",
-            null,
-            h("dt", null, "Connection"),
-            h("dd", null, h(StatusBadge, { tone: host ? "gray" : "red" }, host ? "Untested" : "Missing host")),
-          ),
-        ),
-        h("p", { className: "notice", role: "status" }, ftpMessage),
-        h(
-          "div",
-          { className: "button-grid" },
-          h(
-            "button",
-            {
-              type: "button",
-              className: "secondary-button",
-              disabled: !profileReady || indexState === "working",
-              onClick: () => void refreshIndex(),
-            },
-            [h(RefreshCw, { key: "icon", size: 17, "aria-hidden": true }), "Rescan"],
-          ),
-          unavailableButton("secondary-button", [h(Pause, { key: "icon", size: 17, "aria-hidden": true }), "Pause"]),
-          unavailableButton("secondary-button", [h(RotateCcw, { key: "icon", size: 17, "aria-hidden": true }), "Rotate"]),
-          unavailableButton("danger-button", [h(Trash2, { key: "icon", size: 17, "aria-hidden": true }), "Delete"]),
-        ),
-      ),
-      h(
-        "section",
-        { className: "panel ftp-panel", "aria-labelledby": "ftp-heading" },
-        h(
-          "div",
-          { className: "panel-header" },
-          h(
-            "div",
-            null,
-            h("h2", { id: "ftp-heading" }, "FTP settings"),
-            h("p", null, "Configure the upstream file source."),
-          ),
-        ),
-        h(
-          "form",
-          { className: "ftp-form" },
-          h("div", { className: "field-grid" }, hostField, portField, usernameField, passwordField, tlsModeField, rootPathsField),
-          h(
-            "label",
-            { className: "toggle-row", htmlFor: "allowInvalidCertificate" },
-            h("input", {
-              id: "allowInvalidCertificate",
-              type: "checkbox",
-              checked: allowInvalidCertificate,
-              onChange: (event) => setAllowInvalidCertificate(event.currentTarget.checked),
-            }),
-            "Allow invalid certificate",
-          ),
-          h(
-            "div",
-            { className: "button-row" },
-            h(
-              "button",
-              { type: "button", className: "secondary-button", disabled: !profileReady || indexState === "working", onClick: () => void testConnection() },
-              "Test connection",
-            ),
-            h(
-              "button",
-              {
-                type: "button",
-                className: "primary-button",
-                "aria-label": "Save FTP settings",
-                disabled: !profileReady || indexState === "working",
-                onClick: () => void saveFtp(),
-              },
-              "Save FTP settings",
-            ),
-          ),
         ),
       ),
     ),

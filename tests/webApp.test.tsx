@@ -131,9 +131,9 @@ describe("App", () => {
       expect(control).toBeDisabled();
     }
 
-    for (const name of ["Pause", "Rotate", "Delete"]) {
-      expect(screen.getByRole("button", { name })).toBeDisabled();
-    }
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rotate" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
   it("saves FTP settings and refreshes the index after profile creation", async () => {
@@ -178,5 +178,43 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
     await waitFor(() => expect(rescanIndexMock).toHaveBeenCalledWith({ browserUid: recoveryUid.value, passphrase: "passphrase" }));
     expect(await screen.findByText("Indexed 3 media files.")).toBeTruthy();
+  });
+
+  it("creates the profile and saves filled FTP settings in one setup action", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveFtpSettingsMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.change(screen.getByLabelText("Host"), { target: { value: "ftp.example.test" } });
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "2121" } });
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
+    fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    await waitFor(() => {
+      expect(saveFtpSettingsMock).toHaveBeenCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp.example.test",
+          port: 2121,
+          username: "user",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: false,
+          roots: ["/"],
+        },
+      });
+    });
+    expect(await screen.findByText("Profile created. FTP settings saved. Install link is ready.")).toBeTruthy();
   });
 });
