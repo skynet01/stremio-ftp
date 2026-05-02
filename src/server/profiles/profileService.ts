@@ -21,11 +21,19 @@ export type FtpConfig = {
 export type AddonCustomization = {
   addonName: string;
   addonLogoUrl: string;
+  addonDescription: string;
+};
+
+export type IndexStatus = {
+  lastScanAt: string | null;
+  mediaItems: number;
 };
 
 export const DEFAULT_ADDON_CUSTOMIZATION: AddonCustomization = {
   addonName: "Stremio FTP Addon",
   addonLogoUrl: "",
+  addonDescription:
+    "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
 };
 
 export class DuplicateProfileError extends Error {
@@ -91,20 +99,39 @@ export class ProfileService {
   }
 
   getAddonCustomization(profileId: number): AddonCustomization {
-    const row = this.db.prepare("select addon_name, addon_logo_url from profiles where id = ?").get(profileId) as
-      | { addon_name: string | null; addon_logo_url: string | null }
+    const row = this.db.prepare("select addon_name, addon_logo_url, addon_description from profiles where id = ?").get(profileId) as
+      | { addon_name: string | null; addon_logo_url: string | null; addon_description: string | null }
       | undefined;
     if (!row) throw new ProfileNotFoundError();
     return {
       addonName: row.addon_name?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonName,
       addonLogoUrl: row.addon_logo_url?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonLogoUrl,
+      addonDescription: row.addon_description?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonDescription,
     };
   }
 
   saveAddonCustomization(profileId: number, customization: AddonCustomization) {
     const result = this.db
-      .prepare("update profiles set addon_name = ?, addon_logo_url = ?, updated_at = ? where id = ?")
-      .run(customization.addonName, customization.addonLogoUrl, new Date().toISOString(), profileId);
+      .prepare("update profiles set addon_name = ?, addon_logo_url = ?, addon_description = ?, updated_at = ? where id = ?")
+      .run(customization.addonName, customization.addonLogoUrl, customization.addonDescription, new Date().toISOString(), profileId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
+  }
+
+  getIndexStatus(profileId: number): IndexStatus {
+    const row = this.db.prepare("select last_indexed_at, indexed_media_count from profiles where id = ?").get(profileId) as
+      | { last_indexed_at: string | null; indexed_media_count: number }
+      | undefined;
+    if (!row) throw new ProfileNotFoundError();
+    return {
+      lastScanAt: row.last_indexed_at,
+      mediaItems: row.indexed_media_count,
+    };
+  }
+
+  saveIndexStatus(profileId: number, status: IndexStatus) {
+    const result = this.db
+      .prepare("update profiles set last_indexed_at = ?, indexed_media_count = ?, updated_at = ? where id = ?")
+      .run(status.lastScanAt, status.mediaItems, new Date().toISOString(), profileId);
     if (result.changes === 0) throw new ProfileNotFoundError();
   }
 

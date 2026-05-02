@@ -55,6 +55,7 @@ describe("stremio routes", () => {
     service.saveAddonCustomization(created.profileId, {
       addonName: "Archive 3D",
       addonLogoUrl: "https://cdn.example.test/logo.png",
+      addonDescription: "Stream the archive from my FTP server.",
     });
     const app = createApp(config, db);
 
@@ -62,6 +63,7 @@ describe("stremio routes", () => {
 
     expect(response.body.name).toBe("Archive 3D");
     expect(response.body.logo).toBe("https://cdn.example.test/logo.png");
+    expect(response.body.description).toBe("Stream the archive from my FTP server.");
   });
 
   it("returns CORS headers for public manifest and stream routes", async () => {

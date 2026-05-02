@@ -10,7 +10,7 @@ import {
   testFtpSettings,
   unlockProfile,
 } from "./api.js";
-import type { AddonCustomization, LoadedFtpConfig } from "./api.js";
+import type { AddonCustomization, IndexStatus, LoadedFtpConfig } from "./api.js";
 
 type StatusTone = "green" | "amber" | "red" | "gray";
 const STORAGE_KEYS = {
@@ -22,6 +22,8 @@ const STORAGE_KEYS = {
 const DEFAULT_CUSTOMIZATION: AddonCustomization = {
   addonName: "Stremio FTP Addon",
   addonLogoUrl: "",
+  addonDescription:
+    "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
 };
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
@@ -30,6 +32,23 @@ function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNod
 
 function field(label: string, id: string, control: ReactNode, className = "field-stack") {
   return h("div", { className }, h("label", { htmlFor: id }, label), control);
+}
+
+function Notice({ children, className = "" }: { children?: ReactNode; className?: string }) {
+  return h("p", { className: `notice notification ${className}`.trim(), role: "status" }, children);
+}
+
+function formatScanTime(lastScanAt: string | null) {
+  if (!lastScanAt) return "Never";
+  const date = new Date(lastScanAt);
+  if (Number.isNaN(date.getTime())) return lastScanAt;
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function browserUid() {
@@ -70,13 +89,16 @@ export function App() {
   const [ftpMessage, setFtpMessage] = useState("Save FTP settings, then refresh the index.");
   const [indexState, setIndexState] = useState<"idle" | "working" | "ready" | "error">("idle");
   const [mediaItems, setMediaItems] = useState<number | null>(null);
+  const [lastScanAt, setLastScanAt] = useState<string | null>(null);
   const [manifestUrl, setManifestUrl] = useState<string | null>(null);
   const [stremioInstallUrl, setStremioInstallUrl] = useState<string | null>(null);
   const [addonName, setAddonName] = useState(DEFAULT_CUSTOMIZATION.addonName);
   const [addonLogoUrl, setAddonLogoUrl] = useState(DEFAULT_CUSTOMIZATION.addonLogoUrl);
+  const [addonDescription, setAddonDescription] = useState(DEFAULT_CUSTOMIZATION.addonDescription);
   const [editingName, setEditingName] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
   const [editingLogo, setEditingLogo] = useState(false);
-  const [customizationMessage, setCustomizationMessage] = useState("Click the title or avatar to customize the Stremio addon.");
+  const [customizationMessage, setCustomizationMessage] = useState("Click the title, subtitle, or avatar to customize the Stremio addon.");
 
   const profileReady = profileState === "created" || profileState === "unlocked";
 
@@ -117,22 +139,31 @@ export function App() {
     );
   }
 
+  function applyLoadedIndexStatus(indexStatus: IndexStatus) {
+    setLastScanAt(indexStatus.lastScanAt);
+    setMediaItems(indexStatus.mediaItems);
+    if (indexStatus.lastScanAt) setIndexState("ready");
+  }
+
   function applyCustomization(customization: AddonCustomization) {
     setAddonName(customization.addonName || DEFAULT_CUSTOMIZATION.addonName);
     setAddonLogoUrl(customization.addonLogoUrl || "");
+    setAddonDescription(customization.addonDescription || DEFAULT_CUSTOMIZATION.addonDescription);
   }
 
   function normalizedCustomization(): AddonCustomization {
     return {
       addonName: addonName.trim() || DEFAULT_CUSTOMIZATION.addonName,
       addonLogoUrl: addonLogoUrl.trim(),
+      addonDescription: addonDescription.trim() || DEFAULT_CUSTOMIZATION.addonDescription,
     };
   }
 
   function hasCustomBranding(customization = normalizedCustomization()) {
     return (
       customization.addonName !== DEFAULT_CUSTOMIZATION.addonName ||
-      customization.addonLogoUrl !== DEFAULT_CUSTOMIZATION.addonLogoUrl
+      customization.addonLogoUrl !== DEFAULT_CUSTOMIZATION.addonLogoUrl ||
+      customization.addonDescription !== DEFAULT_CUSTOMIZATION.addonDescription
     );
   }
 
@@ -140,6 +171,7 @@ export function App() {
     try {
       const loaded = await loadFtpSettings({ browserUid: recoveryUid, passphrase: nextPassphrase });
       applyLoadedFtpConfig(loaded.ftpConfig);
+      applyLoadedIndexStatus(loaded.indexStatus);
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "No saved FTP settings found.";
@@ -308,7 +340,8 @@ export function App() {
     setFtpMessage("Refreshing FTP index...");
     try {
       const result = await rescanIndex({ browserUid: recoveryUid, passphrase });
-      setMediaItems(result.filesSeen);
+      setMediaItems(result.mediaItems);
+      setLastScanAt(result.lastScanAt);
       setIndexState("ready");
       setFtpMessage(`Indexed ${result.filesSeen} media file${result.filesSeen === 1 ? "" : "s"}.`);
     } catch (error) {
@@ -333,6 +366,11 @@ export function App() {
 
   function commitAddonName() {
     setEditingName(false);
+    void saveAddonBranding(normalizedCustomization());
+  }
+
+  function commitAddonDescription() {
+    setEditingDescription(false);
     void saveAddonBranding(normalizedCustomization());
   }
 
@@ -493,7 +531,7 @@ export function App() {
     ),
     profileReady
       ? [
-          h("p", { key: "message", className: "notice", role: "status" }, profileMessage),
+          h(Notice, { key: "message" }, profileMessage),
           manifestUrl
             ? h(
                 "div",
@@ -524,7 +562,7 @@ export function App() {
         ]
       : [
           h("div", { key: "fields", className: "profile-grid" }, recoveryField, passphraseField),
-          h("p", { key: "message", className: "notice", role: "status" }, profileMessage),
+          h(Notice, { key: "message" }, profileMessage),
           h(
             "div",
             { key: "actions", className: "button-row" },
@@ -585,12 +623,35 @@ export function App() {
           },
           h("h1", null, addonName),
         ),
-    h(
-      "p",
-      null,
-      "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
-    ),
-    h("p", { className: "customization-notice", role: "status" }, customizationMessage),
+    editingDescription
+      ? h("textarea", {
+          className: "hero-description-input",
+          "aria-label": "Addon description",
+          value: addonDescription,
+          autoFocus: true,
+          maxLength: 260,
+          rows: 3,
+          onChange: (event) => setAddonDescription((event.currentTarget as HTMLTextAreaElement).value),
+          onBlur: commitAddonDescription,
+          onKeyDown: (event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              setAddonDescription(addonDescription.trim() || DEFAULT_CUSTOMIZATION.addonDescription);
+              setEditingDescription(false);
+            }
+          },
+        })
+      : h(
+          "button",
+          {
+            type: "button",
+            className: "editable-description",
+            "aria-label": "Edit addon description",
+            onClick: () => setEditingDescription(true),
+          },
+          h("p", null, addonDescription),
+        ),
+    h(Notice, { className: "customization-notice" }, customizationMessage),
     editingLogo
       ? h(
           "div",
@@ -617,7 +678,7 @@ export function App() {
     { className: "panel setup-token-panel", "aria-labelledby": "setup-token-heading" },
     h("span", { className: "section-label" }, "Configuration locked"),
     h("h2", { id: "setup-token-heading" }, "Setup token required"),
-    h("p", { className: "notice", role: "status" }, "Open the configure page with your setup token to manage FTP credentials and generate a private Stremio manifest."),
+    h(Notice, null, "Open the configure page with your setup token to manage FTP credentials and generate a private Stremio manifest."),
   );
 
   return h(
@@ -709,7 +770,7 @@ export function App() {
         h(
           "dl",
           { className: "status-list" },
-          h("div", null, h("dt", null, "Last scan"), h("dd", null, "Never")),
+          h("div", null, h("dt", null, "Last scan"), h("dd", null, formatScanTime(lastScanAt))),
           h("div", null, h("dt", null, "Media items"), h("dd", null, mediaItems === null ? "0" : String(mediaItems))),
           h(
             "div",
@@ -718,7 +779,7 @@ export function App() {
             h("dd", null, h(StatusBadge, { tone: host ? "gray" : "red" }, host ? "Untested" : "Missing host")),
           ),
         ),
-        h("p", { className: "notice", role: "status" }, ftpMessage),
+        h(Notice, null, ftpMessage),
         h(
           "div",
           { className: "button-grid" },

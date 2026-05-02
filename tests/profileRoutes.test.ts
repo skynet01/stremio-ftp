@@ -211,7 +211,20 @@ describe("profile routes", () => {
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(200);
 
-    expect(response.body).toEqual({ filesSeen: 1 });
+    expect(response.body.filesSeen).toBe(1);
+    expect(response.body.mediaItems).toBe(1);
+    expect(response.body.lastScanAt).toEqual(expect.any(String));
+
+    const loaded = await request(app)
+      .post("/api/profile/ftp/load")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(loaded.body.indexStatus).toEqual({
+      lastScanAt: response.body.lastScanAt,
+      mediaItems: 1,
+    });
   });
 
   it("loads saved FTP settings with the saved password after authentication", async () => {
@@ -259,6 +272,10 @@ describe("profile routes", () => {
         tlsMode: "explicit",
         allowInvalidCertificate: true,
         roots: ["/Movies", "/TV"],
+      },
+      indexStatus: {
+        lastScanAt: null,
+        mediaItems: 0,
       },
     });
   });
@@ -403,6 +420,7 @@ describe("profile routes", () => {
         customization: {
           addonName: "Archive 3D",
           addonLogoUrl: "https://cdn.example.test/logo.png",
+          addonDescription: "Stream the archive from my FTP server.",
         },
       })
       .expect(200);
@@ -417,6 +435,7 @@ describe("profile routes", () => {
       customization: {
         addonName: "Archive 3D",
         addonLogoUrl: "https://cdn.example.test/logo.png",
+        addonDescription: "Stream the archive from my FTP server.",
       },
     });
   });

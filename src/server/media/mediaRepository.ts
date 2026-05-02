@@ -171,6 +171,11 @@ export class MediaRepository {
     return row ? toMediaMatch(row) : null;
   }
 
+  countForProfile(profileId: number): number {
+    const row = this.db.prepare("select count(*) as count from media_files where profile_id = ?").get(profileId) as { count: number };
+    return row.count;
+  }
+
 }
 
 function normalizeRootPath(path: string) {

@@ -30,6 +30,29 @@ describe("app health", () => {
     expect(response.body).toEqual({ ok: true, service: "stremio-ftp", baseUrl: "https://addon.example.test" });
   });
 
+  it("allows external HTTPS addon avatar images in the portal CSP", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const config: AppConfig = {
+      baseUrl: "https://addon.example.test",
+      configDir: "/tmp",
+      sqlitePath: ":memory:",
+      encryptionKey: "0123456789abcdef0123456789abcdef",
+      setupToken: "setup-secret-123",
+      port: 7000,
+      logLevel: "error",
+      crawlerConcurrency: 2,
+      ftpTimeoutMs: 15000,
+      maxOnDemandSearchMs: 4500,
+      profileRateLimitWindowMs: 600000,
+      profileRateLimitMax: 30,
+    };
+
+    const response = await request(createApp(config, db)).get("/health").expect(200);
+
+    expect(response.header["content-security-policy"]).toContain("img-src 'self' data: https:");
+  });
+
   it("serves the configuration portal at /configure", async () => {
     const db = new Database(":memory:");
     migrate(db);

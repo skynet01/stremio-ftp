@@ -52,6 +52,7 @@ describe("App", () => {
     render(<App />);
     expect(screen.getByRole("heading", { name: "Stremio FTP Addon" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit addon name" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit addon description" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit addon avatar" })).toBeTruthy();
     expect(screen.getByLabelText("Host")).toBeTruthy();
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/");
@@ -128,11 +129,16 @@ describe("App", () => {
         allowInvalidCertificate: true,
         roots: ["/Movies", "/TV"],
       },
+      indexStatus: {
+        lastScanAt: "2026-05-02T22:45:00.000Z",
+        mediaItems: 42,
+      },
     });
     loadCustomizationMock.mockResolvedValue({
       customization: {
         addonName: "Archive 3D",
         addonLogoUrl: "https://cdn.example.test/logo.png",
+        addonDescription: "Stream the archive from my FTP server.",
       },
     });
 
@@ -151,6 +157,7 @@ describe("App", () => {
     await waitFor(() => expect(loadFtpSettingsMock).toHaveBeenCalledWith({ browserUid: recoveryUid.value, passphrase: "passphrase" }));
     await waitFor(() => expect(loadCustomizationMock).toHaveBeenCalledWith({ browserUid: recoveryUid.value, passphrase: "passphrase" }));
     expect(screen.getByRole("heading", { name: "Archive 3D" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit addon description" })).toHaveTextContent("Stream the archive from my FTP server.");
     expect(screen.getByRole("link", { name: "Install in Stremio" }).getAttribute("href")).toBe(
       "stremio://addon.example.test/u/unlocked/manifest.json",
     );
@@ -162,6 +169,8 @@ describe("App", () => {
     expect(screen.getByDisplayValue("secret")).toBeTruthy();
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/Movies\n/TV");
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toBeTruthy();
+    expect(screen.getByText("42")).toBeTruthy();
+    expect(screen.getByText(/2026/)).toBeTruthy();
   });
 
   it("saves edited addon name and avatar after profile setup", async () => {
@@ -190,6 +199,23 @@ describe("App", () => {
         customization: {
           addonName: "Archive 3D",
           addonLogoUrl: "",
+          addonDescription: "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
+        },
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit addon description" }));
+    fireEvent.change(screen.getByLabelText("Addon description"), { target: { value: "Stream the archive from my FTP server." } });
+    fireEvent.blur(screen.getByLabelText("Addon description"));
+
+    await waitFor(() =>
+      expect(saveCustomizationMock).toHaveBeenLastCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Archive 3D",
+          addonLogoUrl: "",
+          addonDescription: "Stream the archive from my FTP server.",
         },
       }),
     );
@@ -205,6 +231,7 @@ describe("App", () => {
         customization: {
           addonName: "Archive 3D",
           addonLogoUrl: "https://cdn.example.test/logo.png",
+          addonDescription: "Stream the archive from my FTP server.",
         },
       }),
     );
@@ -223,6 +250,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit addon name" }));
     fireEvent.change(screen.getByLabelText("Addon name"), { target: { value: "Archive 3D" } });
     fireEvent.blur(screen.getByLabelText("Addon name"));
+    fireEvent.click(screen.getByRole("button", { name: "Edit addon description" }));
+    fireEvent.change(screen.getByLabelText("Addon description"), { target: { value: "Stream the archive from my FTP server." } });
+    fireEvent.blur(screen.getByLabelText("Addon description"));
     fireEvent.click(screen.getByRole("button", { name: "Edit addon avatar" }));
     fireEvent.change(screen.getByLabelText("Addon avatar URL"), { target: { value: "https://cdn.example.test/logo.png" } });
     fireEvent.blur(screen.getByLabelText("Addon avatar URL"));
@@ -238,6 +268,7 @@ describe("App", () => {
         customization: {
           addonName: "Archive 3D",
           addonLogoUrl: "https://cdn.example.test/logo.png",
+          addonDescription: "Stream the archive from my FTP server.",
         },
       }),
     );
@@ -252,6 +283,7 @@ describe("App", () => {
       customization: {
         addonName: "Stremio FTP Addon",
         addonLogoUrl: "",
+        addonDescription: "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
       },
     });
     loadFtpSettingsMock.mockResolvedValue({
@@ -264,6 +296,10 @@ describe("App", () => {
         tlsMode: "explicit",
         allowInvalidCertificate: true,
         roots: ["/"],
+      },
+      indexStatus: {
+        lastScanAt: "2026-05-02T22:45:00.000Z",
+        mediaItems: 7,
       },
     });
 
@@ -279,6 +315,8 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Unlock profile" })).toBeNull();
     expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
     expect(screen.getByDisplayValue("secret")).toBeTruthy();
+    expect(screen.getByText("7")).toBeTruthy();
+    expect(screen.getByText(/2026/)).toBeTruthy();
   });
 
   it("shows only the setup token message on /configure without a token", () => {
@@ -346,7 +384,7 @@ describe("App", () => {
     });
     saveFtpSettingsMock.mockResolvedValue({ ok: true });
     testFtpSettingsMock.mockResolvedValue({ ok: true });
-    rescanIndexMock.mockResolvedValue({ filesSeen: 3 });
+    rescanIndexMock.mockResolvedValue({ filesSeen: 3, mediaItems: 3, lastScanAt: "2026-05-02T22:45:00.000Z" });
 
     render(<App />);
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
@@ -380,6 +418,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
     await waitFor(() => expect(rescanIndexMock).toHaveBeenCalledWith({ browserUid: recoveryUidValue, passphrase: "passphrase" }));
     expect(await screen.findByText("Indexed 3 media files.")).toBeTruthy();
+    expect(screen.getByText("3")).toBeTruthy();
+    expect(screen.getByText(/2026/)).toBeTruthy();
   });
 
   it("creates the profile and saves filled FTP settings in one setup action", async () => {

@@ -3,11 +3,12 @@ import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization } from "../profile
 export function publicManifest(customization: Partial<AddonCustomization> = {}) {
   const addonName = customization.addonName?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonName;
   const addonLogoUrl = customization.addonLogoUrl?.trim() || "";
+  const addonDescription = customization.addonDescription?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonDescription;
   return {
     id: "community.stremio-ftp",
     version: "0.1.0",
     name: addonName,
-    description: "Stream movies and series episodes from your configured FTP server.",
+    description: addonDescription,
     resources: ["stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],

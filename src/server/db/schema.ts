@@ -9,6 +9,9 @@ export function migrate(db: Database.Database) {
       encrypted_ftp_config text,
       addon_name text,
       addon_logo_url text,
+      addon_description text,
+      last_indexed_at text,
+      indexed_media_count integer not null default 0 check (indexed_media_count >= 0),
       install_token_hash text not null unique,
       created_at text not null,
       updated_at text not null,
@@ -50,6 +53,9 @@ export function migrate(db: Database.Database) {
   `);
   ensureProfileColumn(db, "addon_name", "text");
   ensureProfileColumn(db, "addon_logo_url", "text");
+  ensureProfileColumn(db, "addon_description", "text");
+  ensureProfileColumn(db, "last_indexed_at", "text");
+  ensureProfileColumn(db, "indexed_media_count", "integer not null default 0");
 }
 
 function ensureProfileColumn(db: Database.Database, name: string, definition: string) {

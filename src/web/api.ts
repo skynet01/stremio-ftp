@@ -21,6 +21,12 @@ export type UnlockProfileResponse = {
 export type AddonCustomization = {
   addonName: string;
   addonLogoUrl: string;
+  addonDescription: string;
+};
+
+export type IndexStatus = {
+  lastScanAt: string | null;
+  mediaItems: number;
 };
 
 const setupToken = new URLSearchParams(window.location.search).get("setup") || "";
@@ -56,6 +62,8 @@ export type AuthenticatedCustomizationRequest = CreateProfileRequest & {
 
 export type RescanResponse = {
   filesSeen: number;
+  lastScanAt: string;
+  mediaItems: number;
 };
 
 async function readJson<T extends object>(response: Response): Promise<T> {
@@ -114,13 +122,13 @@ export async function saveFtpSettings(request: AuthenticatedFtpRequest): Promise
   return readJson<{ ok: true }>(response);
 }
 
-export async function loadFtpSettings(request: CreateProfileRequest): Promise<{ ftpConfig: LoadedFtpConfig }> {
+export async function loadFtpSettings(request: CreateProfileRequest): Promise<{ ftpConfig: LoadedFtpConfig; indexStatus: IndexStatus }> {
   const response = await fetch("/api/profile/ftp/load", {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(request),
   });
-  return readJson<{ ftpConfig: LoadedFtpConfig }>(response);
+  return readJson<{ ftpConfig: LoadedFtpConfig; indexStatus: IndexStatus }>(response);
 }
 
 export async function loadCustomization(request: CreateProfileRequest): Promise<{ customization: AddonCustomization }> {

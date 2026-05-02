@@ -30,6 +30,7 @@ const customizationSchema = z.object({
     .trim()
     .max(2048)
     .refine((value) => !value || /^https?:\/\//i.test(value), "Logo URL must start with http:// or https://"),
+  addonDescription: z.string().trim().min(1).max(260),
 });
 const saveCustomizationSchema = createSchema.extend({ customization: customizationSchema });
 
@@ -146,6 +147,7 @@ export function profileRoutes(
           allowInvalidCertificate: ftpConfig.allowInvalidCertificate,
           roots: ftpConfig.roots,
         },
+        indexStatus: service.getIndexStatus(unlocked.profileId),
       });
     } catch {
       res.status(401).json({ error: "Invalid passphrase" });
@@ -197,7 +199,10 @@ export function profileRoutes(
         });
         filesSeen += result.filesSeen;
       }
-      res.json({ filesSeen });
+      const lastScanAt = new Date().toISOString();
+      const mediaItems = mediaRepository.countForProfile(unlocked.profileId);
+      service.saveIndexStatus(unlocked.profileId, { lastScanAt, mediaItems });
+      res.json({ filesSeen, lastScanAt, mediaItems });
     } catch (error) {
       res.status(400).json({ error: ftpErrorMessage(error, "Unable to refresh FTP index") });
     }

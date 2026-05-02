@@ -146,6 +146,7 @@ textarea:focus-visible,
   font-weight: 600;
   letter-spacing: 0.08em;
   box-shadow: 0 20px 44px -28px rgba(0, 0, 0, 0.85);
+  overflow: hidden;
 }
 
 .brand-mark:hover {
@@ -219,6 +220,29 @@ textarea:focus-visible,
   color: var(--accent-2);
 }
 
+.editable-description {
+  display: block;
+  max-width: 680px;
+  min-height: 0;
+  margin: 18px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  box-shadow: none;
+}
+
+.editable-description p {
+  margin: 0;
+}
+
+.editable-description:hover p {
+  color: var(--accent-2);
+}
+
 .hero-title-input {
   max-width: min(780px, 100%);
   border-bottom-color: var(--accent);
@@ -227,6 +251,17 @@ textarea:focus-visible,
   font-size: clamp(3rem, 8vw, 6.4rem);
   font-weight: 650;
   line-height: 0.9;
+}
+
+.hero-description-input {
+  max-width: 680px;
+  margin-top: 18px;
+  border-bottom-color: var(--accent);
+  color: var(--cream);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: clamp(0.86rem, 1.1vw, 1rem);
+  letter-spacing: 0.035em;
+  line-height: 1.5;
 }
 
 .customization-notice {
@@ -575,6 +610,24 @@ input:-webkit-autofill:active {
   color: var(--cream-dim);
   font-size: 0.92rem;
   line-height: 1.55;
+}
+
+.notification {
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid rgba(168, 224, 99, 0.22);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--cream-dim);
+  background:
+    linear-gradient(180deg, rgba(168, 224, 99, 0.075), rgba(168, 224, 99, 0.018)),
+    rgba(255, 255, 255, 0.018);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.045em;
+  box-shadow:
+    0 0 0 1px rgba(168, 224, 99, 0.035) inset,
+    0 18px 46px -32px rgba(168, 224, 99, 0.85);
 }
 
 .manifest-url {
