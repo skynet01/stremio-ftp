@@ -6,6 +6,7 @@ import { openDatabase } from "./db/database.js";
 import { MediaRepository } from "./media/mediaRepository.js";
 import { ProfileService } from "./profiles/profileService.js";
 import { profileRoutes } from "./profiles/profileRoutes.js";
+import { createProxyRouter } from "./proxy/proxyRoutes.js";
 import { stremioRoutes } from "./stremio/routes.js";
 
 export function createApp(config: AppConfig, db: Database.Database = openDatabase(config.sqlitePath)) {
@@ -17,6 +18,7 @@ export function createApp(config: AppConfig, db: Database.Database = openDatabas
   const profileService = new ProfileService(db, config.encryptionKey);
   const mediaRepository = new MediaRepository(db);
   app.use("/api", profileRoutes(config, profileService));
+  app.use(createProxyRouter({ resolve: async () => null }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 
   app.get("/health", (_req, res) => {
