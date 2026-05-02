@@ -19,6 +19,8 @@ function config(): AppConfig {
     maxOnDemandSearchMs: 4500,
     negativeCacheTtlMs: 300000,
     proxyIdleTimeoutMs: 30000,
+    profileRateLimitWindowMs: 60000,
+    profileRateLimitMax: 30,
   };
 }
 
@@ -90,5 +92,20 @@ describe("profile routes", () => {
       .expect(401);
 
     expect(response.body).toEqual({ error: "Invalid passphrase" });
+  });
+
+  it("rate limits repeated profile creation attempts from the same client", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), profileRateLimitMax: 2 }, db);
+
+    await request(app).post("/api/profile").send({ browserUid: "browser-uid-1", passphrase: "passphrase" }).expect(201);
+    await request(app).post("/api/profile").send({ browserUid: "browser-uid-2", passphrase: "passphrase" }).expect(201);
+    const response = await request(app)
+      .post("/api/profile")
+      .send({ browserUid: "browser-uid-3", passphrase: "passphrase" })
+      .expect(429);
+
+    expect(response.body).toEqual({ error: "Too many profile attempts" });
   });
 });

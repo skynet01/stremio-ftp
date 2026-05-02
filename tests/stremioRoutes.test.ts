@@ -20,6 +20,8 @@ const config: AppConfig = {
   maxOnDemandSearchMs: 4500,
   negativeCacheTtlMs: 300000,
   proxyIdleTimeoutMs: 30000,
+  profileRateLimitWindowMs: 600000,
+  profileRateLimitMax: 30,
 };
 
 describe("stremio routes", () => {
@@ -31,7 +33,7 @@ describe("stremio routes", () => {
     const db = new Database(":memory:");
     migrate(db);
     const service = new ProfileService(db, config.encryptionKey);
-    const created = service.createProfile("uid-12345678", "passphrase");
+    const created = await service.createProfile("uid-12345678", "passphrase");
     const app = createApp(config, db);
 
     const response = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
@@ -57,7 +59,7 @@ describe("stremio routes", () => {
     const db = new Database(":memory:");
     migrate(db);
     const service = new ProfileService(db, config.encryptionKey);
-    const created = service.createProfile("uid-12345678", "passphrase");
+    const created = await service.createProfile("uid-12345678", "passphrase");
     const repository = new MediaRepository(db);
     repository.upsertParsedFile(created.profileId, {
       mediaKind: "series",
@@ -83,11 +85,32 @@ describe("stremio routes", () => {
 
     const response = await request(app).get(`/u/${created.installUrlToken}/stream/series/tt0898266:9:17.json`).expect(200);
 
-    expect(fetchMock).toHaveBeenCalledWith("https://v3-cinemeta.strem.io/meta/series/tt0898266.json");
-    expect(fetchMock).not.toHaveBeenCalledWith("https://v3-cinemeta.strem.io/meta/series/tt0898266:9:17.json");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://v3-cinemeta.strem.io/meta/series/tt0898266.json",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://v3-cinemeta.strem.io/meta/series/tt0898266:9:17.json",
+      expect.anything(),
+    );
     expect(response.body.streams).toHaveLength(1);
     expect(response.body.streams[0].url).toMatch(
       new RegExp(`^https://addon\\.example\\.test/proxy/${created.installUrlToken}/\\d+$`),
     );
+  });
+
+  it("returns empty streams without fetching metadata for malformed Stremio ids", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp(config, db);
+
+    const response = await request(app).get(`/u/${created.installUrlToken}/stream/movie/not-imdb.json`).expect(200);
+
+    expect(response.body).toEqual({ streams: [] });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

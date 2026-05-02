@@ -26,7 +26,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     if (!type || !profileId) return res.json({ streams: [] });
 
     try {
-      const metadata = await fetchCinemetaMeta(type, cinemetaId(type, req.params.id));
+      const metadata = await fetchCinemetaMeta(type, cinemetaId(type, req.params.id), config.maxOnDemandSearchMs);
       if (!metadata) return res.json({ streams: [] });
 
       const streams = await resolveStreams({

@@ -6,27 +6,27 @@ import { ProfileService } from "../src/server/profiles/profileService";
 const key = "0123456789abcdef0123456789abcdef";
 
 describe("ProfileService", () => {
-  it("creates, unlocks, and rotates install tokens", () => {
+  it("creates, unlocks, and rotates install tokens", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const service = new ProfileService(db, key);
 
-    const created = service.createProfile("browser-uid", "passphrase");
+    const created = await service.createProfile("browser-uid", "passphrase");
     expect(created.installUrlToken).toHaveLength(32);
 
-    const unlocked = service.unlockProfile("browser-uid", "passphrase");
+    const unlocked = await service.unlockProfile("browser-uid", "passphrase");
     expect(unlocked.profileId).toBe(created.profileId);
-    expect(() => service.unlockProfile("browser-uid", "wrong")).toThrow("Invalid passphrase");
+    await expect(service.unlockProfile("browser-uid", "wrong")).rejects.toThrow("Invalid passphrase");
 
     const rotated = service.rotateInstallToken(created.profileId);
     expect(rotated.installUrlToken).not.toBe(created.installUrlToken);
   });
 
-  it("stores encrypted ftp config", () => {
+  it("stores encrypted ftp config", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const service = new ProfileService(db, key);
-    const created = service.createProfile("browser-uid", "passphrase");
+    const created = await service.createProfile("browser-uid", "passphrase");
 
     service.saveFtpConfig(created.profileId, {
       host: "ftp.example.test",

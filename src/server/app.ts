@@ -12,12 +12,21 @@ import { profileRoutes } from "./profiles/profileRoutes.js";
 import { createProxyRouter } from "./proxy/proxyRoutes.js";
 import { stremioRoutes } from "./stremio/routes.js";
 
-export function createApp(config: AppConfig, db: Database.Database = openDatabase(config.sqlitePath)) {
+type AppOptions = {
+  publicDir?: string;
+};
+
+export function createApp(
+  config: AppConfig,
+  db: Database.Database = openDatabase(config.sqlitePath),
+  options: AppOptions = {},
+) {
   const app = express();
-  const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
+  const publicDir = options.publicDir ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
   const indexHtml = path.join(publicDir, "index.html");
   app.disable("x-powered-by");
-  app.use(helmet({ contentSecurityPolicy: false }));
+  app.set("trust proxy", "loopback");
+  app.use(helmet());
   app.use(express.json({ limit: "128kb" }));
 
   const profileService = new ProfileService(db, config.encryptionKey);
@@ -33,7 +42,7 @@ export function createApp(config: AppConfig, db: Database.Database = openDatabas
   if (existsSync(indexHtml)) {
     app.use(express.static(publicDir));
     app.get(["/", "/configure"], (_req, res) => {
-      res.sendFile(indexHtml);
+      res.sendFile("index.html", { root: publicDir });
     });
   }
 

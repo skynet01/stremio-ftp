@@ -25,7 +25,6 @@
     "mime-types": "^2.1.35",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "stremio-addon-sdk": "^1.6.10",
     "zod": "^4.0.0"
   },
   "devDependencies": {

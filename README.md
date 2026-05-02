@@ -90,9 +90,11 @@ INDEX_REFRESH_INTERVAL_MS=21600000
 MAX_ON_DEMAND_SEARCH_MS=4500
 NEGATIVE_CACHE_TTL_MS=300000
 PROXY_IDLE_TIMEOUT_MS=30000
+PROFILE_RATE_LIMIT_WINDOW_MS=600000
+PROFILE_RATE_LIMIT_MAX=20
 ```
 
-`BASE_URL` and `CONFIG_ENCRYPTION_KEY` are required. `CONFIG_DIR` defaults to `/config`, and the SQLite database is stored as `stremio-ftp.sqlite` inside that directory.
+`BASE_URL` and `CONFIG_ENCRYPTION_KEY` are required. `CONFIG_DIR` defaults to `/config`, and the SQLite database is stored as `stremio-ftp.sqlite` inside that directory. Profile creation and unlock endpoints are rate-limited per client IP with `PROFILE_RATE_LIMIT_WINDOW_MS` and `PROFILE_RATE_LIMIT_MAX`.
 
 ## Troubleshooting
 

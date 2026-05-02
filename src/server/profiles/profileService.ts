@@ -36,9 +36,10 @@ export class ProfileService {
     private readonly encryptionKey: string,
   ) {}
 
-  createProfile(browserUid: string, passphrase: string) {
+  async createProfile(browserUid: string, passphrase: string) {
     const token = randomToken();
     const now = new Date().toISOString();
+    const passphraseVerifier = await createPassphraseVerifier(passphrase);
     let result: Database.RunResult;
     try {
       result = this.db
@@ -46,7 +47,7 @@ export class ProfileService {
           insert into profiles (browser_uid, passphrase_verifier, install_token_hash, created_at, updated_at)
           values (?, ?, ?, ?, ?)
         `)
-        .run(browserUid, createPassphraseVerifier(passphrase), hashToken(token), now, now);
+        .run(browserUid, passphraseVerifier, hashToken(token), now, now);
     } catch (error) {
       if (error instanceof Error && error.message.includes("profiles.browser_uid")) throw new DuplicateProfileError();
       throw error;
@@ -54,11 +55,11 @@ export class ProfileService {
     return { profileId: Number(result.lastInsertRowid), installUrlToken: token };
   }
 
-  unlockProfile(browserUid: string, passphrase: string) {
+  async unlockProfile(browserUid: string, passphrase: string) {
     const row = this.db.prepare("select id, passphrase_verifier from profiles where browser_uid = ?").get(browserUid) as
       | { id: number; passphrase_verifier: string }
       | undefined;
-    if (!row || !verifyPassphrase(passphrase, row.passphrase_verifier)) throw new Error("Invalid passphrase");
+    if (!row || !(await verifyPassphrase(passphrase, row.passphrase_verifier))) throw new Error("Invalid passphrase");
     this.db.prepare("update profiles set last_unlocked_at = ? where id = ?").run(new Date().toISOString(), row.id);
     return { profileId: row.id };
   }

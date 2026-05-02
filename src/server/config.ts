@@ -11,6 +11,8 @@ export type AppConfig = {
   maxOnDemandSearchMs: number;
   negativeCacheTtlMs: number;
   proxyIdleTimeoutMs: number;
+  profileRateLimitWindowMs: number;
+  profileRateLimitMax: number;
 };
 
 function requireValue(env: NodeJS.ProcessEnv | Record<string, string | undefined>, key: string): string {
@@ -54,5 +56,7 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     maxOnDemandSearchMs: numberValue(env, "MAX_ON_DEMAND_SEARCH_MS", 4500),
     negativeCacheTtlMs: numberValue(env, "NEGATIVE_CACHE_TTL_MS", 300000),
     proxyIdleTimeoutMs: numberValue(env, "PROXY_IDLE_TIMEOUT_MS", 30000),
+    profileRateLimitWindowMs: numberValue(env, "PROFILE_RATE_LIMIT_WINDOW_MS", 600000),
+    profileRateLimitMax: numberValue(env, "PROFILE_RATE_LIMIT_MAX", 20),
   };
 }

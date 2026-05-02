@@ -1,7 +1,9 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 
 const ALGORITHM = "aes-256-gcm";
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
+const scryptAsync = promisify(scrypt);
 
 function keyBytes(secret: string): Buffer {
   return createHash("sha256").update(secret).digest();
@@ -35,13 +37,13 @@ export function decryptJson<T = unknown>(encoded: string, secret: string): T {
   return JSON.parse(plaintext.toString("utf8")) as T;
 }
 
-export function createPassphraseVerifier(passphrase: string): string {
+export async function createPassphraseVerifier(passphrase: string): Promise<string> {
   const salt = randomBytes(16);
-  const hash = scryptSync(passphrase, salt, 64);
+  const hash = (await scryptAsync(passphrase, salt, 64)) as Buffer;
   return `scrypt$${salt.toString("base64url")}$${hash.toString("base64url")}`;
 }
 
-export function verifyPassphrase(passphrase: string, verifier: string): boolean {
+export async function verifyPassphrase(passphrase: string, verifier: string): Promise<boolean> {
   const parts = verifier.split("$");
   if (parts.length !== 3) return false;
   const [scheme, saltEncoded, expectedEncoded] = parts;
@@ -49,6 +51,6 @@ export function verifyPassphrase(passphrase: string, verifier: string): boolean 
   const salt = Buffer.from(saltEncoded, "base64url");
   const expected = Buffer.from(expectedEncoded, "base64url");
   if (salt.length !== 16 || expected.length !== 64) return false;
-  const actual = scryptSync(passphrase, salt, expected.length);
+  const actual = (await scryptAsync(passphrase, salt, expected.length)) as Buffer;
   return timingSafeEqual(expected, actual);
 }

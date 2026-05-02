@@ -17,17 +17,17 @@ describe("security helpers", () => {
     expect(decryptJson(encrypted, key)).toEqual({ password: "secret", host: "ftp.example.test" });
   });
 
-  it("verifies passphrases with scrypt", () => {
-    const verifier = createPassphraseVerifier("correct horse battery staple");
-    expect(verifyPassphrase("correct horse battery staple", verifier)).toBe(true);
-    expect(verifyPassphrase("wrong", verifier)).toBe(false);
+  it("verifies passphrases with scrypt", async () => {
+    const verifier = await createPassphraseVerifier("correct horse battery staple");
+    await expect(verifyPassphrase("correct horse battery staple", verifier)).resolves.toBe(true);
+    await expect(verifyPassphrase("wrong", verifier)).resolves.toBe(false);
   });
 
-  it("rejects malformed passphrase verifiers", () => {
-    const verifier = createPassphraseVerifier("anything");
-    expect(verifyPassphrase("anything", "scrypt$aaaa$!!!!")).toBe(false);
-    expect(verifyPassphrase("anything", "scrypt$a$a")).toBe(false);
-    expect(verifyPassphrase("anything", `${verifier}$extra`)).toBe(false);
+  it("rejects malformed passphrase verifiers", async () => {
+    const verifier = await createPassphraseVerifier("anything");
+    await expect(verifyPassphrase("anything", "scrypt$aaaa$!!!!")).resolves.toBe(false);
+    await expect(verifyPassphrase("anything", "scrypt$a$a")).resolves.toBe(false);
+    await expect(verifyPassphrase("anything", `${verifier}$extra`)).resolves.toBe(false);
   });
 
   it("hashes tokens and redacts sensitive strings", () => {
