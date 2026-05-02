@@ -131,7 +131,7 @@ export function profileRoutes(
           host: ftpConfig.host,
           port: ftpConfig.port,
           username: ftpConfig.username,
-          password: "",
+          password: ftpConfig.password,
           passwordConfigured: Boolean(ftpConfig.password),
           tlsMode: ftpConfig.tlsMode,
           allowInvalidCertificate: ftpConfig.allowInvalidCertificate,

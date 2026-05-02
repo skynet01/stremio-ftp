@@ -43,6 +43,22 @@ describe("stremio routes", () => {
       catalogs: [],
       behaviorHints: { configurable: true, configurationRequired: false },
     });
+    expect(response.header["access-control-allow-origin"]).toBe("*");
+    expect(response.header["cross-origin-resource-policy"]).toBe("cross-origin");
+  });
+
+  it("returns CORS headers for public manifest and stream routes", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config, db);
+
+    const manifestResponse = await request(app).get("/manifest.json").expect(200);
+    const streamResponse = await request(app).get("/u/not-real/stream/movie/tt0133093.json").expect(200);
+
+    expect(manifestResponse.header["access-control-allow-origin"]).toBe("*");
+    expect(streamResponse.header["access-control-allow-origin"]).toBe("*");
+    expect(manifestResponse.header["cross-origin-resource-policy"]).toBe("cross-origin");
+    expect(streamResponse.header["cross-origin-resource-policy"]).toBe("cross-origin");
   });
 
   it("returns empty streams for invalid tokens", async () => {

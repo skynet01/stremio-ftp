@@ -214,7 +214,7 @@ describe("profile routes", () => {
     expect(response.body).toEqual({ filesSeen: 1 });
   });
 
-  it("loads saved FTP settings without exposing the password", async () => {
+  it("loads saved FTP settings with the saved password after authentication", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const app = createApp(config(), db);
@@ -254,7 +254,7 @@ describe("profile routes", () => {
         host: "ftp.example.test",
         port: 2121,
         username: "user",
-        password: "",
+        password: "secret",
         passwordConfigured: true,
         tlsMode: "explicit",
         allowInvalidCertificate: true,

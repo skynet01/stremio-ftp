@@ -35,6 +35,8 @@ function browserUid() {
 }
 
 export function App() {
+  const hasSetupToken = Boolean(new URLSearchParams(window.location.search).get("setup"));
+  const showSetupTokenMessage = window.location.pathname === "/configure" && !hasSetupToken;
   const [recoveryUid, setRecoveryUid] = useState(() => {
     const stored = window.localStorage.getItem(STORAGE_KEYS.recoveryUid);
     if (stored) return stored;
@@ -61,6 +63,7 @@ export function App() {
   const profileReady = profileState === "created" || profileState === "unlocked";
 
   useEffect(() => {
+    if (showSetupTokenMessage) return;
     const rememberedPassphrase = window.localStorage.getItem(STORAGE_KEYS.passphrase);
     if (!rememberedPassphrase) return;
     void restoreRememberedProfile(rememberedPassphrase);
@@ -85,13 +88,13 @@ export function App() {
     setHost(ftpConfig.host);
     setPort(String(ftpConfig.port));
     setUsername(ftpConfig.username);
-    setPassword("");
+    setPassword(ftpConfig.password);
     setTlsMode(ftpConfig.tlsMode);
     setAllowInvalidCertificate(ftpConfig.allowInvalidCertificate);
     setRootPaths(ftpConfig.roots.join("\n"));
     setFtpMessage(
       ftpConfig.passwordConfigured
-        ? "Saved FTP settings loaded. Leave password blank to keep the stored password."
+        ? "Saved FTP settings loaded."
         : "Saved FTP settings loaded.",
     );
   }
@@ -265,7 +268,7 @@ export function App() {
       id: "passphrase",
       type: "password",
       value: passphrase,
-      autoComplete: "new-password",
+      autoComplete: "current-password",
       onChange: (event) => setPassphrase(event.currentTarget.value),
       placeholder: "Minimum 8 characters",
     }),
@@ -343,7 +346,7 @@ export function App() {
       value: password,
       autoComplete: "new-password",
       onChange: (event) => setPassword(event.currentTarget.value),
-      placeholder: "Leave blank to keep saved password",
+      placeholder: "FTP account password",
     }),
     "field-stack password-field",
   );
@@ -400,7 +403,28 @@ export function App() {
     profileReady
       ? [
           h("p", { key: "message", className: "notice", role: "status" }, profileMessage),
-          manifestUrl ? h("p", { key: "manifest", className: "manifest-url" }, h("span", null, "Manifest URL"), h("code", null, manifestUrl)) : null,
+          manifestUrl
+            ? h(
+                "div",
+                { key: "manifest", className: "manifest-url" },
+                h("span", null, "Manifest URL"),
+                h(
+                  "div",
+                  { className: "inline-control" },
+                  h("code", null, manifestUrl),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "icon-button",
+                      "aria-label": "Copy manifest URL",
+                      onClick: () => void navigator.clipboard?.writeText(manifestUrl),
+                    },
+                    h(Copy, { size: 18, "aria-hidden": true }),
+                  ),
+                ),
+              )
+            : null,
           h(
             "div",
             { key: "actions", className: "button-row" },
@@ -408,7 +432,7 @@ export function App() {
           ),
         ]
       : [
-          h("div", { key: "fields", className: "profile-grid" }, passphraseField, recoveryField),
+          h("div", { key: "fields", className: "profile-grid" }, recoveryField, passphraseField),
           h("p", { key: "message", className: "notice", role: "status" }, profileMessage),
           h(
             "div",
@@ -439,16 +463,40 @@ export function App() {
         ],
   );
 
+  const hero = h(
+    "section",
+    { className: "hero" },
+    h("span", { className: "section-label" }, "Private source addon"),
+    h("h1", null, "Stremio FTP Addon"),
+    h(
+      "p",
+      null,
+      "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
+    ),
+  );
+
+  const setupTokenPanel = h(
+    "section",
+    { className: "panel setup-token-panel", "aria-labelledby": "setup-token-heading" },
+    h("span", { className: "section-label" }, "Configuration locked"),
+    h("h2", { id: "setup-token-heading" }, "Setup token required"),
+    h("p", { className: "notice", role: "status" }, "Open the configure page with your setup token to manage FTP credentials and generate a private Stremio manifest."),
+  );
+
   return h(
     "main",
     { className: "app-shell" },
     h(
       "header",
       { className: "topbar" },
-      h("div", { className: "brand-lockup" }, h("span", { className: "brand-mark" }, "FS"), h("div", null, h("h1", null, "FTP Streams"), h("p", null, "Configure your private Stremio source"))),
+      h("div", { className: "brand-lockup" }, h("span", { className: "brand-mark" }, "TVA"), h("div", null, h("p", { className: "brand-title" }, "FTP Streams"), h("p", null, "Configure your private Stremio source"))),
       h(StatusBadge, { tone: profileReady ? "green" : "gray" }, profileState === "created" ? "Ready to install" : profileState === "unlocked" ? "Unlocked" : "Not installed"),
     ),
-    h(
+    hero,
+    showSetupTokenMessage ? setupTokenPanel : null,
+    showSetupTokenMessage
+      ? null
+      : h(
       "div",
       { className: "portal-grid" },
       h(

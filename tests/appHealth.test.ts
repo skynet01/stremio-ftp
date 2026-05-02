@@ -59,7 +59,7 @@ describe("app health", () => {
     expect(response.text).toContain("configure app");
   });
 
-  it("requires the setup token to serve /configure", async () => {
+  it("serves the configuration shell without the setup token", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const publicDir = path.join(tmpdir(), `stremio-ftp-public-${Date.now()}`);
@@ -80,7 +80,10 @@ describe("app health", () => {
       profileRateLimitMax: 30,
     };
 
-    await request(createApp(config, db, { publicDir })).get("/configure").expect(403);
-    await request(createApp(config, db, { publicDir })).get("/configure").query({ setup: "setup-secret-123" }).expect(200);
+    const missingToken = await request(createApp(config, db, { publicDir })).get("/configure").expect(200);
+    const withToken = await request(createApp(config, db, { publicDir })).get("/configure").query({ setup: "setup-secret-123" }).expect(200);
+
+    expect(missingToken.text).toContain("configure app");
+    expect(withToken.text).toContain("configure app");
   });
 });

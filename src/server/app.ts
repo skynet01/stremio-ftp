@@ -31,7 +31,8 @@ export function createApp(
   const indexHtml = path.join(publicDir, "index.html");
   app.disable("x-powered-by");
   app.set("trust proxy", "loopback");
-  app.use(helmet());
+  app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+  app.use(stremioCors());
   app.use(express.json({ limit: "128kb" }));
 
   const profileService = new ProfileService(db, config.encryptionKey);
@@ -51,12 +52,23 @@ export function createApp(
     app.get("/", (_req, res) => {
       res.sendFile("index.html", { root: publicDir });
     });
-    app.get("/configure", requireSetupToken(config), (_req, res) => {
+    app.get("/configure", (_req, res) => {
       res.sendFile("index.html", { root: publicDir });
     });
   }
 
   return app;
+}
+
+function stremioCors(): express.RequestHandler {
+  return (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Range, x-setup-token");
+    res.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  };
 }
 
 function requireSetupToken(config: AppConfig): express.RequestHandler {

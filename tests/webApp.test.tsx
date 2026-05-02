@@ -24,6 +24,7 @@ const unlockProfileMock = vi.mocked(unlockProfile);
 describe("App", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    window.history.pushState({}, "", "/");
     createProfileMock.mockReset();
     loadFtpSettingsMock.mockReset();
     rescanIndexMock.mockReset();
@@ -34,7 +35,7 @@ describe("App", () => {
 
   it("renders the FTP configuration portal", () => {
     render(<App />);
-    expect(screen.getByRole("heading", { name: "FTP Streams" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Stremio FTP Addon" })).toBeTruthy();
     expect(screen.getByLabelText("Host")).toBeTruthy();
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/");
     expect(screen.getByRole("button", { name: "Test connection" })).toBeTruthy();
@@ -53,7 +54,7 @@ describe("App", () => {
 
     try {
       render(<App />);
-      expect(screen.getByRole("heading", { name: "FTP Streams" })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Stremio FTP Addon" })).toBeTruthy();
       expect(screen.getByLabelText("Recovery UID")).toBeTruthy();
     } finally {
       Object.defineProperty(globalThis, "crypto", {
@@ -104,7 +105,7 @@ describe("App", () => {
         host: "ftp.example.test",
         port: 2121,
         username: "user",
-        password: "",
+        password: "secret",
         passwordConfigured: true,
         tlsMode: "explicit",
         allowInvalidCertificate: true,
@@ -133,6 +134,7 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Unlock profile" })).toBeNull();
     expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
     expect(screen.getByDisplayValue("2121")).toBeTruthy();
+    expect(screen.getByDisplayValue("secret")).toBeTruthy();
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/Movies\n/TV");
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toBeTruthy();
   });
@@ -147,7 +149,7 @@ describe("App", () => {
         host: "ftp.example.test",
         port: 13017,
         username: "user",
-        password: "",
+        password: "secret",
         passwordConfigured: true,
         tlsMode: "explicit",
         allowInvalidCertificate: true,
@@ -166,6 +168,50 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Unlock profile" })).toBeNull();
     expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
+    expect(screen.getByDisplayValue("secret")).toBeTruthy();
+  });
+
+  it("shows only the setup token message on /configure without a token", () => {
+    window.history.pushState({}, "", "/configure");
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "Setup token required" })).toBeTruthy();
+    expect(screen.queryByLabelText("Host")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
+  });
+
+  it("does not auto-load a saved profile on /configure without a setup token", () => {
+    window.history.pushState({}, "", "/configure");
+    window.localStorage.setItem("stremio-ftp-recovery-uid", "remembered-browser");
+    window.localStorage.setItem("stremio-ftp-passphrase", "passphrase");
+
+    render(<App />);
+
+    expect(loadFtpSettingsMock).not.toHaveBeenCalled();
+    expect(unlockProfileMock).not.toHaveBeenCalled();
+  });
+
+  it("shows recovery uid before passphrase in first-time profile setup", () => {
+    render(<App />);
+
+    const fields = screen.getAllByLabelText(/Recovery UID|Passphrase/);
+    expect(fields[0].id).toBe("recoveryUid");
+    expect(fields[1].id).toBe("passphrase");
+  });
+
+  it("offers a copy control for the manifest URL after profile creation", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    expect(await screen.findByRole("button", { name: "Copy manifest URL" })).toBeTruthy();
   });
 
   it("keeps profile-dependent controls disabled before profile setup", () => {

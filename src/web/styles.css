@@ -1,18 +1,18 @@
 @import url("https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Fraunces:opsz,wght,SOFT@9..144,500..700,20..80&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
 :root {
-  --ink: #0b0808;
-  --panel: #15100f;
-  --panel-2: #1b1514;
-  --line: #30241f;
-  --line-soft: #221917;
-  --cream: #f5eee4;
-  --cream-dim: #cdbfaf;
-  --muted: #8d7d6e;
-  --muted-2: #5d5047;
-  --accent: #e63946;
-  --accent-2: #ff5966;
-  --green: #75d594;
+  --ink: #11120d;
+  --panel: #1d1b14;
+  --panel-2: #242116;
+  --line: #3f3a2b;
+  --line-soft: #2d2a20;
+  --cream: #f2ead7;
+  --cream-dim: #d0c3a5;
+  --muted: #9b8f70;
+  --muted-2: #6a624d;
+  --accent: #a8e063;
+  --accent-2: #c4f27f;
+  --green: #a8e063;
   --amber: #f2b84b;
   color: var(--cream);
   background: var(--ink);
@@ -30,9 +30,10 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    radial-gradient(900px 640px at 86% -12%, rgba(230, 57, 70, 0.22), transparent 62%),
-    radial-gradient(760px 620px at -12% 108%, rgba(120, 30, 50, 0.18), transparent 64%),
-    linear-gradient(180deg, #110b0b 0%, var(--ink) 100%);
+    linear-gradient(90deg, rgba(168, 224, 99, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(168, 224, 99, 0.028) 1px, transparent 1px),
+    linear-gradient(180deg, #19170f 0%, var(--ink) 100%);
+  background-size: 44px 44px, 44px 44px, auto;
 }
 
 body::before {
@@ -107,12 +108,12 @@ textarea:focus-visible,
 }
 
 .topbar {
-  min-height: 66px;
+  min-height: 58px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  margin-bottom: clamp(28px, 4vw, 48px);
+  margin-bottom: clamp(22px, 3vw, 34px);
   padding-bottom: 18px;
   border-bottom: 1px solid var(--line-soft);
 }
@@ -142,15 +143,15 @@ textarea:focus-visible,
   box-shadow: 0 20px 44px -28px rgba(0, 0, 0, 0.85);
 }
 
-.topbar h1 {
+.brand-title {
   margin: 0;
   color: var(--cream);
   font-family: "Fraunces", Georgia, serif;
-  font-size: clamp(2.25rem, 5.5vw, 4.7rem);
+  font-size: 1.25rem;
   font-variation-settings: "SOFT" 45;
   font-weight: 650;
   letter-spacing: 0;
-  line-height: 0.95;
+  line-height: 1;
 }
 
 .topbar p,
@@ -161,11 +162,38 @@ textarea:focus-visible,
   line-height: 1.55;
 }
 
+.hero {
+  max-width: 880px;
+  margin-bottom: clamp(24px, 4vw, 46px);
+  padding-bottom: clamp(20px, 3vw, 34px);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.hero h1 {
+  max-width: 780px;
+  margin: 0;
+  color: var(--cream);
+  font-family: "Fraunces", Georgia, serif;
+  font-size: clamp(3rem, 8vw, 6.4rem);
+  font-variation-settings: "SOFT" 28;
+  font-weight: 620;
+  letter-spacing: 0;
+  line-height: 0.92;
+}
+
+.hero p {
+  max-width: 680px;
+  margin: 18px 0 0;
+  color: var(--cream-dim);
+  font-size: clamp(1rem, 1.4vw, 1.16rem);
+  line-height: 1.5;
+}
+
 .portal-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.38fr) minmax(300px, 0.72fr);
   gap: clamp(18px, 2.4vw, 28px);
-  align-items: start;
+  align-items: stretch;
 }
 
 .panel {
@@ -176,9 +204,28 @@ textarea:focus-visible,
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: clamp(22px, 2.8vw, 34px);
+  display: flex;
+  flex-direction: column;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.035) inset,
     0 34px 80px -44px rgba(0, 0, 0, 0.9);
+}
+
+.ftp-form,
+.status-panel {
+  height: 100%;
+}
+
+.ftp-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.ftp-form .button-row,
+.status-panel .button-grid {
+  margin-top: auto;
+  padding-top: 24px;
 }
 
 .panel::before {
@@ -374,9 +421,9 @@ input:-webkit-autofill:active {
 .primary-button {
   min-width: 146px;
   background: var(--accent);
-  color: #fff8f5;
+  color: #10130c;
   border-color: var(--accent);
-  box-shadow: 0 18px 42px -22px rgba(230, 57, 70, 0.75);
+  box-shadow: 0 18px 42px -22px rgba(168, 224, 99, 0.75);
 }
 
 .primary-button:hover {
@@ -417,8 +464,8 @@ input:-webkit-autofill:active {
 }
 
 .badge-red {
-  color: var(--accent-2);
-  background: rgba(230, 57, 70, 0.08);
+  color: #ff8274;
+  background: rgba(255, 130, 116, 0.08);
 }
 
 .badge-gray {
@@ -475,6 +522,8 @@ input:-webkit-autofill:active {
 }
 
 .manifest-url code {
+  display: block;
+  width: 100%;
   overflow-wrap: anywhere;
   color: var(--cream-dim);
   background: rgba(255, 255, 255, 0.025);
@@ -485,6 +534,10 @@ input:-webkit-autofill:active {
   font-size: 0.74rem;
   letter-spacing: 0;
   text-transform: none;
+}
+
+.setup-token-panel {
+  max-width: 760px;
 }
 
 .toggle-row {
