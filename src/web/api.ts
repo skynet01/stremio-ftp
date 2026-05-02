@@ -6,15 +6,24 @@ export type CreateProfileRequest = {
 };
 
 export type CreateProfileResponse = {
-  profileId: string;
+  profileId: number;
   recoveryUid: string;
   manifestUrl: string;
   stremioInstallUrl: string;
 };
 
 export type UnlockProfileResponse = {
-  profileId: string;
+  profileId: number;
 };
+
+const setupToken = new URLSearchParams(window.location.search).get("setup") || "";
+
+function authHeaders() {
+  return {
+    "Content-Type": "application/json",
+    ...(setupToken ? { "x-setup-token": setupToken } : {}),
+  };
+}
 
 export type FtpConfigRequest = {
   host: string;
@@ -57,7 +66,7 @@ async function readJson<T extends object>(response: Response): Promise<T> {
 export async function createProfile(request: CreateProfileRequest): Promise<CreateProfileResponse> {
   const response = await fetch("/api/profile", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify(request),
   });
   return readJson<CreateProfileResponse>(response);
@@ -66,7 +75,7 @@ export async function createProfile(request: CreateProfileRequest): Promise<Crea
 export async function unlockProfile(request: CreateProfileRequest): Promise<UnlockProfileResponse> {
   const response = await fetch("/api/profile/unlock", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify(request),
   });
   return readJson<UnlockProfileResponse>(response);
@@ -75,7 +84,7 @@ export async function unlockProfile(request: CreateProfileRequest): Promise<Unlo
 export async function testFtpSettings(request: AuthenticatedFtpRequest): Promise<{ ok: true }> {
   const response = await fetch("/api/profile/ftp/test", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify(request),
   });
   return readJson<{ ok: true }>(response);
@@ -84,7 +93,7 @@ export async function testFtpSettings(request: AuthenticatedFtpRequest): Promise
 export async function saveFtpSettings(request: AuthenticatedFtpRequest): Promise<{ ok: true }> {
   const response = await fetch("/api/profile/ftp", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify(request),
   });
   return readJson<{ ok: true }>(response);
@@ -93,7 +102,7 @@ export async function saveFtpSettings(request: AuthenticatedFtpRequest): Promise
 export async function rescanIndex(request: CreateProfileRequest): Promise<RescanResponse> {
   const response = await fetch("/api/profile/index/rescan", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify(request),
   });
   return readJson<RescanResponse>(response);

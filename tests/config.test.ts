@@ -6,6 +6,7 @@ describe("loadConfig", () => {
     const config = loadConfig({
       BASE_URL: "https://example.test/",
       CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      SETUP_TOKEN: "setup-secret-123",
       PORT: "8123",
       LOG_LEVEL: "debug",
       CONFIG_DIR: "/tmp/stremio-ftp-test",
@@ -16,10 +17,17 @@ describe("loadConfig", () => {
     expect(config.logLevel).toBe("debug");
     expect(config.sqlitePath).toBe("/tmp/stremio-ftp-test/stremio-ftp.sqlite");
     expect(config.maxOnDemandSearchMs).toBe(4500);
+    expect(config.setupToken).toBe("setup-secret-123");
   });
 
   it("rejects missing required values", () => {
     expect(() => loadConfig({})).toThrow("BASE_URL is required");
+    expect(() =>
+      loadConfig({
+        BASE_URL: "https://example.test",
+        CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      }),
+    ).toThrow("SETUP_TOKEN is required");
   });
 
   it("rejects fractional numeric values", () => {
@@ -27,6 +35,7 @@ describe("loadConfig", () => {
       loadConfig({
         BASE_URL: "https://example.test",
         CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+        SETUP_TOKEN: "setup-secret-123",
         CRAWLER_CONCURRENCY: "1.5",
       }),
     ).toThrow("CRAWLER_CONCURRENCY must be a positive integer");
@@ -37,6 +46,7 @@ describe("loadConfig", () => {
       loadConfig({
         BASE_URL: "https://example.test",
         CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+        SETUP_TOKEN: "setup-secret-123",
         PORT: "65536",
       }),
     ).toThrow("PORT must be an integer from 1 to 65535");
@@ -48,6 +58,7 @@ describe("loadConfig", () => {
         loadConfig({
           BASE_URL: "https://example.test",
           CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+          SETUP_TOKEN: "setup-secret-123",
           PORT: port,
         }),
       ).toThrow("PORT must be a positive integer");

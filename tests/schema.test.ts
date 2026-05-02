@@ -76,13 +76,7 @@ describe("schema", () => {
     const tables = db
       .prepare("select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name")
       .all() as { name: string }[];
-    expect(tables.map((row) => row.name)).toEqual([
-      "crawl_state",
-      "media_files",
-      "metadata_cache",
-      "negative_cache",
-      "profiles",
-    ]);
+    expect(tables.map((row) => row.name)).toEqual(["media_files", "profiles"]);
   });
 
   it("creates media lookup indexes", () => {
@@ -138,30 +132,5 @@ describe("schema", () => {
     expect(() => insertMediaFile(db, profileId, { episode: 0 })).toThrow();
     expect(() => insertMediaFile(db, profileId, { confidence: -1 })).toThrow();
     expect(() => insertMediaFile(db, profileId, { confidence: 101 })).toThrow();
-  });
-
-  it("rejects invalid crawl status and cache types", () => {
-    const db = createDb();
-    const profileId = insertProfile(db);
-
-    expect(() =>
-      db
-        .prepare("insert into crawl_state (profile_id, root_path, status) values (?, '/', 'unknown')")
-        .run(profileId),
-    ).toThrow();
-    expect(() =>
-      db
-        .prepare(
-          "insert into metadata_cache (type, imdb_id, payload_json, fetched_at) values ('clip', 'tt1', '{}', '2026-05-02T00:00:00.000Z')",
-        )
-        .run(),
-    ).toThrow();
-    expect(() =>
-      db
-        .prepare(
-          "insert into negative_cache (profile_id, type, stremio_id, expires_at) values (?, 'clip', 'tt1', '2026-05-02T00:00:00.000Z')",
-        )
-        .run(profileId),
-    ).toThrow();
   });
 });

@@ -12,14 +12,12 @@ function config(): AppConfig {
     configDir: "/tmp",
     sqlitePath: ":memory:",
     encryptionKey: "0123456789abcdef0123456789abcdef",
+    setupToken: "setup-secret-123",
     port: 7000,
     logLevel: "error",
     crawlerConcurrency: 2,
     ftpTimeoutMs: 15000,
-    indexRefreshIntervalMs: 21600000,
     maxOnDemandSearchMs: 4500,
-    negativeCacheTtlMs: 300000,
-    proxyIdleTimeoutMs: 30000,
     profileRateLimitWindowMs: 60000,
     profileRateLimitMax: 30,
   };
@@ -33,6 +31,7 @@ describe("profile routes", () => {
 
     const response = await request(app)
       .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(201);
 
@@ -45,7 +44,11 @@ describe("profile routes", () => {
     migrate(db);
     const app = createApp(config(), db);
 
-    const response = await request(app).post("/api/profile").send({ browserUid: "short", passphrase: "short" }).expect(400);
+    const response = await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "short", passphrase: "short" })
+      .expect(400);
 
     expect(response.body).toEqual({ error: "Invalid profile request" });
   });
@@ -55,9 +58,14 @@ describe("profile routes", () => {
     migrate(db);
     const app = createApp(config(), db);
 
-    await request(app).post("/api/profile").send({ browserUid: "browser-uid", passphrase: "passphrase" }).expect(201);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
     const response = await request(app)
       .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(409);
 
@@ -71,10 +79,12 @@ describe("profile routes", () => {
 
     const created = await request(app)
       .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(201);
     const response = await request(app)
       .post("/api/profile/unlock")
+      .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(200);
 
@@ -86,9 +96,14 @@ describe("profile routes", () => {
     migrate(db);
     const app = createApp(config(), db);
 
-    await request(app).post("/api/profile").send({ browserUid: "browser-uid", passphrase: "passphrase" }).expect(201);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
     const response = await request(app)
       .post("/api/profile/unlock")
+      .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "incorrect" })
       .expect(401);
 
@@ -100,10 +115,19 @@ describe("profile routes", () => {
     migrate(db);
     const app = createApp({ ...config(), profileRateLimitMax: 2 }, db);
 
-    await request(app).post("/api/profile").send({ browserUid: "browser-uid-1", passphrase: "passphrase" }).expect(201);
-    await request(app).post("/api/profile").send({ browserUid: "browser-uid-2", passphrase: "passphrase" }).expect(201);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid-1", passphrase: "passphrase" })
+      .expect(201);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid-2", passphrase: "passphrase" })
+      .expect(201);
     const response = await request(app)
       .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid-3", passphrase: "passphrase" })
       .expect(429);
 
@@ -131,7 +155,11 @@ describe("profile routes", () => {
       }),
     });
 
-    await request(app).post("/api/profile").send({ browserUid: "browser-uid", passphrase: "passphrase" }).expect(201);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
     const ftpConfig = {
       host: "ftp.example.test",
       port: 21,
@@ -144,10 +172,12 @@ describe("profile routes", () => {
 
     await request(app)
       .post("/api/profile/ftp")
+      .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase", ftpConfig })
       .expect(200);
     const response = await request(app)
       .post("/api/profile/index/rescan")
+      .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(200);
 
@@ -167,6 +197,7 @@ describe("profile routes", () => {
 
     const created = await request(app)
       .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(201);
     const token = String(created.body.manifestUrl).match(/\/u\/([^/]+)\/manifest\.json$/)?.[1];
@@ -174,6 +205,7 @@ describe("profile routes", () => {
 
     await request(app)
       .post("/api/profile/ftp")
+      .set("x-setup-token", "setup-secret-123")
       .send({
         browserUid: "browser-uid",
         passphrase: "passphrase",
@@ -206,5 +238,18 @@ describe("profile routes", () => {
     const response = await request(app).get(`/proxy/${token}/${fileId}`).set("Range", "bytes=2-5").expect(206);
 
     expect(response.text ?? Buffer.from(response.body).toString("utf8")).toBe("2345");
+  });
+
+  it("rejects profile APIs without the setup token", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    const response = await request(app)
+      .post("/api/profile")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(403);
+
+    expect(response.body).toEqual({ error: "Invalid setup token" });
   });
 });

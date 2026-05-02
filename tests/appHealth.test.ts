@@ -17,14 +17,12 @@ describe("app health", () => {
       configDir: "/tmp",
       sqlitePath: ":memory:",
       encryptionKey: "0123456789abcdef0123456789abcdef",
+      setupToken: "setup-secret-123",
       port: 7000,
       logLevel: "error",
       crawlerConcurrency: 2,
       ftpTimeoutMs: 15000,
-      indexRefreshIntervalMs: 21600000,
       maxOnDemandSearchMs: 4500,
-      negativeCacheTtlMs: 300000,
-      proxyIdleTimeoutMs: 30000,
       profileRateLimitWindowMs: 600000,
       profileRateLimitMax: 30,
     };
@@ -43,20 +41,46 @@ describe("app health", () => {
       configDir: "/tmp",
       sqlitePath: ":memory:",
       encryptionKey: "0123456789abcdef0123456789abcdef",
+      setupToken: "setup-secret-123",
       port: 7000,
       logLevel: "error",
       crawlerConcurrency: 2,
       ftpTimeoutMs: 15000,
-      indexRefreshIntervalMs: 21600000,
       maxOnDemandSearchMs: 4500,
-      negativeCacheTtlMs: 300000,
-      proxyIdleTimeoutMs: 30000,
       profileRateLimitWindowMs: 600000,
       profileRateLimitMax: 30,
     };
 
-    const response = await request(createApp(config, db, { publicDir })).get("/configure").expect(200);
+    const response = await request(createApp(config, db, { publicDir }))
+      .get("/configure")
+      .query({ setup: "setup-secret-123" })
+      .expect(200);
 
     expect(response.text).toContain("configure app");
+  });
+
+  it("requires the setup token to serve /configure", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const publicDir = path.join(tmpdir(), `stremio-ftp-public-${Date.now()}`);
+    mkdirSync(publicDir);
+    writeFileSync(path.join(publicDir, "index.html"), "<html><body>configure app</body></html>");
+    const config: AppConfig = {
+      baseUrl: "https://addon.example.test",
+      configDir: "/tmp",
+      sqlitePath: ":memory:",
+      encryptionKey: "0123456789abcdef0123456789abcdef",
+      setupToken: "setup-secret-123",
+      port: 7000,
+      logLevel: "error",
+      crawlerConcurrency: 2,
+      ftpTimeoutMs: 15000,
+      maxOnDemandSearchMs: 4500,
+      profileRateLimitWindowMs: 600000,
+      profileRateLimitMax: 30,
+    };
+
+    await request(createApp(config, db, { publicDir })).get("/configure").expect(403);
+    await request(createApp(config, db, { publicDir })).get("/configure").query({ setup: "setup-secret-123" }).expect(200);
   });
 });

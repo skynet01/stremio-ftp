@@ -60,7 +60,7 @@ describe("App", () => {
 
   it("creates a profile and exposes the returned Stremio install link", async () => {
     createProfileMock.mockResolvedValue({
-      profileId: "profile-1",
+      profileId: 1,
       recoveryUid: "browser-uid",
       manifestUrl: "https://addon.example.test/u/token/manifest.json",
       stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
@@ -86,7 +86,7 @@ describe("App", () => {
 
   it("unlocks an existing profile without inventing an install link", async () => {
     createProfileMock.mockRejectedValue(new Error("Profile already exists"));
-    unlockProfileMock.mockResolvedValue({ profileId: "profile-1" });
+    unlockProfileMock.mockResolvedValue({ profileId: 1 });
 
     render(<App />);
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
@@ -120,7 +120,7 @@ describe("App", () => {
 
   it("saves FTP settings and refreshes the index after profile creation", async () => {
     createProfileMock.mockResolvedValue({
-      profileId: "profile-1",
+      profileId: 1,
       recoveryUid: "browser-uid",
       manifestUrl: "https://addon.example.test/u/token/manifest.json",
       stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",

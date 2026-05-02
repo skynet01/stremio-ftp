@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import express from "express";
 import { existsSync } from "node:fs";
+import { timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import helmet from "helmet";
@@ -36,6 +37,7 @@ export function createApp(
   const profileService = new ProfileService(db, config.encryptionKey);
   const mediaRepository = new MediaRepository(db);
   const ftpClientFactory = options.ftpClientFactory ?? createBasicFtpClient;
+  app.use("/api/profile", requireSetupToken(config));
   app.use("/api", profileRoutes(config, profileService, mediaRepository, ftpClientFactory));
   app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
@@ -46,10 +48,36 @@ export function createApp(
 
   if (existsSync(indexHtml)) {
     app.use(express.static(publicDir));
-    app.get(["/", "/configure"], (_req, res) => {
+    app.get("/", (_req, res) => {
+      res.sendFile("index.html", { root: publicDir });
+    });
+    app.get("/configure", requireSetupToken(config), (_req, res) => {
       res.sendFile("index.html", { root: publicDir });
     });
   }
 
   return app;
+}
+
+function requireSetupToken(config: AppConfig): express.RequestHandler {
+  return (req, res, next) => {
+    const provided = setupTokenFromRequest(req);
+    if (!provided || !safeEqual(provided, config.setupToken)) {
+      return res.status(403).json({ error: "Invalid setup token" });
+    }
+    next();
+  };
+}
+
+function setupTokenFromRequest(req: express.Request) {
+  const header = req.header("x-setup-token");
+  if (header) return header;
+  const query = req.query.setup;
+  return typeof query === "string" ? query : null;
+}
+
+function safeEqual(a: string, b: string) {
+  const aBytes = Buffer.from(a);
+  const bBytes = Buffer.from(b);
+  return aBytes.length === bBytes.length && timingSafeEqual(aBytes, bBytes);
 }

@@ -3,14 +3,12 @@ export type AppConfig = {
   configDir: string;
   sqlitePath: string;
   encryptionKey: string;
+  setupToken: string;
   port: number;
   logLevel: "debug" | "info" | "warn" | "error";
   crawlerConcurrency: number;
   ftpTimeoutMs: number;
-  indexRefreshIntervalMs: number;
   maxOnDemandSearchMs: number;
-  negativeCacheTtlMs: number;
-  proxyIdleTimeoutMs: number;
   profileRateLimitWindowMs: number;
   profileRateLimitMax: number;
 };
@@ -38,6 +36,8 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
   const baseUrl = requireValue(env, "BASE_URL").replace(/\/+$/, "");
   const encryptionKey = requireValue(env, "CONFIG_ENCRYPTION_KEY");
   if (encryptionKey.length < 32) throw new Error("CONFIG_ENCRYPTION_KEY must be at least 32 characters");
+  const setupToken = requireValue(env, "SETUP_TOKEN");
+  if (setupToken.length < 16) throw new Error("SETUP_TOKEN must be at least 16 characters");
 
   const configDir = env.CONFIG_DIR?.trim() || "/config";
   const logLevel = (env.LOG_LEVEL || "info") as AppConfig["logLevel"];
@@ -48,14 +48,12 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     configDir,
     sqlitePath: `${configDir.replace(/\/+$/, "")}/stremio-ftp.sqlite`,
     encryptionKey,
+    setupToken,
     port: portValue(env, "PORT", 7000),
     logLevel,
     crawlerConcurrency: numberValue(env, "CRAWLER_CONCURRENCY", 2),
     ftpTimeoutMs: numberValue(env, "FTP_TIMEOUT_MS", 15000),
-    indexRefreshIntervalMs: numberValue(env, "INDEX_REFRESH_INTERVAL_MS", 21600000),
     maxOnDemandSearchMs: numberValue(env, "MAX_ON_DEMAND_SEARCH_MS", 4500),
-    negativeCacheTtlMs: numberValue(env, "NEGATIVE_CACHE_TTL_MS", 300000),
-    proxyIdleTimeoutMs: numberValue(env, "PROXY_IDLE_TIMEOUT_MS", 30000),
     profileRateLimitWindowMs: numberValue(env, "PROFILE_RATE_LIMIT_WINDOW_MS", 600000),
     profileRateLimitMax: numberValue(env, "PROFILE_RATE_LIMIT_MAX", 20),
   };

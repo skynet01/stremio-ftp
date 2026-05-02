@@ -37,34 +37,5 @@ export function migrate(db: Database.Database) {
     create index if not exists idx_media_episode on media_files(profile_id, media_kind, parsed_title, season, episode);
     create index if not exists idx_media_movie on media_files(profile_id, media_kind, imdb_id, parsed_title, parsed_year);
 
-    create table if not exists crawl_state (
-      id integer primary key autoincrement,
-      profile_id integer not null references profiles(id) on delete cascade,
-      root_path text not null,
-      status text not null check (status in ('idle', 'running', 'paused', 'failed', 'complete')),
-      last_scan_started_at text,
-      last_scan_finished_at text,
-      last_error text,
-      files_seen integer not null default 0,
-      unique(profile_id, root_path)
-    );
-
-    create table if not exists metadata_cache (
-      id integer primary key autoincrement,
-      type text not null check (type in ('movie', 'series')),
-      imdb_id text not null,
-      payload_json text not null,
-      fetched_at text not null,
-      unique(type, imdb_id)
-    );
-
-    create table if not exists negative_cache (
-      id integer primary key autoincrement,
-      profile_id integer not null references profiles(id) on delete cascade,
-      type text not null check (type in ('movie', 'series')),
-      stremio_id text not null,
-      expires_at text not null,
-      unique(profile_id, type, stremio_id)
-    );
   `);
 }

@@ -39,11 +39,12 @@ Build and run the addon with Docker Compose:
 ```bash
 BASE_URL=https://stremio-ftp.example.com
 CONFIG_ENCRYPTION_KEY="$(openssl rand -hex 32)"
-export BASE_URL CONFIG_ENCRYPTION_KEY
+SETUP_TOKEN="$(openssl rand -hex 24)"
+export BASE_URL CONFIG_ENCRYPTION_KEY SETUP_TOKEN
 docker compose up --build
 ```
 
-The compose file stores persistent configuration and the SQLite database under `./config`. That directory is ignored by Docker builds so local encrypted profile data is not sent as build context. Set `BASE_URL` to the HTTPS origin that Stremio clients can reach, and use a stable random `CONFIG_ENCRYPTION_KEY` value of at least 32 characters before creating profiles. Changing this key later prevents existing encrypted profile secrets from being decrypted.
+The compose file stores persistent configuration and the SQLite database in the named Docker volume `stremio-ftp-config`. Set `BASE_URL` to the HTTPS origin that Stremio clients can reach, and use stable random `CONFIG_ENCRYPTION_KEY` and `SETUP_TOKEN` values before creating profiles. Changing the encryption key later prevents existing encrypted profile secrets from being decrypted.
 
 ## HTTPS Reverse Proxy
 
@@ -59,7 +60,7 @@ The manifest and stream URLs are generated from `BASE_URL`, so it must match the
 
 ## Configuration Portal Workflow
 
-1. Open the configuration portal at `/configure` on your addon host.
+1. Open the configuration portal at `/configure?setup=your-setup-token` on your addon host.
 2. Create a profile with the browser-generated recovery UID and a passphrase.
 3. Save and test FTP settings, then refresh the index.
 4. Copy the generated manifest URL or use the Stremio install link.
@@ -82,20 +83,18 @@ Keep profile URLs private. Stream URLs proxy matching FTP files through the addo
 ```bash
 BASE_URL=https://stremio-ftp.example.com
 CONFIG_ENCRYPTION_KEY=replace-with-at-least-32-random-characters
+SETUP_TOKEN=replace-with-at-least-16-random-characters
 CONFIG_DIR=/config
 PORT=7000
 LOG_LEVEL=info
 CRAWLER_CONCURRENCY=2
 FTP_TIMEOUT_MS=15000
-INDEX_REFRESH_INTERVAL_MS=21600000
 MAX_ON_DEMAND_SEARCH_MS=4500
-NEGATIVE_CACHE_TTL_MS=300000
-PROXY_IDLE_TIMEOUT_MS=30000
 PROFILE_RATE_LIMIT_WINDOW_MS=600000
 PROFILE_RATE_LIMIT_MAX=20
 ```
 
-`BASE_URL` and `CONFIG_ENCRYPTION_KEY` are required. `CONFIG_DIR` defaults to `/config`, and the SQLite database is stored as `stremio-ftp.sqlite` inside that directory. Profile creation and unlock endpoints are rate-limited per client IP with `PROFILE_RATE_LIMIT_WINDOW_MS` and `PROFILE_RATE_LIMIT_MAX`.
+`BASE_URL`, `CONFIG_ENCRYPTION_KEY`, and `SETUP_TOKEN` are required. `CONFIG_DIR` defaults to `/config`, and the SQLite database is stored as `stremio-ftp.sqlite` inside that directory. Profile configuration endpoints and `/configure` require the setup token. Profile creation and unlock endpoints are rate-limited per client IP with `PROFILE_RATE_LIMIT_WINDOW_MS` and `PROFILE_RATE_LIMIT_MAX`.
 
 ## Troubleshooting
 

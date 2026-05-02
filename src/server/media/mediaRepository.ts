@@ -171,38 +171,6 @@ export class MediaRepository {
     return row ? toMediaMatch(row) : null;
   }
 
-  setNegativeCache(profileId: number, type: "movie" | "series", stremioId: string, expiresAt: string) {
-    this.db
-      .prepare(
-        `
-        insert into negative_cache (profile_id, type, stremio_id, expires_at)
-        values (?, ?, ?, ?)
-        on conflict(profile_id, type, stremio_id) do update set
-          expires_at = excluded.expires_at
-      `,
-      )
-      .run(profileId, type, stremioId, expiresAt);
-  }
-
-  isNegativeCached(profileId: number, type: "movie" | "series", stremioId: string, now = new Date().toISOString()) {
-    const row = this.db
-      .prepare(
-        `
-        select 1
-        from negative_cache
-        where profile_id = ?
-          and type = ?
-          and stremio_id = ?
-          and expires_at > ?
-      `,
-      )
-      .get(profileId, type, stremioId, now);
-    return Boolean(row);
-  }
-
-  clearExpiredNegativeCache(now = new Date().toISOString()) {
-    return this.db.prepare("delete from negative_cache where expires_at <= ?").run(now).changes;
-  }
 }
 
 function normalizeRootPath(path: string) {

@@ -156,17 +156,4 @@ describe("MediaRepository", () => {
     expect(repo.deleteStaleUnderRoot(profileId, "/", currentSeen)).toBe(1);
     expect(repo.findEpisode(profileId, "stale movie", 1, 1)).toHaveLength(0);
   });
-
-  it("sets, checks, and clears expired negative cache rows", () => {
-    const db = new Database(":memory:");
-    migrate(db);
-    const profileId = createProfile(db);
-    const repo = new MediaRepository(db);
-
-    repo.setNegativeCache(profileId, "movie", "tt1234567", "2026-05-02T01:00:00.000Z");
-
-    expect(repo.isNegativeCached(profileId, "movie", "tt1234567", "2026-05-02T00:59:00.000Z")).toBe(true);
-    expect(repo.isNegativeCached(profileId, "movie", "tt1234567", "2026-05-02T01:00:00.000Z")).toBe(false);
-    expect(repo.clearExpiredNegativeCache("2026-05-02T01:00:00.000Z")).toBe(1);
-  });
 });

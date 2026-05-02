@@ -43,7 +43,13 @@ function browserUid() {
 }
 
 export function App() {
-  const [recoveryUid] = useState(browserUid);
+  const [recoveryUid, setRecoveryUid] = useState(() => {
+    const stored = window.localStorage.getItem("stremio-ftp-recovery-uid");
+    if (stored) return stored;
+    const generated = browserUid();
+    window.localStorage.setItem("stremio-ftp-recovery-uid", generated);
+    return generated;
+  });
   const [passphrase, setPassphrase] = useState("");
   const [host, setHost] = useState("");
   const [port, setPort] = useState("21");
@@ -165,7 +171,14 @@ export function App() {
     h(
       "div",
       { className: "inline-control" },
-      h("input", { id: "recoveryUid", value: recoveryUid, readOnly: true }),
+      h("input", {
+        id: "recoveryUid",
+        value: recoveryUid,
+        onChange: (event) => {
+          setRecoveryUid(event.currentTarget.value);
+          window.localStorage.setItem("stremio-ftp-recovery-uid", event.currentTarget.value);
+        },
+      }),
       h(
         "button",
         {
@@ -222,7 +235,6 @@ export function App() {
       value: password,
       autoComplete: "new-password",
       onChange: (event) => setPassword(event.currentTarget.value),
-      placeholder: "Leave blank to keep current",
     }),
   );
 

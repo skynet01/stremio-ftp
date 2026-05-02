@@ -8,6 +8,10 @@ services:
       CONFIG_ENCRYPTION_KEY: "${CONFIG_ENCRYPTION_KEY:?set CONFIG_ENCRYPTION_KEY}"
       PORT: "7000"
       CONFIG_DIR: "/config"
+      SETUP_TOKEN: "${SETUP_TOKEN:?set SETUP_TOKEN}"
     volumes:
-      - ./config:/config
+      - stremio-ftp-config:/config
     restart: unless-stopped
+
+volumes:
+  stremio-ftp-config:
