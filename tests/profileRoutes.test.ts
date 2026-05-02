@@ -353,6 +353,46 @@ describe("profile routes", () => {
       .expect(200);
   });
 
+  it("returns the FTP list error when testing an invalid root path", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db, {
+      ftpClientFactory: async () => ({
+        list: async (path) => {
+          throw new Error(`450 ${path}: No such file or directory`);
+        },
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+    });
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    const response = await request(app)
+      .post("/api/profile/ftp/test")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp.example.test",
+          port: 21,
+          username: "user",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: true,
+          roots: ["/media"],
+        },
+      })
+      .expect(400);
+
+    expect(response.body).toEqual({ error: "FTP error: 450 /media: No such file or directory" });
+  });
+
   it("proxies indexed FTP files for the matching install token", async () => {
     const db = new Database(":memory:");
     migrate(db);

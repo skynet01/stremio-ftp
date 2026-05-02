@@ -43,7 +43,7 @@ export function App() {
   const [password, setPassword] = useState("");
   const [tlsMode, setTlsMode] = useState("explicit");
   const [allowInvalidCertificate, setAllowInvalidCertificate] = useState(false);
-  const [rootPaths, setRootPaths] = useState("/media");
+  const [rootPaths, setRootPaths] = useState("/");
   const [profileState, setProfileState] = useState<"new" | "creating" | "created" | "unlocked" | "error">("new");
   const [profileMessage, setProfileMessage] = useState("Create or unlock this browser profile to install the addon.");
   const [ftpMessage, setFtpMessage] = useState("Save FTP settings, then refresh the index.");

@@ -35,6 +35,7 @@ describe("App", () => {
     render(<App />);
     expect(screen.getByRole("heading", { name: "FTP Streams" })).toBeTruthy();
     expect(screen.getByLabelText("Host")).toBeTruthy();
+    expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/");
     expect(screen.getByRole("button", { name: "Test connection" })).toBeTruthy();
     expect(screen.getByText("Index status")).toBeTruthy();
   });

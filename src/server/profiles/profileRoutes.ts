@@ -93,8 +93,8 @@ export function profileRoutes(
         await client.close();
       }
       res.json({ ok: true });
-    } catch {
-      res.status(400).json({ error: "Unable to connect to FTP server" });
+    } catch (error) {
+      res.status(400).json({ error: ftpErrorMessage(error, "Unable to connect to FTP server") });
     }
   });
 
@@ -160,12 +160,17 @@ export function profileRoutes(
         filesSeen += result.filesSeen;
       }
       res.json({ filesSeen });
-    } catch {
-      res.status(400).json({ error: "Unable to refresh FTP index" });
+    } catch (error) {
+      res.status(400).json({ error: ftpErrorMessage(error, "Unable to refresh FTP index") });
     }
   });
 
   return router;
+}
+
+function ftpErrorMessage(error: unknown, fallback: string) {
+  if (!(error instanceof Error) || !error.message.trim()) return fallback;
+  return `FTP error: ${error.message}`;
 }
 
 function ftpConfigWithStoredPassword(
