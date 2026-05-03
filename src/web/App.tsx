@@ -17,6 +17,7 @@ import { APP_CHANGELOG } from "./changelog.js";
 import type { AddonCustomization, ConnectionStatus, IndexStatus, LoadedFtpConfig, ScanSchedule, ScanStatus } from "./api.js";
 
 type StatusTone = "green" | "amber" | "red" | "gray";
+type ChangelogEntry = { hash: string; subject: string };
 const STORAGE_KEYS = {
   recoveryUid: "stremio-ftp-recovery-uid",
   passphrase: "stremio-ftp-passphrase",
@@ -57,6 +58,7 @@ const DEFAULT_SCAN_SCHEDULE: ScanSchedule = {
   intervalMinutes: 0,
   nextScheduledScanAt: null,
 };
+const GITHUB_COMMITS_API = "https://api.github.com/repos/skynet01/stremio-ftp/commits?per_page=6";
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
   return h("span", { className: `badge badge-${tone}` }, children);
@@ -174,6 +176,7 @@ export function App() {
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingLogo, setEditingLogo] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
+  const [changelogEntries, setChangelogEntries] = useState<ChangelogEntry[]>(APP_CHANGELOG);
   const [customizationMessage, setCustomizationMessage] = useState("Click the title, subtitle, or avatar to customize the Stremio addon.");
 
   const profileReady = profileState === "created" || profileState === "unlocked";
@@ -204,6 +207,26 @@ export function App() {
     // Poll only while the current scan is active.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileReady, scanStatus.status]);
+
+  useEffect(() => {
+    if (!changelogOpen || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") return;
+    const controller = new AbortController();
+    void fetch(GITHUB_COMMITS_API, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (!Array.isArray(body)) return;
+        const commits = body
+          .map((item): ChangelogEntry | null => {
+            const sha = typeof item?.sha === "string" ? item.sha.slice(0, 7) : "";
+            const message = typeof item?.commit?.message === "string" ? item.commit.message.split("\n")[0] : "";
+            return sha && message ? { hash: sha, subject: message } : null;
+          })
+          .filter(Boolean) as ChangelogEntry[];
+        if (commits.length) setChangelogEntries(commits);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [changelogOpen]);
 
   function rememberInstall(manifest: string, stremioInstall: string) {
     setManifestUrl(manifest);
@@ -1201,11 +1224,11 @@ export function App() {
               h("div", null, h("span", { className: "section-label" }, `v${APP_VERSION}`), h("h2", { id: "changelog-heading" }, "Latest changes")),
               h("button", { type: "button", className: "secondary-button", onClick: () => setChangelogOpen(false) }, "Close"),
             ),
-            APP_CHANGELOG.length
+            changelogEntries.length
               ? h(
                   "ol",
                   { className: "changelog-list" },
-                  APP_CHANGELOG.map((commit) =>
+                  changelogEntries.map((commit) =>
                     h(
                       "li",
                       { key: commit.hash },
