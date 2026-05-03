@@ -641,6 +641,30 @@ input:-webkit-autofill:active {
   color: var(--accent);
 }
 
+.catalog-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.45fr);
+  gap: 14px;
+  margin-top: 16px;
+  max-width: 760px;
+}
+
+.content-type-options {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.field-label {
+  color: var(--cream-dim);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .manifest-url {
   display: grid;
   gap: 7px;

@@ -5,6 +5,13 @@ export function publicManifest(customization: Partial<AddonCustomization> = {}) 
   const addonLogoUrl = customization.addonLogoUrl?.trim() || "";
   const addonDescription = customization.addonDescription?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonDescription;
   const catalogEnabled = customization.catalogEnabled === true;
+  const contentTypes = customization.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
+  const catalogs = [
+    ...(contentTypes.movies ? [{ type: "movie", id: "ftp-movies", name: `${addonName} Movies`, extra: [{ name: "skip" }] }] : []),
+    ...(contentTypes.series ? [{ type: "series", id: "ftp-series", name: `${addonName} Series`, extra: [{ name: "skip" }] }] : []),
+    ...(contentTypes.anime ? [{ type: "series", id: "ftp-anime", name: `${addonName} Anime`, extra: [{ name: "skip" }] }] : []),
+    { type: "movie", id: "ftp-other", name: `${addonName} Other`, extra: [{ name: "skip" }] },
+  ];
   return {
     id: "community.stremio-ftp",
     version: "0.1.0",
@@ -13,13 +20,7 @@ export function publicManifest(customization: Partial<AddonCustomization> = {}) 
     resources: catalogEnabled ? ["stream", "catalog", "meta"] : ["stream"],
     types: ["movie", "series"],
     idPrefixes: catalogEnabled ? ["tt", "ftp"] : ["tt"],
-    catalogs: catalogEnabled
-      ? [
-          { type: "movie", id: "ftp-movies", name: `${addonName} Movies`, extra: [{ name: "skip" }] },
-          { type: "series", id: "ftp-series", name: `${addonName} Series`, extra: [{ name: "skip" }] },
-          { type: "movie", id: "ftp-other", name: `${addonName} Other`, extra: [{ name: "skip" }] },
-        ]
-      : [],
+    catalogs: catalogEnabled ? catalogs : [],
     ...(addonLogoUrl ? { logo: addonLogoUrl } : {}),
     behaviorHints: { configurable: true, configurationRequired: true },
   };

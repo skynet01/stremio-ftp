@@ -1,5 +1,7 @@
 import type { CatalogItem } from "../media/mediaRepository.js";
 
+export type TmdbCatalogKind = "movie" | "series" | "anime";
+
 export type CatalogMeta = {
   id: string;
   type: "movie" | "series";
@@ -41,32 +43,32 @@ type TmdbExternalIds = {
   imdb_id?: string | null;
 };
 
-export async function tmdbCatalogMeta(item: CatalogItem, apiKey: string | null): Promise<CatalogMeta | null> {
-  if (!apiKey) return item.imdbId ? fallbackMeta(item, item.imdbId) : null;
+export async function tmdbCatalogMeta(item: CatalogItem, apiKey: string | null, catalogKind: TmdbCatalogKind = item.catalogKind): Promise<CatalogMeta | null> {
+  if (!apiKey) return item.imdbId ? fallbackMeta(item, item.imdbId, catalogKind) : null;
 
-  return item.imdbId ? metaFromImdbId(item, item.imdbId, apiKey) : metaFromSearch(item, apiKey);
+  return item.imdbId ? metaFromImdbId(item, item.imdbId, apiKey, catalogKind) : metaFromSearch(item, apiKey, catalogKind);
 }
 
-async function metaFromImdbId(item: CatalogItem, imdbId: string, apiKey: string): Promise<CatalogMeta | null> {
+async function metaFromImdbId(item: CatalogItem, imdbId: string, apiKey: string, catalogKind: TmdbCatalogKind): Promise<CatalogMeta | null> {
   const url = new URL(`https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}`);
   url.searchParams.set("api_key", apiKey);
   url.searchParams.set("external_source", "imdb_id");
   const response = await fetch(url);
-  if (!response.ok) return fallbackMeta(item, imdbId);
+  if (!response.ok) return fallbackMeta(item, imdbId, catalogKind);
   const body = (await response.json()) as TmdbFindResponse;
-  const result = item.mediaKind === "movie" ? body.movie_results?.[0] : body.tv_results?.[0];
-  if (!result) return fallbackMeta(item, imdbId);
+  const result = catalogKind === "movie" ? body.movie_results?.[0] : body.tv_results?.[0];
+  if (!result) return fallbackMeta(item, imdbId, catalogKind);
 
-  return metaFromTmdbResult(item, imdbId, result);
+  return metaFromTmdbResult(item, imdbId, result, catalogKind);
 }
 
-async function metaFromSearch(item: CatalogItem, apiKey: string): Promise<CatalogMeta | null> {
-  const searchType = item.mediaKind === "movie" ? "movie" : "tv";
+async function metaFromSearch(item: CatalogItem, apiKey: string, catalogKind: TmdbCatalogKind): Promise<CatalogMeta | null> {
+  const searchType = catalogKind === "movie" ? "movie" : "tv";
   const url = new URL(`https://api.themoviedb.org/3/search/${searchType}`);
   url.searchParams.set("api_key", apiKey);
   url.searchParams.set("query", item.parsedTitle);
   if (item.parsedYear) {
-    url.searchParams.set(item.mediaKind === "movie" ? "year" : "first_air_date_year", String(item.parsedYear));
+    url.searchParams.set(catalogKind === "movie" ? "year" : "first_air_date_year", String(item.parsedYear));
   }
 
   const response = await fetch(url);
@@ -78,7 +80,7 @@ async function metaFromSearch(item: CatalogItem, apiKey: string): Promise<Catalo
   const externalIds = await fetchExternalIds(searchType, result.id, apiKey);
   if (!externalIds?.imdb_id) return null;
 
-  return metaFromTmdbResult(item, externalIds.imdb_id, result);
+  return metaFromTmdbResult(item, externalIds.imdb_id, result, catalogKind);
 }
 
 async function fetchExternalIds(type: "movie" | "tv", tmdbId: number, apiKey: string): Promise<TmdbExternalIds | null> {
@@ -89,14 +91,14 @@ async function fetchExternalIds(type: "movie" | "tv", tmdbId: number, apiKey: st
   return (await response.json()) as TmdbExternalIds;
 }
 
-function metaFromTmdbResult(item: CatalogItem, imdbId: string, result: TmdbMovie | TmdbTv): CatalogMeta {
-  const movieResult = item.mediaKind === "movie" ? (result as TmdbMovie) : null;
-  const tvResult = item.mediaKind === "series" ? (result as TmdbTv) : null;
+function metaFromTmdbResult(item: CatalogItem, imdbId: string, result: TmdbMovie | TmdbTv, catalogKind: TmdbCatalogKind): CatalogMeta {
+  const movieResult = catalogKind === "movie" ? (result as TmdbMovie) : null;
+  const tvResult = catalogKind !== "movie" ? (result as TmdbTv) : null;
   const title = movieResult ? movieResult.title : tvResult?.name;
   const date = movieResult ? movieResult.release_date : tvResult?.first_air_date;
   return {
     id: imdbId,
-    type: item.mediaKind,
+    type: catalogKind === "movie" ? "movie" : "series",
     name: title?.trim() || titleCase(item.parsedTitle),
     poster: imageUrl(result.poster_path),
     background: imageUrl(result.backdrop_path),
@@ -105,10 +107,10 @@ function metaFromTmdbResult(item: CatalogItem, imdbId: string, result: TmdbMovie
   };
 }
 
-function fallbackMeta(item: CatalogItem, imdbId: string): CatalogMeta {
+function fallbackMeta(item: CatalogItem, imdbId: string, catalogKind: TmdbCatalogKind): CatalogMeta {
   return {
     id: imdbId,
-    type: item.mediaKind,
+    type: catalogKind === "movie" ? "movie" : "series",
     name: titleCase(item.parsedTitle),
     releaseInfo: item.parsedYear ? String(item.parsedYear) : undefined,
   };

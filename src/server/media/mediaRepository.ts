@@ -1,7 +1,8 @@
 import type Database from "better-sqlite3";
 import type { ParsedMedia } from "./parser.js";
 
-export type ParsedMediaFileInput = ParsedMedia & {
+export type ParsedMediaFileInput = Omit<ParsedMedia, "catalogKind"> & {
+  catalogKind?: ParsedMedia["catalogKind"];
   sizeBytes?: number | null;
   modifiedAt?: string | null;
   lastSeenAt?: string;
@@ -17,6 +18,7 @@ export type MediaMatch = {
 
 export type CatalogItem = {
   mediaKind: "movie" | "series";
+  catalogKind: "movie" | "series" | "anime";
   parsedTitle: string;
   parsedYear: number | null;
   imdbId: string | null;
@@ -87,6 +89,7 @@ export class MediaRepository {
           size_bytes,
           modified_at,
           media_kind,
+          catalog_kind,
           parsed_title,
           parsed_year,
           season,
@@ -95,7 +98,7 @@ export class MediaRepository {
           quality,
           confidence,
           last_seen_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(profile_id, ftp_path) do update set
           filename = excluded.filename,
           normalized_filename = excluded.normalized_filename,
@@ -103,6 +106,7 @@ export class MediaRepository {
           size_bytes = excluded.size_bytes,
           modified_at = excluded.modified_at,
           media_kind = excluded.media_kind,
+          catalog_kind = excluded.catalog_kind,
           parsed_title = excluded.parsed_title,
           parsed_year = excluded.parsed_year,
           season = excluded.season,
@@ -122,6 +126,7 @@ export class MediaRepository {
         file.sizeBytes ?? null,
         file.modifiedAt ?? null,
         file.mediaKind,
+        file.catalogKind ?? file.mediaKind,
         file.parsedTitle,
         file.parsedYear,
         file.season,
@@ -213,22 +218,23 @@ export class MediaRepository {
     return row.count;
   }
 
-  catalogItems(profileId: number, mediaKind: "movie" | "series", limit: number, skip: number): CatalogItem[] {
+  catalogItems(profileId: number, catalogKind: "movie" | "series" | "anime", limit: number, skip: number): CatalogItem[] {
     const rows = this.db
       .prepare(
         `
-        select media_kind, parsed_title, parsed_year, imdb_id, max(confidence) as max_confidence
+        select media_kind, catalog_kind, parsed_title, parsed_year, imdb_id, max(confidence) as max_confidence
         from media_files
         where profile_id = ?
-          and media_kind = ?
+          and catalog_kind = ?
           and parsed_title is not null
-        group by media_kind, parsed_title, parsed_year, imdb_id
+        group by media_kind, catalog_kind, parsed_title, parsed_year, imdb_id
         order by max_confidence desc, parsed_title asc
         limit ? offset ?
       `,
       )
-      .all(profileId, mediaKind, limit, skip) as Array<{
+      .all(profileId, catalogKind, limit, skip) as Array<{
       media_kind: "movie" | "series";
+      catalog_kind: "movie" | "series" | "anime";
       parsed_title: string;
       parsed_year: number | null;
       imdb_id: string | null;
@@ -236,6 +242,7 @@ export class MediaRepository {
 
     return rows.map((row) => ({
       mediaKind: row.media_kind,
+      catalogKind: row.catalog_kind,
       parsedTitle: row.parsed_title,
       parsedYear: row.parsed_year,
       imdbId: row.imdb_id,

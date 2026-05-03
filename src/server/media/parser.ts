@@ -4,6 +4,7 @@ const SUPPORTED_EXTENSIONS = new Set(["mkv", "mp4", "avi", "mov", "m4v", "ts", "
 
 export type ParsedMedia = {
   mediaKind: "movie" | "series";
+  catalogKind: "movie" | "series" | "anime";
   ftpPath: string;
   filename: string;
   normalizedFilename: string;
@@ -15,6 +16,15 @@ export type ParsedMedia = {
   imdbId: string | null;
   quality: string | null;
   confidence: number;
+};
+
+export type ParseMediaOptions = {
+  contentTypes?: {
+    movies?: boolean;
+    series?: boolean;
+    anime?: boolean;
+  };
+  libraryLayout?: "auto" | "folders" | "flat";
 };
 
 function qualityOf(value: string): string | null {
@@ -37,7 +47,11 @@ function folderTitleOf(ftpPath: string): string | null {
   return title ? normalizeTitle(title) : null;
 }
 
-export function parseMediaPath(ftpPath: string): ParsedMedia | null {
+export function parseMediaPath(ftpPath: string, options: ParseMediaOptions = {}): ParsedMedia | null {
+  return parseMediaPathWithOptions(ftpPath, options);
+}
+
+export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOptions = {}): ParsedMedia | null {
   const filename = basename(ftpPath);
   const extension = filename.split(".").pop()?.toLowerCase() || "";
   if (!SUPPORTED_EXTENSIONS.has(extension)) return null;
@@ -51,6 +65,7 @@ export function parseMediaPath(ftpPath: string): ParsedMedia | null {
   if (sxe?.groups) {
     return {
       mediaKind: "series",
+      catalogKind: seriesCatalogKind(ftpPath, options),
       ftpPath,
       filename,
       normalizedFilename,
@@ -69,6 +84,7 @@ export function parseMediaPath(ftpPath: string): ParsedMedia | null {
   if (bareSxe?.groups) {
     return {
       mediaKind: "series",
+      catalogKind: seriesCatalogKind(ftpPath, options),
       ftpPath,
       filename,
       normalizedFilename,
@@ -87,6 +103,7 @@ export function parseMediaPath(ftpPath: string): ParsedMedia | null {
   if (xPattern?.groups) {
     return {
       mediaKind: "series",
+      catalogKind: seriesCatalogKind(ftpPath, options),
       ftpPath,
       filename,
       normalizedFilename,
@@ -105,6 +122,7 @@ export function parseMediaPath(ftpPath: string): ParsedMedia | null {
   if (bareXPattern?.groups) {
     return {
       mediaKind: "series",
+      catalogKind: seriesCatalogKind(ftpPath, options),
       ftpPath,
       filename,
       normalizedFilename,
@@ -119,12 +137,32 @@ export function parseMediaPath(ftpPath: string): ParsedMedia | null {
     };
   }
 
+  const animeEpisode = animeEnabled(options) ? withoutExtension.match(/^(?<title>.+?)[\s._-]+(?:-|ep(?:isode)?[\s._-]*)?(?<episode>\d{1,3})(?:v\d+)?(?:[\s._-]+|$)/i) : null;
+  if (animeEpisode?.groups) {
+    return {
+      mediaKind: "series",
+      catalogKind: "anime",
+      ftpPath,
+      filename,
+      normalizedFilename,
+      extension,
+      parsedTitle: normalizeTitle(stripKnownTokens(animeEpisode.groups.title)),
+      parsedYear: null,
+      season: 1,
+      episode: Number(animeEpisode.groups.episode),
+      imdbId,
+      quality,
+      confidence: 82,
+    };
+  }
+
   const yearMatch = Array.from(withoutExtension.matchAll(/\b(19\d{2}|20\d{2})\b/g)).at(-1);
   const year = yearMatch?.[1];
-  const titleBeforeYear = yearMatch ? withoutExtension.slice(0, yearMatch.index ?? 0) : stripKnownTokens(withoutExtension);
+  const titleBeforeYear = movieTitleSource(ftpPath, withoutExtension, yearMatch?.index ?? null, options);
 
   return {
     mediaKind: "movie",
+    catalogKind: "movie",
     ftpPath,
     filename,
     normalizedFilename,
@@ -137,4 +175,21 @@ export function parseMediaPath(ftpPath: string): ParsedMedia | null {
     quality,
     confidence: imdbId ? 90 : year ? 70 : 45,
   };
+}
+
+function animeEnabled(options: ParseMediaOptions) {
+  return options.contentTypes?.anime === true;
+}
+
+function seriesCatalogKind(ftpPath: string, options: ParseMediaOptions): "series" | "anime" {
+  if (animeEnabled(options) && (!options.contentTypes?.series || /\banime\b/i.test(ftpPath))) return "anime";
+  return "series";
+}
+
+function movieTitleSource(ftpPath: string, withoutExtension: string, yearIndex: number | null, options: ParseMediaOptions) {
+  if (options.libraryLayout === "folders") {
+    const folderTitle = folderTitleOf(ftpPath);
+    if (folderTitle) return folderTitle;
+  }
+  return yearIndex !== null ? withoutExtension.slice(0, yearIndex) : stripKnownTokens(withoutExtension);
 }

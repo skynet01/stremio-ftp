@@ -23,6 +23,13 @@ export type AddonCustomization = {
   addonLogoUrl: string;
   addonDescription: string;
   catalogEnabled: boolean;
+  catalogTmdbApiKey?: string;
+  catalogContentTypes?: {
+    movies: boolean;
+    series: boolean;
+    anime: boolean;
+  };
+  libraryLayout?: "auto" | "folders" | "flat";
 };
 
 export type IndexStatus = {

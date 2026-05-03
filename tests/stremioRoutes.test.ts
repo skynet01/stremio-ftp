@@ -267,6 +267,132 @@ describe("stremio routes", () => {
     ]);
   });
 
+  it("uses profile TMDB key and anime content settings for anime catalog lookup", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: true,
+      catalogTmdbApiKey: "profile-tmdb-key",
+      catalogContentTypes: { movies: false, series: false, anime: true },
+      libraryLayout: "auto",
+    });
+    const repository = new MediaRepository(db);
+    repository.upsertParsedFile(created.profileId, {
+      mediaKind: "series",
+      catalogKind: "anime",
+      ftpPath: "/anime/Afro.Samurai.01.1080p.mkv",
+      filename: "Afro.Samurai.01.1080p.mkv",
+      normalizedFilename: "afro samurai 01 1080p",
+      extension: "mkv",
+      parsedTitle: "afro samurai",
+      parsedYear: null,
+      season: 1,
+      episode: 1,
+      imdbId: null,
+      quality: "1080p",
+      confidence: 82,
+      sizeBytes: 1024 * 1024,
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              id: 37858,
+              name: "Afro Samurai",
+              overview: "A warrior seeks revenge.",
+              poster_path: "/afro.jpg",
+              backdrop_path: "/afro-bg.jpg",
+              first_air_date: "2007-01-04",
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ imdb_id: "tt0465316" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ ...config, tmdbApiKey: "env-key" }, db);
+
+    const manifest = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
+    const catalog = await request(app).get(`/u/${created.installUrlToken}/catalog/series/ftp-anime.json`).expect(200);
+
+    expect(manifest.body.catalogs).toEqual([
+      { type: "series", id: "ftp-anime", name: "Archive 3D Anime", extra: [{ name: "skip" }] },
+      { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: [{ name: "skip" }] },
+    ]);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("api_key=profile-tmdb-key");
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/3/search/tv");
+    expect(catalog.body.metas).toEqual([
+      {
+        id: "tt0465316",
+        type: "series",
+        name: "Afro Samurai",
+        poster: "https://image.tmdb.org/t/p/w500/afro.jpg",
+        background: "https://image.tmdb.org/t/p/w500/afro-bg.jpg",
+        description: "A warrior seeks revenge.",
+        releaseInfo: "2007",
+      },
+    ]);
+  });
+
+  it("keeps TMDB-resolved duplicate formats out of the Other catalog", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: true,
+      catalogContentTypes: { movies: true, series: true, anime: false },
+    });
+    const repository = new MediaRepository(db);
+    repository.upsertParsedFile(created.profileId, {
+      mediaKind: "movie",
+      catalogKind: "movie",
+      ftpPath: "/movies/Ready.Player.One.2018.3D.HSBS.mkv",
+      filename: "Ready.Player.One.2018.3D.HSBS.mkv",
+      normalizedFilename: "ready player one 2018 3d hsbs",
+      extension: "mkv",
+      parsedTitle: "ready player one",
+      parsedYear: 2018,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: "1080p",
+      confidence: 70,
+      sizeBytes: 1024 * 1024,
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [{ id: 333339, title: "Ready Player One", release_date: "2018-03-29" }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ imdb_id: "tt1677720" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ ...config, tmdbApiKey: "tmdb-key" }, db);
+
+    const otherCatalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-other.json`).expect(200);
+
+    expect(otherCatalog.body.metas).toEqual([]);
+  });
+
   it("returns CORS headers for public manifest and stream routes", async () => {
     const db = new Database(":memory:");
     migrate(db);

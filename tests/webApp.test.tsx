@@ -36,6 +36,11 @@ const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
 const testFtpSettingsMock = vi.mocked(testFtpSettings);
 const unlockProfileMock = vi.mocked(unlockProfile);
+const defaultCatalogOptions = {
+  catalogTmdbApiKey: "",
+  catalogContentTypes: { movies: true, series: true, anime: false },
+  libraryLayout: "auto",
+};
 
 describe("App", () => {
   beforeEach(() => {
@@ -63,6 +68,9 @@ describe("App", () => {
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/");
     expect(screen.getByRole("button", { name: "Test connection" })).toBeTruthy();
     expect(screen.getByText("Index status")).toBeTruthy();
+    expect(screen.getByLabelText("TMDB API key")).toBeTruthy();
+    expect(screen.getByLabelText("Library layout")).toBeTruthy();
+    expect(screen.getByLabelText("Anime")).toBeTruthy();
   });
 
   it("renders when crypto.randomUUID is unavailable", () => {
@@ -214,6 +222,7 @@ describe("App", () => {
           addonLogoUrl: "",
           addonDescription: "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: false,
+          ...defaultCatalogOptions,
         },
       }),
     );
@@ -231,6 +240,7 @@ describe("App", () => {
           addonLogoUrl: "",
           addonDescription: "Stream the archive from my FTP server.",
           catalogEnabled: false,
+          ...defaultCatalogOptions,
         },
       }),
     );
@@ -248,6 +258,7 @@ describe("App", () => {
           addonLogoUrl: "https://cdn.example.test/logo.png",
           addonDescription: "Stream the archive from my FTP server.",
           catalogEnabled: false,
+          ...defaultCatalogOptions,
         },
       }),
     );
@@ -286,6 +297,7 @@ describe("App", () => {
           addonLogoUrl: "https://cdn.example.test/logo.png",
           addonDescription: "Stream the archive from my FTP server.",
           catalogEnabled: false,
+          ...defaultCatalogOptions,
         },
       }),
     );
@@ -506,6 +518,45 @@ describe("App", () => {
           addonDescription:
             "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: true,
+          ...defaultCatalogOptions,
+        },
+      }),
+    );
+  });
+
+  it("saves catalog metadata and library parsing options after profile setup", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("link", { name: "Install in Stremio" });
+
+    fireEvent.change(screen.getByLabelText("TMDB API key"), { target: { value: "profile-tmdb-key" } });
+    fireEvent.blur(screen.getByLabelText("TMDB API key"));
+    fireEvent.click(screen.getByLabelText("Anime"));
+    fireEvent.change(screen.getByLabelText("Library layout"), { target: { value: "folders" } });
+
+    await waitFor(() =>
+      expect(saveCustomizationMock).toHaveBeenLastCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Stremio FTP Addon",
+          addonLogoUrl: "",
+          addonDescription:
+            "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+          catalogEnabled: false,
+          catalogTmdbApiKey: "profile-tmdb-key",
+          catalogContentTypes: { movies: true, series: true, anime: true },
+          libraryLayout: "folders",
         },
       }),
     );

@@ -11,6 +11,11 @@ export function migrate(db: Database.Database) {
       addon_logo_url text,
       addon_description text,
       catalog_enabled integer not null default 0 check (catalog_enabled in (0, 1)),
+      catalog_tmdb_api_key text,
+      catalog_content_movies integer not null default 1 check (catalog_content_movies in (0, 1)),
+      catalog_content_series integer not null default 1 check (catalog_content_series in (0, 1)),
+      catalog_content_anime integer not null default 0 check (catalog_content_anime in (0, 1)),
+      library_layout text not null default 'auto' check (library_layout in ('auto', 'folders', 'flat')),
       last_indexed_at text,
       indexed_media_count integer not null default 0 check (indexed_media_count >= 0),
       last_ftp_tested_at text,
@@ -38,6 +43,7 @@ export function migrate(db: Database.Database) {
       size_bytes integer check (size_bytes is null or size_bytes >= 0),
       modified_at text,
       media_kind text not null check (media_kind in ('movie', 'series')),
+      catalog_kind text not null default 'movie' check (catalog_kind in ('movie', 'series', 'anime')),
       parsed_title text,
       parsed_year integer check (parsed_year is null or parsed_year between 1888 and 2200),
       season integer check (season is null or season > 0),
@@ -58,14 +64,26 @@ export function migrate(db: Database.Database) {
   ensureProfileColumn(db, "addon_logo_url", "text");
   ensureProfileColumn(db, "addon_description", "text");
   ensureProfileColumn(db, "catalog_enabled", "integer not null default 0");
+  ensureProfileColumn(db, "catalog_tmdb_api_key", "text");
+  ensureProfileColumn(db, "catalog_content_movies", "integer not null default 1");
+  ensureProfileColumn(db, "catalog_content_series", "integer not null default 1");
+  ensureProfileColumn(db, "catalog_content_anime", "integer not null default 0");
+  ensureProfileColumn(db, "library_layout", "text not null default 'auto'");
   ensureProfileColumn(db, "last_indexed_at", "text");
   ensureProfileColumn(db, "indexed_media_count", "integer not null default 0");
   ensureProfileColumn(db, "last_ftp_tested_at", "text");
   ensureProfileColumn(db, "last_ftp_test_ok", "integer");
+  ensureMediaColumn(db, "catalog_kind", "text not null default 'movie'");
 }
 
 function ensureProfileColumn(db: Database.Database, name: string, definition: string) {
   const columns = db.prepare("pragma table_info(profiles)").all() as { name: string }[];
   if (columns.some((column) => column.name === name)) return;
   db.prepare(`alter table profiles add column ${name} ${definition}`).run();
+}
+
+function ensureMediaColumn(db: Database.Database, name: string, definition: string) {
+  const columns = db.prepare("pragma table_info(media_files)").all() as { name: string }[];
+  if (columns.some((column) => column.name === name)) return;
+  db.prepare(`alter table media_files add column ${name} ${definition}`).run();
 }

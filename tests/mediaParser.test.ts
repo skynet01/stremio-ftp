@@ -85,6 +85,21 @@ describe("media parser", () => {
     });
   });
 
+  it("parses anime absolute episode numbers when anime content is enabled", () => {
+    expect(
+      parseMediaPath("/Anime/Afro Samurai/Afro.Samurai.01.1080p.mkv", {
+        contentTypes: { movies: true, series: true, anime: true },
+      }),
+    ).toMatchObject({
+      mediaKind: "series",
+      catalogKind: "anime",
+      parsedTitle: "afro samurai",
+      season: 1,
+      episode: 1,
+      quality: "1080p",
+    });
+  });
+
   it("ignores unsupported files", () => {
     expect(parseMediaPath("/TV/Show/notes.txt")).toBeNull();
   });

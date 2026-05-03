@@ -2,8 +2,8 @@ import { Router } from "express";
 import type { AppConfig } from "../config.js";
 import type { MediaRepository } from "../media/mediaRepository.js";
 import { fetchCinemetaMeta } from "../metadata/cinemetaClient.js";
-import { tmdbCatalogMeta } from "../metadata/tmdbClient.js";
-import type { ProfileService } from "../profiles/profileService.js";
+import { tmdbCatalogMeta, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
+import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization, type ProfileService } from "../profiles/profileService.js";
 import { publicManifest, tokenManifest } from "./manifest.js";
 import { resolveStreams } from "./streamResolver.js";
 
@@ -60,6 +60,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const profileId = installToken ? profiles.profileIdForInstallToken(installToken) : null;
     const customization = profileId ? profiles.getAddonCustomization(profileId) : null;
     if (!type || !profileId || !customization?.catalogEnabled || !isCatalogId(type, catalogId)) return res.json({ metas: [] });
+    const tmdbApiKey = effectiveTmdbApiKey(customization, config);
 
     const skip = skipFromExtra(stringParam(req.params.extra));
     if (catalogId === "ftp-other") {
@@ -67,19 +68,17 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
       const metas = (
         await Promise.all(
           items.map(async (item) => {
-            const tmdbMeta = await tmdbCatalogMeta(
-              { mediaKind: item.mediaKind, parsedTitle: item.parsedTitle, parsedYear: item.parsedYear, imdbId: null },
-              config.tmdbApiKey,
-            );
-            return tmdbMeta ? null : otherCatalogMeta(item);
+            return (await resolvesInEnabledCatalog(item, tmdbApiKey, customization)) ? null : otherCatalogMeta(item);
           }),
         )
       ).filter(Boolean);
       return res.json({ metas });
     }
 
-    const items = mediaRepository.catalogItems(profileId, type, 100, skip);
-    const metas = (await Promise.all(items.map((item) => tmdbCatalogMeta(item, config.tmdbApiKey)))).filter(Boolean);
+    const catalogKind = catalogKindForId(catalogId);
+    if (!catalogKind || !catalogKindEnabled(catalogKind, customization)) return res.json({ metas: [] });
+    const items = mediaRepository.catalogItems(profileId, catalogKind, 100, skip);
+    const metas = (await Promise.all(items.map((item) => tmdbCatalogMeta(item, tmdbApiKey, catalogKind)))).filter(Boolean);
     res.json({ metas });
   });
 
@@ -99,8 +98,9 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     if (!/^tt\d{7,8}$/i.test(id)) return res.json({ meta: null });
 
     const meta = await tmdbCatalogMeta(
-      { mediaKind: type, parsedTitle: id, parsedYear: null, imdbId: id },
-      config.tmdbApiKey,
+      { mediaKind: type, catalogKind: type, parsedTitle: id, parsedYear: null, imdbId: id },
+      effectiveTmdbApiKey(customization, config),
+      type,
     );
     res.json({ meta });
   });
@@ -120,8 +120,50 @@ function isCatalogId(type: StremioType, catalogId: string) {
   return (
     (type === "movie" && catalogId === "ftp-movies") ||
     (type === "series" && catalogId === "ftp-series") ||
+    (type === "series" && catalogId === "ftp-anime") ||
     (type === "movie" && catalogId === "ftp-other")
   );
+}
+
+function catalogKindForId(catalogId: string): TmdbCatalogKind | null {
+  if (catalogId === "ftp-movies") return "movie";
+  if (catalogId === "ftp-series") return "series";
+  if (catalogId === "ftp-anime") return "anime";
+  return null;
+}
+
+function effectiveTmdbApiKey(customization: AddonCustomization, config: AppConfig) {
+  return customization.catalogTmdbApiKey?.trim() || config.tmdbApiKey;
+}
+
+function catalogKindEnabled(catalogKind: TmdbCatalogKind, customization: AddonCustomization) {
+  const contentTypes = customization.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
+  if (catalogKind === "movie") return contentTypes.movies;
+  if (catalogKind === "series") return contentTypes.series;
+  return contentTypes.anime;
+}
+
+async function resolvesInEnabledCatalog(
+  item: { mediaKind: "movie" | "series"; parsedTitle: string; parsedYear: number | null; imdbId?: string | null },
+  tmdbApiKey: string | null,
+  customization: AddonCustomization,
+) {
+  for (const catalogKind of ["movie", "series", "anime"] as const) {
+    if (!catalogKindEnabled(catalogKind, customization)) continue;
+    const meta = await tmdbCatalogMeta(
+      {
+        mediaKind: catalogKind === "movie" ? "movie" : "series",
+        catalogKind,
+        parsedTitle: item.parsedTitle,
+        parsedYear: item.parsedYear,
+        imdbId: item.imdbId ?? null,
+      },
+      tmdbApiKey,
+      catalogKind,
+    );
+    if (meta) return true;
+  }
+  return false;
 }
 
 function skipFromExtra(extra: string | undefined) {

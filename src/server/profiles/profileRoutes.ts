@@ -4,7 +4,7 @@ import type { AppConfig } from "../config.js";
 import { crawlProfileRoot } from "../ftp/crawler.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { MediaRepository } from "../media/mediaRepository.js";
-import { DuplicateProfileError, ProfileService } from "./profileService.js";
+import { DEFAULT_ADDON_CUSTOMIZATION, DuplicateProfileError, ProfileService } from "./profileService.js";
 
 const createSchema = z.object({
   browserUid: z.string().min(8),
@@ -32,6 +32,15 @@ const customizationSchema = z.object({
     .refine((value) => !value || /^https?:\/\//i.test(value), "Logo URL must start with http:// or https://"),
   addonDescription: z.string().trim().min(1).max(260),
   catalogEnabled: z.boolean().default(false),
+  catalogTmdbApiKey: z.string().trim().max(128).default(""),
+  catalogContentTypes: z
+    .object({
+      movies: z.boolean().default(true),
+      series: z.boolean().default(true),
+      anime: z.boolean().default(false),
+    })
+    .default(DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!),
+  libraryLayout: z.enum(["auto", "folders", "flat"]).default("auto"),
 });
 const saveCustomizationSchema = createSchema.extend({ customization: customizationSchema });
 
@@ -192,6 +201,7 @@ export function profileRoutes(
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
       const ftpConfig = service.getFtpConfig(unlocked.profileId);
       if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
+      const customization = service.getAddonCustomization(unlocked.profileId);
 
       let filesSeen = 0;
       for (const rootPath of ftpConfig.roots) {
@@ -201,6 +211,10 @@ export function profileRoutes(
           ftpConfig,
           factory: ftpClientFactory,
           repo: mediaRepository,
+          parserOptions: {
+            contentTypes: customization.catalogContentTypes,
+            libraryLayout: customization.libraryLayout,
+          },
         });
         filesSeen += result.filesSeen;
       }

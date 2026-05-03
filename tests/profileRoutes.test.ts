@@ -456,6 +456,9 @@ describe("profile routes", () => {
           addonLogoUrl: "https://cdn.example.test/logo.png",
           addonDescription: "Stream the archive from my FTP server.",
           catalogEnabled: true,
+          catalogTmdbApiKey: "profile-tmdb-key",
+          catalogContentTypes: { movies: true, series: false, anime: true },
+          libraryLayout: "folders",
         },
       })
       .expect(200);
@@ -472,6 +475,9 @@ describe("profile routes", () => {
         addonLogoUrl: "https://cdn.example.test/logo.png",
         addonDescription: "Stream the archive from my FTP server.",
         catalogEnabled: true,
+        catalogTmdbApiKey: "profile-tmdb-key",
+        catalogContentTypes: { movies: true, series: false, anime: true },
+        libraryLayout: "folders",
       },
     });
   });

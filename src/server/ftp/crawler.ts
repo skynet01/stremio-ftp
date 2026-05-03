@@ -1,5 +1,5 @@
 import type { MediaRepository } from "../media/mediaRepository.js";
-import { parseMediaPath } from "../media/parser.js";
+import { parseMediaPath, type ParseMediaOptions } from "../media/parser.js";
 import type { FtpConfig } from "../profiles/profileService.js";
 import type { FtpClientFactory } from "./ftpTypes.js";
 
@@ -12,6 +12,7 @@ export type CrawlProfileRootInput = {
   ftpConfig: FtpConfig;
   factory: FtpClientFactory;
   repo: MediaRepository;
+  parserOptions?: ParseMediaOptions;
 };
 
 export async function crawlProfileRoot(input: CrawlProfileRootInput) {
@@ -37,7 +38,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
       if (entry.type === "directory") {
         await walk(entry.path, depth + 1);
       } else {
-        const parsed = parseMediaPath(entry.path);
+        const parsed = parseMediaPath(entry.path, input.parserOptions);
         if (parsed) {
           filesSeen += 1;
           input.repo.upsertParsedFile(input.profileId, {

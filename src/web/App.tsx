@@ -26,6 +26,9 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
   addonDescription:
     "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
   catalogEnabled: false,
+  catalogTmdbApiKey: "",
+  catalogContentTypes: { movies: true, series: true, anime: false },
+  libraryLayout: "auto",
 };
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
@@ -111,6 +114,9 @@ export function App() {
   const [addonLogoUrl, setAddonLogoUrl] = useState(DEFAULT_CUSTOMIZATION.addonLogoUrl);
   const [addonDescription, setAddonDescription] = useState(DEFAULT_CUSTOMIZATION.addonDescription);
   const [catalogEnabled, setCatalogEnabled] = useState(DEFAULT_CUSTOMIZATION.catalogEnabled);
+  const [catalogTmdbApiKey, setCatalogTmdbApiKey] = useState(DEFAULT_CUSTOMIZATION.catalogTmdbApiKey || "");
+  const [catalogContentTypes, setCatalogContentTypes] = useState(DEFAULT_CUSTOMIZATION.catalogContentTypes!);
+  const [libraryLayout, setLibraryLayout] = useState<"auto" | "folders" | "flat">(DEFAULT_CUSTOMIZATION.libraryLayout || "auto");
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingLogo, setEditingLogo] = useState(false);
@@ -177,6 +183,9 @@ export function App() {
     setAddonLogoUrl(customization.addonLogoUrl || "");
     setAddonDescription(customization.addonDescription || DEFAULT_CUSTOMIZATION.addonDescription);
     setCatalogEnabled(customization.catalogEnabled ?? DEFAULT_CUSTOMIZATION.catalogEnabled);
+    setCatalogTmdbApiKey(customization.catalogTmdbApiKey || "");
+    setCatalogContentTypes(customization.catalogContentTypes || DEFAULT_CUSTOMIZATION.catalogContentTypes!);
+    setLibraryLayout(customization.libraryLayout || DEFAULT_CUSTOMIZATION.libraryLayout || "auto");
   }
 
   function normalizedCustomization(): AddonCustomization {
@@ -185,6 +194,9 @@ export function App() {
       addonLogoUrl: addonLogoUrl.trim(),
       addonDescription: addonDescription.trim() || DEFAULT_CUSTOMIZATION.addonDescription,
       catalogEnabled,
+      catalogTmdbApiKey: catalogTmdbApiKey.trim(),
+      catalogContentTypes,
+      libraryLayout,
     };
   }
 
@@ -193,7 +205,10 @@ export function App() {
       customization.addonName !== DEFAULT_CUSTOMIZATION.addonName ||
       customization.addonLogoUrl !== DEFAULT_CUSTOMIZATION.addonLogoUrl ||
       customization.addonDescription !== DEFAULT_CUSTOMIZATION.addonDescription ||
-      customization.catalogEnabled !== DEFAULT_CUSTOMIZATION.catalogEnabled
+      customization.catalogEnabled !== DEFAULT_CUSTOMIZATION.catalogEnabled ||
+      customization.catalogTmdbApiKey !== DEFAULT_CUSTOMIZATION.catalogTmdbApiKey ||
+      customization.libraryLayout !== DEFAULT_CUSTOMIZATION.libraryLayout ||
+      JSON.stringify(customization.catalogContentTypes) !== JSON.stringify(DEFAULT_CUSTOMIZATION.catalogContentTypes)
     );
   }
 
@@ -414,6 +429,21 @@ export function App() {
   function updateCatalogEnabled(nextEnabled: boolean) {
     setCatalogEnabled(nextEnabled);
     void saveAddonBranding({ ...normalizedCustomization(), catalogEnabled: nextEnabled });
+  }
+
+  function updateCatalogContentType(key: keyof NonNullable<AddonCustomization["catalogContentTypes"]>, enabled: boolean) {
+    const nextContentTypes = { ...catalogContentTypes, [key]: enabled };
+    setCatalogContentTypes(nextContentTypes);
+    void saveAddonBranding({ ...normalizedCustomization(), catalogContentTypes: nextContentTypes });
+  }
+
+  function updateLibraryLayout(nextLayout: "auto" | "folders" | "flat") {
+    setLibraryLayout(nextLayout);
+    void saveAddonBranding({ ...normalizedCustomization(), libraryLayout: nextLayout });
+  }
+
+  function commitCatalogTmdbApiKey() {
+    void saveAddonBranding({ ...normalizedCustomization(), catalogTmdbApiKey: catalogTmdbApiKey.trim() });
   }
 
   const passphraseField = field(
@@ -707,6 +737,76 @@ export function App() {
         onChange: (event) => updateCatalogEnabled(event.currentTarget.checked),
       }),
       "Show indexed FTP catalog in Stremio",
+    ),
+    h(
+      "div",
+      { className: "catalog-options" },
+      field(
+        "TMDB API key",
+        "catalogTmdbApiKey",
+        h("input", {
+          id: "catalogTmdbApiKey",
+          className: filledClass(catalogTmdbApiKey),
+          value: catalogTmdbApiKey,
+          placeholder: "Use server default",
+          onChange: (event) => setCatalogTmdbApiKey(event.currentTarget.value),
+          onBlur: commitCatalogTmdbApiKey,
+        }),
+      ),
+      field(
+        "Library layout",
+        "libraryLayout",
+        h(
+          "select",
+          {
+            id: "libraryLayout",
+            className: filledClass(libraryLayout),
+            value: libraryLayout,
+            onChange: (event) => updateLibraryLayout((event.currentTarget as HTMLSelectElement).value as "auto" | "folders" | "flat"),
+          },
+          h("option", { value: "auto" }, "Auto detect"),
+          h("option", { value: "folders" }, "Organized by folders"),
+          h("option", { value: "flat" }, "Single folder of files"),
+        ),
+      ),
+      h(
+        "div",
+        { className: "content-type-options", role: "group", "aria-label": "Server content types" },
+        h("span", { className: "field-label" }, "Server content"),
+        h(
+          "label",
+          { className: "toggle-row", htmlFor: "catalogMovies" },
+          h("input", {
+            id: "catalogMovies",
+            type: "checkbox",
+            checked: catalogContentTypes.movies,
+            onChange: (event) => updateCatalogContentType("movies", event.currentTarget.checked),
+          }),
+          "Movies",
+        ),
+        h(
+          "label",
+          { className: "toggle-row", htmlFor: "catalogSeries" },
+          h("input", {
+            id: "catalogSeries",
+            type: "checkbox",
+            checked: catalogContentTypes.series,
+            onChange: (event) => updateCatalogContentType("series", event.currentTarget.checked),
+          }),
+          "Series",
+        ),
+        h(
+          "label",
+          { className: "toggle-row", htmlFor: "catalogAnime" },
+          h("input", {
+            id: "catalogAnime",
+            type: "checkbox",
+            checked: catalogContentTypes.anime,
+            onChange: (event) => updateCatalogContentType("anime", event.currentTarget.checked),
+          }),
+          "Anime",
+        ),
+      ),
     ),
     editingLogo
       ? h(

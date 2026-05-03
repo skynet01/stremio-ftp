@@ -23,7 +23,18 @@ export type AddonCustomization = {
   addonLogoUrl: string;
   addonDescription: string;
   catalogEnabled: boolean;
+  catalogTmdbApiKey?: string;
+  catalogContentTypes?: CatalogContentTypes;
+  libraryLayout?: LibraryLayout;
 };
+
+export type CatalogContentTypes = {
+  movies: boolean;
+  series: boolean;
+  anime: boolean;
+};
+
+export type LibraryLayout = "auto" | "folders" | "flat";
 
 export type IndexStatus = {
   lastScanAt: string | null;
@@ -41,6 +52,9 @@ export const DEFAULT_ADDON_CUSTOMIZATION: AddonCustomization = {
   addonDescription:
     "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
   catalogEnabled: false,
+  catalogTmdbApiKey: "",
+  catalogContentTypes: { movies: true, series: true, anime: false },
+  libraryLayout: "auto",
 };
 
 export class DuplicateProfileError extends Error {
@@ -106,8 +120,28 @@ export class ProfileService {
   }
 
   getAddonCustomization(profileId: number): AddonCustomization {
-    const row = this.db.prepare("select addon_name, addon_logo_url, addon_description, catalog_enabled from profiles where id = ?").get(profileId) as
-      | { addon_name: string | null; addon_logo_url: string | null; addon_description: string | null; catalog_enabled: number }
+    const row = this.db
+      .prepare(
+        `
+        select addon_name, addon_logo_url, addon_description, catalog_enabled,
+               catalog_tmdb_api_key, catalog_content_movies, catalog_content_series,
+               catalog_content_anime, library_layout
+        from profiles
+        where id = ?
+      `,
+      )
+      .get(profileId) as
+      | {
+          addon_name: string | null;
+          addon_logo_url: string | null;
+          addon_description: string | null;
+          catalog_enabled: number;
+          catalog_tmdb_api_key: string | null;
+          catalog_content_movies: number | null;
+          catalog_content_series: number | null;
+          catalog_content_anime: number | null;
+          library_layout: LibraryLayout | null;
+        }
       | undefined;
     if (!row) throw new ProfileNotFoundError();
     return {
@@ -115,17 +149,46 @@ export class ProfileService {
       addonLogoUrl: row.addon_logo_url?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonLogoUrl,
       addonDescription: row.addon_description?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonDescription,
       catalogEnabled: Boolean(row.catalog_enabled),
+      catalogTmdbApiKey: row.catalog_tmdb_api_key?.trim() || "",
+      catalogContentTypes: {
+        movies: row.catalog_content_movies === null ? true : Boolean(row.catalog_content_movies),
+        series: row.catalog_content_series === null ? true : Boolean(row.catalog_content_series),
+        anime: row.catalog_content_anime === null ? false : Boolean(row.catalog_content_anime),
+      },
+      libraryLayout: row.library_layout || "auto",
     };
   }
 
   saveAddonCustomization(profileId: number, customization: AddonCustomization) {
+    const contentTypes = customization.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
+    const libraryLayout = customization.libraryLayout ?? DEFAULT_ADDON_CUSTOMIZATION.libraryLayout!;
     const result = this.db
-      .prepare("update profiles set addon_name = ?, addon_logo_url = ?, addon_description = ?, catalog_enabled = ?, updated_at = ? where id = ?")
+      .prepare(
+        `
+        update profiles
+        set addon_name = ?,
+            addon_logo_url = ?,
+            addon_description = ?,
+            catalog_enabled = ?,
+            catalog_tmdb_api_key = ?,
+            catalog_content_movies = ?,
+            catalog_content_series = ?,
+            catalog_content_anime = ?,
+            library_layout = ?,
+            updated_at = ?
+        where id = ?
+      `,
+      )
       .run(
         customization.addonName,
         customization.addonLogoUrl,
         customization.addonDescription,
         customization.catalogEnabled ? 1 : 0,
+        customization.catalogTmdbApiKey?.trim() || "",
+        contentTypes.movies ? 1 : 0,
+        contentTypes.series ? 1 : 0,
+        contentTypes.anime ? 1 : 0,
+        libraryLayout,
         new Date().toISOString(),
         profileId,
       );

@@ -2,7 +2,7 @@
 
 Stremio FTP is a self-hosted Stremio source addon that lets users stream movies and series episodes from their own FTP or FTPS server. It exposes a web configuration portal where a user saves FTP credentials, scans the FTP library, and receives a private Stremio manifest URL.
 
-By default this is a stream-source addon: open a movie or episode from another Stremio catalog, and this addon appears as a streaming option when the clicked title is found in the indexed FTP library. Profiles can also enable an optional FTP catalog so indexed movies and series appear as browsable Stremio catalogs with TMDB posters and metadata.
+By default this is a stream-source addon: open a movie or episode from another Stremio catalog, and this addon appears as a streaming option when the clicked title is found in the indexed FTP library. Profiles can also enable optional FTP catalogs so indexed movies, series, anime, and unresolved files appear in Stremio with TMDB posters and metadata where possible.
 
 ## Features
 
@@ -13,8 +13,9 @@ By default this is a stream-source addon: open a movie or episode from another S
 - Optional invalid-certificate allowance for self-signed or seedbox FTP certificates
 - Movies and series episode filename parsing
 - Manual index refresh from the portal
-- Optional movie and series catalogs generated from the indexed FTP library
+- Optional movie, series, anime, and other catalogs generated from the indexed FTP library
 - Optional TMDB metadata enrichment for catalog posters, descriptions, and artwork
+- Per-profile TMDB API key override, content type toggles, and folder-layout hint
 - Private per-profile manifest URLs for Stremio
 - HTTP range proxy streaming from FTP to Stremio
 - Docker and Docker Compose deployment
@@ -24,7 +25,9 @@ By default this is a stream-source addon: open a movie or episode from another S
 
 - Use this only with media you own, are licensed to access, or are otherwise legally allowed to stream.
 - Catalogs are off by default per profile. Enable `Show indexed FTP catalog in Stremio` in the portal if you want this addon to expose browsable FTP catalogs.
+- The `Other` catalog is for indexed videos that cannot be resolved by TMDB under the enabled Movies, Series, or Anime options.
 - TMDB enrichment requires `TMDB_API_KEY`. Without it, catalog items that already have IMDb IDs can still appear with basic title/year metadata but no TMDB poster art.
+- After changing content type or layout options, run `Rescan` so files are re-parsed with the new profile settings.
 - Scans are manual. Background scheduled rescans are not implemented yet.
 - The manifest install token is shown when a profile is created. The server stores only a hash of it, so unlocking an existing profile can load FTP settings but cannot reconstruct an old install URL.
 - The generated manifest URL can stream indexed files for that profile. Keep it private.
@@ -72,7 +75,7 @@ Notes:
 - `CONFIG_ENCRYPTION_KEY` must stay stable across container rebuilds and restarts.
 - `SETUP_TOKEN` protects `/configure` and profile-management APIs when set. If omitted, the portal and profile APIs are open to anyone who can reach the hosted addon.
 - `STREMIO_FTP_SETUP_TOKEN` is accepted as an alternate name for `SETUP_TOKEN`.
-- `TMDB_API_KEY` is optional. Set it if users will enable the FTP catalog option and you want posters, backdrops, descriptions, and release years from TMDB.
+- `TMDB_API_KEY` is optional. Set it as the server default if users will enable the FTP catalog option and you want posters, backdrops, descriptions, and release years from TMDB. Users can override it per profile in the portal.
 - SQLite is stored at `$CONFIG_DIR/stremio-ftp.sqlite`.
 - `PROFILE_RATE_LIMIT_MAX` limits profile actions per client IP per rate-limit window.
 
@@ -134,7 +137,10 @@ https://stremio-ftp.example.com/configure
 4. Click `Test connection`.
 5. Click `Rescan`.
 6. Optionally enable `Show indexed FTP catalog in Stremio`.
-7. Install the generated Stremio manifest URL.
+7. If catalogs are enabled, choose the content types on the server: Movies, Series, Anime, and set a TMDB key if you do not want to use the server default.
+8. Choose the library layout hint: auto detect, organized by folders, or a single folder of files.
+9. Click `Rescan` again after changing catalog parsing options.
+10. Install the generated Stremio manifest URL.
 
 For an existing browser profile:
 
