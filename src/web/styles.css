@@ -685,17 +685,29 @@ input:-webkit-autofill:active {
     0 18px 46px -32px rgba(168, 224, 99, 0.85);
 }
 
+.library-settings {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.library-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
 .catalog-toggle {
-  margin-top: 14px;
+  margin-top: 0;
   color: var(--accent);
 }
 
-.catalog-options {
+.library-settings-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.45fr);
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.58fr) minmax(190px, 0.58fr);
   gap: 14px;
-  margin-top: 16px;
-  max-width: 760px;
 }
 
 .content-type-options {
@@ -712,6 +724,15 @@ input:-webkit-autofill:active {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.direct-stream-warning {
+  margin: 14px 0 0;
+  color: var(--amber);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.045em;
+  line-height: 1.55;
 }
 
 .manifest-url {
@@ -819,8 +840,14 @@ input:-webkit-autofill:active {
   .portal-grid,
   .field-grid,
   .profile-grid,
-  .ftp-field-grid {
+  .ftp-field-grid,
+  .library-settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .library-settings-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .span-2 {

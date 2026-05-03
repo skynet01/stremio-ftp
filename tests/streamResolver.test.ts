@@ -15,6 +15,7 @@ describe("stream resolver", () => {
           {
             id: 99,
             filename: "Show.Name.S02E05.1080p.mkv",
+            ftpPath: "/TV/Show.Name.S02E05.1080p.mkv",
             quality: "1080p",
             sizeBytes: 2254857830,
           },
@@ -47,6 +48,7 @@ describe("stream resolver", () => {
           {
             id: 99,
             filename: "Show.Name.S02E05.1080p.mkv",
+            ftpPath: "/TV/Show.Name.S02E05.1080p.mkv",
             quality: "1080p",
             sizeBytes: 2254857830,
           },
@@ -63,6 +65,7 @@ describe("stream resolver", () => {
       {
         id: 99,
         filename: "Show.Name.S02E05.1080p.mkv",
+        ftpPath: "/TV/Show.Name.S02E05.1080p.mkv",
         quality: "1080p",
         sizeBytes: 2254857830,
       },
@@ -92,6 +95,7 @@ describe("stream resolver", () => {
         {
           id: 99,
           filename: "Show.Name.S02E05.1080p.mkv",
+          ftpPath: "/TV/Show.Name.S02E05.1080p.mkv",
           quality: "1080p",
           sizeBytes: 2254857830,
         },
@@ -120,6 +124,7 @@ describe("stream resolver", () => {
       {
         id: 7,
         filename: "The.Movie.2021.2160p.mkv",
+        ftpPath: "/Movies/The.Movie.2021.2160p.mkv",
         quality: "2160p",
         sizeBytes: null,
       },
@@ -140,5 +145,47 @@ describe("stream resolver", () => {
 
     expect(findMovie).toHaveBeenCalledWith(3, "tt7654321", "movie", 2021);
     expect(streams[0]?.url).toBe("https://addon.example.test/proxy/token/7");
+  });
+
+  it("can return direct FTP URLs instead of proxy streams", async () => {
+    const streams = await resolveStreams({
+      baseUrl: "https://addon.example.test",
+      installToken: "token",
+      profileId: 1,
+      type: "movie",
+      id: "tt7654321",
+      metadata: { name: "The Movie!", releaseInfo: "2021" },
+      streamDeliveryMode: "direct",
+      ftpConfig: {
+        host: "ftp.example.test",
+        port: 2121,
+        username: "user name",
+        password: "p@ss/word",
+        tlsMode: "none",
+        allowInvalidCertificate: false,
+        roots: ["/Movies"],
+      },
+      mediaRepository: {
+        findEpisode: () => [],
+        findMovie: () => [
+          {
+            id: 7,
+            filename: "The.Movie.2021.2160p.mkv",
+            ftpPath: "/Movies/The Movie 2021.mkv",
+            quality: "2160p",
+            sizeBytes: null,
+          },
+        ],
+      },
+    });
+
+    expect(streams[0]).toMatchObject({
+      name: "FTP 2160p",
+      url: "ftp://user%20name:p%40ss%2Fword@ftp.example.test:2121/Movies/The%20Movie%202021.mkv",
+      behaviorHints: {
+        notWebReady: true,
+        filename: "The.Movie.2021.2160p.mkv",
+      },
+    });
   });
 });

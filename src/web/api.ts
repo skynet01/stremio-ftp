@@ -30,6 +30,7 @@ export type AddonCustomization = {
     anime: boolean;
   };
   libraryLayout?: "auto" | "folders" | "flat";
+  streamDeliveryMode?: "proxy" | "direct";
 };
 
 export type IndexStatus = {

@@ -26,6 +26,7 @@ export type AddonCustomization = {
   catalogTmdbApiKey?: string;
   catalogContentTypes?: CatalogContentTypes;
   libraryLayout?: LibraryLayout;
+  streamDeliveryMode?: StreamDeliveryMode;
 };
 
 export type CatalogContentTypes = {
@@ -35,6 +36,7 @@ export type CatalogContentTypes = {
 };
 
 export type LibraryLayout = "auto" | "folders" | "flat";
+export type StreamDeliveryMode = "proxy" | "direct";
 
 export type IndexStatus = {
   lastScanAt: string | null;
@@ -60,6 +62,7 @@ export const DEFAULT_ADDON_CUSTOMIZATION: AddonCustomization = {
   catalogTmdbApiKey: "",
   catalogContentTypes: { movies: true, series: true, anime: false },
   libraryLayout: "auto",
+  streamDeliveryMode: "proxy",
 };
 
 export class DuplicateProfileError extends Error {
@@ -134,7 +137,7 @@ export class ProfileService {
         `
         select addon_name, addon_logo_url, addon_description, catalog_enabled,
                catalog_tmdb_api_key, catalog_content_movies, catalog_content_series,
-               catalog_content_anime, library_layout
+               catalog_content_anime, library_layout, stream_delivery_mode
         from profiles
         where id = ?
       `,
@@ -150,6 +153,7 @@ export class ProfileService {
           catalog_content_series: number | null;
           catalog_content_anime: number | null;
           library_layout: LibraryLayout | null;
+          stream_delivery_mode: StreamDeliveryMode | null;
         }
       | undefined;
     if (!row) throw new ProfileNotFoundError();
@@ -165,12 +169,14 @@ export class ProfileService {
         anime: row.catalog_content_anime === null ? false : Boolean(row.catalog_content_anime),
       },
       libraryLayout: row.library_layout || "auto",
+      streamDeliveryMode: row.stream_delivery_mode || "proxy",
     };
   }
 
   saveAddonCustomization(profileId: number, customization: AddonCustomization) {
     const contentTypes = customization.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
     const libraryLayout = customization.libraryLayout ?? DEFAULT_ADDON_CUSTOMIZATION.libraryLayout!;
+    const streamDeliveryMode = customization.streamDeliveryMode ?? DEFAULT_ADDON_CUSTOMIZATION.streamDeliveryMode!;
     const result = this.db
       .prepare(
         `
@@ -184,6 +190,7 @@ export class ProfileService {
             catalog_content_series = ?,
             catalog_content_anime = ?,
             library_layout = ?,
+            stream_delivery_mode = ?,
             updated_at = ?
         where id = ?
       `,
@@ -198,6 +205,7 @@ export class ProfileService {
         contentTypes.series ? 1 : 0,
         contentTypes.anime ? 1 : 0,
         libraryLayout,
+        streamDeliveryMode,
         new Date().toISOString(),
         profileId,
       );

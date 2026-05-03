@@ -4,6 +4,8 @@ Stremio FTP is a self-hosted Stremio source addon that lets users stream movies 
 
 By default this is a stream-source addon: open a movie or episode from another Stremio catalog, and this addon appears as a streaming option when the clicked title is found in the indexed FTP library. Profiles can also enable optional FTP catalogs so indexed movies, series, anime, and unresolved files appear in Stremio with TMDB posters and metadata where possible.
 
+![Stremio FTP configuration portal](Screenshot.jpg)
+
 ## Features
 
 - Web configuration portal at `/configure`, optionally protected by `/configure?setup=...`
@@ -17,6 +19,7 @@ By default this is a stream-source addon: open a movie or episode from another S
 - Optional movie, series, anime, and other catalogs generated from the indexed FTP library
 - Optional TMDB metadata enrichment for catalog posters, descriptions, and artwork
 - Per-profile TMDB API key override, content type toggles, and folder-layout hint
+- Per-profile proxy or direct FTP stream delivery mode
 - Private per-profile manifest URLs for Stremio
 - HTTP range proxy streaming from FTP to Stremio
 - Docker and Docker Compose deployment
@@ -31,6 +34,7 @@ By default this is a stream-source addon: open a movie or episode from another S
 - After changing content type or layout options, run `Rescan` so files are re-parsed with the new profile settings.
 - Scans run in a background queue. New files do not appear as Stremio source options until the next manual or scheduled scan finishes.
 - Scan progress and ETA are best-effort because FTP servers do not provide a full recursive item count before traversal.
+- Proxy streaming is the default and recommended mode. Direct FTP mode sends FTP URLs to Stremio clients; it may not work in every client, can expose FTP credentials in stream URLs, and explicit FTPS support varies by client. When supported, playback bypasses addon-server bandwidth and speed limits.
 - The manifest install token is shown when a profile is created. The server stores only a hash of it, so unlocking an existing profile can load FTP settings but cannot reconstruct an old install URL.
 - The generated manifest URL can stream indexed files for that profile. Keep it private.
 - Changing `CONFIG_ENCRYPTION_KEY` after profiles exist will make saved FTP credentials undecryptable.
@@ -159,9 +163,10 @@ https://stremio-ftp.example.com/configure
 6. Optionally enable `Show indexed FTP catalog in Stremio`.
 7. If catalogs are enabled, choose the content types on the server: Movies, Series, Anime, and set a TMDB key if you do not want to use the server default.
 8. Choose the library layout hint: auto detect, organized by folders, or a single folder of files.
-9. Click `Rescan` again after changing catalog parsing options.
-10. Choose an optional rescan frequency: manual only, every 6 hours, every 12 hours, daily, or weekly.
-11. Install the generated Stremio manifest URL.
+9. Keep `Proxy through addon` stream delivery unless you specifically want Stremio clients to receive direct FTP URLs.
+10. Click `Rescan` again after changing catalog parsing options.
+11. Choose an optional rescan frequency: manual only, every 6 hours, every 12 hours, daily, or weekly.
+12. Install the generated Stremio manifest URL.
 
 For an existing browser profile:
 

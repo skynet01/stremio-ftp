@@ -16,6 +16,7 @@ export function migrate(db: Database.Database) {
       catalog_content_series integer not null default 1 check (catalog_content_series in (0, 1)),
       catalog_content_anime integer not null default 0 check (catalog_content_anime in (0, 1)),
       library_layout text not null default 'auto' check (library_layout in ('auto', 'folders', 'flat')),
+      stream_delivery_mode text not null default 'proxy' check (stream_delivery_mode in ('proxy', 'direct')),
       last_indexed_at text,
       indexed_media_count integer not null default 0 check (indexed_media_count >= 0),
       last_ftp_tested_at text,
@@ -92,6 +93,7 @@ export function migrate(db: Database.Database) {
   ensureProfileColumn(db, "catalog_content_series", "integer not null default 1");
   ensureProfileColumn(db, "catalog_content_anime", "integer not null default 0");
   ensureProfileColumn(db, "library_layout", "text not null default 'auto'");
+  ensureProfileColumn(db, "stream_delivery_mode", "text not null default 'proxy'");
   ensureProfileColumn(db, "last_indexed_at", "text");
   ensureProfileColumn(db, "indexed_media_count", "integer not null default 0");
   ensureProfileColumn(db, "last_ftp_tested_at", "text");

@@ -31,6 +31,7 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
   catalogTmdbApiKey: "",
   catalogContentTypes: { movies: true, series: true, anime: false },
   libraryLayout: "auto",
+  streamDeliveryMode: "proxy",
 };
 const GITHUB_URL = "https://github.com/skynet01/stremio-ftp";
 const APP_VERSION = __APP_VERSION__;
@@ -84,6 +85,19 @@ function formatScanTime(lastScanAt: string | null) {
 function formatConnectionStatus(status: ConnectionStatus) {
   if (!status.lastTestedAt) return "Untested";
   return `${status.ok ? "Passed" : "Failed"} ${formatScanTime(status.lastTestedAt)}`;
+}
+
+function formatNextScan(nextScheduledScanAt: string | null) {
+  if (!nextScheduledScanAt) return "Not scheduled";
+  const date = new Date(nextScheduledScanAt);
+  if (Number.isNaN(date.getTime())) return nextScheduledScanAt;
+  const diffMs = date.getTime() - Date.now();
+  if (diffMs <= 0) return "Due now";
+  const minutes = Math.ceil(diffMs / 60_000);
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 48) return `in ${hours}h`;
+  return formatScanTime(nextScheduledScanAt);
 }
 
 function formatEta(seconds: number | null) {
@@ -154,6 +168,7 @@ export function App() {
   const [catalogTmdbApiKey, setCatalogTmdbApiKey] = useState(DEFAULT_CUSTOMIZATION.catalogTmdbApiKey || "");
   const [catalogContentTypes, setCatalogContentTypes] = useState(DEFAULT_CUSTOMIZATION.catalogContentTypes!);
   const [libraryLayout, setLibraryLayout] = useState<"auto" | "folders" | "flat">(DEFAULT_CUSTOMIZATION.libraryLayout || "auto");
+  const [streamDeliveryMode, setStreamDeliveryMode] = useState<"proxy" | "direct">(DEFAULT_CUSTOMIZATION.streamDeliveryMode || "proxy");
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingLogo, setEditingLogo] = useState(false);
@@ -262,6 +277,7 @@ export function App() {
     setCatalogTmdbApiKey(customization.catalogTmdbApiKey || "");
     setCatalogContentTypes(customization.catalogContentTypes || DEFAULT_CUSTOMIZATION.catalogContentTypes!);
     setLibraryLayout(customization.libraryLayout || DEFAULT_CUSTOMIZATION.libraryLayout || "auto");
+    setStreamDeliveryMode(customization.streamDeliveryMode || DEFAULT_CUSTOMIZATION.streamDeliveryMode || "proxy");
   }
 
   function normalizedCustomization(): AddonCustomization {
@@ -273,6 +289,7 @@ export function App() {
       catalogTmdbApiKey: catalogTmdbApiKey.trim(),
       catalogContentTypes,
       libraryLayout,
+      streamDeliveryMode,
     };
   }
 
@@ -284,6 +301,7 @@ export function App() {
       customization.catalogEnabled !== DEFAULT_CUSTOMIZATION.catalogEnabled ||
       customization.catalogTmdbApiKey !== DEFAULT_CUSTOMIZATION.catalogTmdbApiKey ||
       customization.libraryLayout !== DEFAULT_CUSTOMIZATION.libraryLayout ||
+      customization.streamDeliveryMode !== DEFAULT_CUSTOMIZATION.streamDeliveryMode ||
       JSON.stringify(customization.catalogContentTypes) !== JSON.stringify(DEFAULT_CUSTOMIZATION.catalogContentTypes)
     );
   }
@@ -536,6 +554,11 @@ export function App() {
     void saveAddonBranding({ ...normalizedCustomization(), libraryLayout: nextLayout });
   }
 
+  function updateStreamDeliveryMode(nextMode: "proxy" | "direct") {
+    setStreamDeliveryMode(nextMode);
+    void saveAddonBranding({ ...normalizedCustomization(), streamDeliveryMode: nextMode });
+  }
+
   function commitCatalogTmdbApiKey() {
     void saveAddonBranding({ ...normalizedCustomization(), catalogTmdbApiKey: catalogTmdbApiKey.trim() });
   }
@@ -676,6 +699,119 @@ export function App() {
       rows: 4,
     }),
     "field-stack root-paths-field",
+  );
+
+  const librarySettings = h(
+    "div",
+    { className: "library-settings" },
+    h(
+      "div",
+      { className: "library-settings-header" },
+      h("span", { className: "field-label" }, "Library settings"),
+      h(
+        "label",
+        { className: "toggle-row catalog-toggle", htmlFor: "catalogEnabled" },
+        h("input", {
+          id: "catalogEnabled",
+          type: "checkbox",
+          checked: catalogEnabled,
+          onChange: (event) => updateCatalogEnabled(event.currentTarget.checked),
+        }),
+        "Show indexed FTP catalog in Stremio",
+      ),
+    ),
+    h(
+      "div",
+      { className: "library-settings-grid" },
+      field(
+        "TMDB API key",
+        "catalogTmdbApiKey",
+        h("input", {
+          id: "catalogTmdbApiKey",
+          className: filledClass(catalogTmdbApiKey),
+          value: catalogTmdbApiKey,
+          placeholder: "Use server default",
+          onChange: (event) => setCatalogTmdbApiKey(event.currentTarget.value),
+          onBlur: commitCatalogTmdbApiKey,
+        }),
+      ),
+      field(
+        "Library layout",
+        "libraryLayout",
+        h(
+          "select",
+          {
+            id: "libraryLayout",
+            className: filledClass(libraryLayout),
+            value: libraryLayout,
+            onChange: (event) => updateLibraryLayout((event.currentTarget as HTMLSelectElement).value as "auto" | "folders" | "flat"),
+          },
+          h("option", { value: "auto" }, "Auto detect"),
+          h("option", { value: "folders" }, "Organized by folders"),
+          h("option", { value: "flat" }, "Single folder of files"),
+        ),
+      ),
+      field(
+        "Stream delivery",
+        "streamDeliveryMode",
+        h(
+          "select",
+          {
+            id: "streamDeliveryMode",
+            className: filledClass(streamDeliveryMode),
+            value: streamDeliveryMode,
+            onChange: (event) => updateStreamDeliveryMode((event.currentTarget as HTMLSelectElement).value as "proxy" | "direct"),
+          },
+          h("option", { value: "proxy" }, "Proxy through addon"),
+          h("option", { value: "direct" }, "Direct FTP URL"),
+        ),
+      ),
+      h(
+        "div",
+        { className: "content-type-options", role: "group", "aria-label": "Server content types" },
+        h("span", { className: "field-label" }, "Server content"),
+        h(
+          "label",
+          { className: "toggle-row", htmlFor: "catalogMovies" },
+          h("input", {
+            id: "catalogMovies",
+            type: "checkbox",
+            checked: catalogContentTypes.movies,
+            onChange: (event) => updateCatalogContentType("movies", event.currentTarget.checked),
+          }),
+          "Movies",
+        ),
+        h(
+          "label",
+          { className: "toggle-row", htmlFor: "catalogSeries" },
+          h("input", {
+            id: "catalogSeries",
+            type: "checkbox",
+            checked: catalogContentTypes.series,
+            onChange: (event) => updateCatalogContentType("series", event.currentTarget.checked),
+          }),
+          "Series",
+        ),
+        h(
+          "label",
+          { className: "toggle-row", htmlFor: "catalogAnime" },
+          h("input", {
+            id: "catalogAnime",
+            type: "checkbox",
+            checked: catalogContentTypes.anime,
+            onChange: (event) => updateCatalogContentType("anime", event.currentTarget.checked),
+          }),
+          "Anime",
+        ),
+      ),
+    ),
+    streamDeliveryMode === "direct"
+      ? h(
+          "p",
+          { className: "direct-stream-warning" },
+          "Direct FTP sends FTP URLs to Stremio clients. Some clients may not support it, and credentials can be visible in the stream URL, but playback no longer depends on the addon server bandwidth.",
+        )
+      : null,
   );
 
   const installPanel = h(
@@ -819,89 +955,8 @@ export function App() {
             onClick: () => setEditingDescription(true),
           },
           h("p", null, addonDescription),
-        ),
+    ),
     h(Notice, { className: "customization-notice" }, customizationMessage),
-    h(
-      "label",
-      { className: "toggle-row catalog-toggle", htmlFor: "catalogEnabled" },
-      h("input", {
-        id: "catalogEnabled",
-        type: "checkbox",
-        checked: catalogEnabled,
-        onChange: (event) => updateCatalogEnabled(event.currentTarget.checked),
-      }),
-      "Show indexed FTP catalog in Stremio",
-    ),
-    h(
-      "div",
-      { className: "catalog-options" },
-      field(
-        "TMDB API key",
-        "catalogTmdbApiKey",
-        h("input", {
-          id: "catalogTmdbApiKey",
-          className: filledClass(catalogTmdbApiKey),
-          value: catalogTmdbApiKey,
-          placeholder: "Use server default",
-          onChange: (event) => setCatalogTmdbApiKey(event.currentTarget.value),
-          onBlur: commitCatalogTmdbApiKey,
-        }),
-      ),
-      field(
-        "Library layout",
-        "libraryLayout",
-        h(
-          "select",
-          {
-            id: "libraryLayout",
-            className: filledClass(libraryLayout),
-            value: libraryLayout,
-            onChange: (event) => updateLibraryLayout((event.currentTarget as HTMLSelectElement).value as "auto" | "folders" | "flat"),
-          },
-          h("option", { value: "auto" }, "Auto detect"),
-          h("option", { value: "folders" }, "Organized by folders"),
-          h("option", { value: "flat" }, "Single folder of files"),
-        ),
-      ),
-      h(
-        "div",
-        { className: "content-type-options", role: "group", "aria-label": "Server content types" },
-        h("span", { className: "field-label" }, "Server content"),
-        h(
-          "label",
-          { className: "toggle-row", htmlFor: "catalogMovies" },
-          h("input", {
-            id: "catalogMovies",
-            type: "checkbox",
-            checked: catalogContentTypes.movies,
-            onChange: (event) => updateCatalogContentType("movies", event.currentTarget.checked),
-          }),
-          "Movies",
-        ),
-        h(
-          "label",
-          { className: "toggle-row", htmlFor: "catalogSeries" },
-          h("input", {
-            id: "catalogSeries",
-            type: "checkbox",
-            checked: catalogContentTypes.series,
-            onChange: (event) => updateCatalogContentType("series", event.currentTarget.checked),
-          }),
-          "Series",
-        ),
-        h(
-          "label",
-          { className: "toggle-row", htmlFor: "catalogAnime" },
-          h("input", {
-            id: "catalogAnime",
-            type: "checkbox",
-            checked: catalogContentTypes.anime,
-            onChange: (event) => updateCatalogContentType("anime", event.currentTarget.checked),
-          }),
-          "Anime",
-        ),
-      ),
-    ),
     editingLogo
       ? h(
           "div",
@@ -981,6 +1036,7 @@ export function App() {
           "form",
           { className: "ftp-form" },
           h("div", { className: "field-grid ftp-field-grid" }, hostField, portField, usernameField, passwordField, securityField, rootPathsField),
+          librarySettings,
           h(
             "div",
             { className: "button-row" },
@@ -1022,6 +1078,7 @@ export function App() {
           "dl",
           { className: "status-list" },
           h("div", null, h("dt", null, "Last scan"), h("dd", null, formatScanTime(lastScanAt))),
+          h("div", null, h("dt", null, "Next scan"), h("dd", null, formatNextScan(scanSchedule.nextScheduledScanAt))),
           h("div", null, h("dt", null, "Media items"), h("dd", null, mediaItems === null ? "0" : String(mediaItems))),
           h(
             "div",

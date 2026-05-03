@@ -5,7 +5,7 @@ import { fetchCinemetaMeta } from "../metadata/cinemetaClient.js";
 import { tmdbCatalogMeta, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
 import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization, type ProfileService } from "../profiles/profileService.js";
 import { publicManifest, tokenManifest } from "./manifest.js";
-import { resolveStreams } from "./streamResolver.js";
+import { resolveStreams, streamForMatch } from "./streamResolver.js";
 
 type StremioType = "movie" | "series";
 
@@ -29,9 +29,21 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     if (!type || !profileId) return res.json({ streams: [] });
 
     const fileId = internalFileId(id);
+    const customization = profiles.getAddonCustomization(profileId);
+    const ftpConfig = profiles.getFtpConfig(profileId);
     if (fileId) {
       const files = mediaRepository.otherCatalogStreams(profileId, fileId);
-      return res.json({ streams: files.map((file) => directFileStream(config.baseUrl, installToken, file)) });
+      return res.json({
+        streams: files.map((file) =>
+          streamForMatch({
+            baseUrl: config.baseUrl,
+            installToken,
+            match: file,
+            streamDeliveryMode: customization.streamDeliveryMode,
+            ftpConfig,
+          }),
+        ),
+      });
     }
 
     try {
@@ -46,6 +58,8 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
         id,
         metadata,
         mediaRepository,
+        streamDeliveryMode: customization.streamDeliveryMode,
+        ftpConfig,
       });
       res.json({ streams });
     } catch {
@@ -197,33 +211,10 @@ function otherCatalogMeta(item: {
   };
 }
 
-function directFileStream(
-  baseUrl: string,
-  installToken: string,
-  file: { id: number; filename: string; quality: string | null; sizeBytes: number | null },
-) {
-  return {
-    name: `FTP ${file.quality ?? "Source"}`,
-    description: `${file.filename}${file.sizeBytes ? `\n${formatBytes(file.sizeBytes)}` : ""}`,
-    url: `${baseUrl.replace(/\/+$/, "")}/proxy/${encodeURIComponent(installToken)}/${encodeURIComponent(String(file.id))}`,
-    behaviorHints: {
-      notWebReady: true,
-      filename: file.filename,
-      ...(file.sizeBytes ? { videoSize: file.sizeBytes } : {}),
-    },
-  };
-}
-
 function titleCase(value: string) {
   return value
     .split(/\s+/)
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
-}
-
-function formatBytes(bytes: number): string {
-  const gib = bytes / 1024 / 1024 / 1024;
-  if (gib >= 1) return `${gib.toFixed(1)} GB`;
-  return `${(bytes / 1024 / 1024).toFixed(0)} MB`;
 }

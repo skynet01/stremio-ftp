@@ -44,6 +44,7 @@ const customizationSchema = z.object({
     })
     .default(DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!),
   libraryLayout: z.enum(["auto", "folders", "flat"]).default("auto"),
+  streamDeliveryMode: z.enum(["proxy", "direct"]).default("proxy"),
 });
 const saveCustomizationSchema = createSchema.extend({ customization: customizationSchema });
 

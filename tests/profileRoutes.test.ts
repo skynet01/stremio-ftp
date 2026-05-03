@@ -523,6 +523,7 @@ describe("profile routes", () => {
           catalogTmdbApiKey: "profile-tmdb-key",
           catalogContentTypes: { movies: true, series: false, anime: true },
           libraryLayout: "folders",
+          streamDeliveryMode: "direct",
         },
       })
       .expect(200);
@@ -542,6 +543,7 @@ describe("profile routes", () => {
         catalogTmdbApiKey: "profile-tmdb-key",
         catalogContentTypes: { movies: true, series: false, anime: true },
         libraryLayout: "folders",
+        streamDeliveryMode: "direct",
       },
     });
   });

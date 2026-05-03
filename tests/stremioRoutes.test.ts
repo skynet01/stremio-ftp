@@ -516,6 +516,59 @@ describe("stremio routes", () => {
     );
   });
 
+  it("returns direct FTP stream URLs when profile stream delivery is direct", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveFtpConfig(created.profileId, {
+      host: "ftp.example.test",
+      port: 2121,
+      username: "user name",
+      password: "p@ss/word",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/movies"],
+    });
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: false,
+      streamDeliveryMode: "direct",
+    });
+    const repository = new MediaRepository(db);
+    repository.upsertParsedFile(created.profileId, {
+      mediaKind: "movie",
+      ftpPath: "/movies/The.Matrix.1999.1080p.mkv",
+      filename: "The.Matrix.1999.1080p.mkv",
+      normalizedFilename: "the matrix 1999 1080p",
+      extension: "mkv",
+      parsedTitle: "matrix",
+      parsedYear: 1999,
+      season: null,
+      episode: null,
+      imdbId: "tt0133093",
+      quality: "1080p",
+      confidence: 95,
+      sizeBytes: 1024,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ meta: { id: "tt0133093", name: "The Matrix", releaseInfo: "1999" } }),
+      })),
+    );
+    const app = createApp(config, db);
+
+    const response = await request(app).get(`/u/${created.installUrlToken}/stream/movie/tt0133093.json`).expect(200);
+
+    expect(response.body.streams[0].url).toBe(
+      "ftp://user%20name:p%40ss%2Fword@ftp.example.test:2121/movies/The.Matrix.1999.1080p.mkv",
+    );
+  });
+
   it("returns empty streams without fetching metadata for malformed Stremio ids", async () => {
     const db = new Database(":memory:");
     migrate(db);

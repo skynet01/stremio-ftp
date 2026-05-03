@@ -46,6 +46,7 @@ const defaultCatalogOptions = {
   catalogTmdbApiKey: "",
   catalogContentTypes: { movies: true, series: true, anime: false },
   libraryLayout: "auto",
+  streamDeliveryMode: "proxy",
 };
 const idleScanStatus = {
   id: null,
@@ -99,8 +100,9 @@ describe("App", () => {
     expect(screen.getByText("Index status")).toBeTruthy();
     expect(screen.getByLabelText("TMDB API key")).toBeTruthy();
     expect(screen.getByLabelText("Library layout")).toBeTruthy();
+    expect(screen.getByLabelText("Stream delivery")).toBeTruthy();
     expect(screen.getByLabelText("Anime")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.1.0`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.2.0`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "https://github.com/skynet01/stremio-ftp" }).getAttribute("href")).toBe(
       "https://github.com/skynet01/stremio-ftp",
@@ -651,6 +653,7 @@ describe("App", () => {
     fireEvent.blur(screen.getByLabelText("TMDB API key"));
     fireEvent.click(screen.getByLabelText("Anime"));
     fireEvent.change(screen.getByLabelText("Library layout"), { target: { value: "folders" } });
+    fireEvent.change(screen.getByLabelText("Stream delivery"), { target: { value: "direct" } });
 
     await waitFor(() =>
       expect(saveCustomizationMock).toHaveBeenLastCalledWith({
@@ -665,9 +668,11 @@ describe("App", () => {
           catalogTmdbApiKey: "profile-tmdb-key",
           catalogContentTypes: { movies: true, series: true, anime: true },
           libraryLayout: "folders",
+          streamDeliveryMode: "direct",
         },
       }),
     );
+    expect(screen.getByText(/Direct FTP sends FTP URLs to Stremio clients/)).toBeTruthy();
   });
 
   it("creates the profile and saves filled FTP settings in one setup action", async () => {

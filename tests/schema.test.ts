@@ -84,7 +84,9 @@ describe("schema", () => {
     const profileColumns = db.prepare("pragma table_info(profiles)").all() as { name: string }[];
     const scanColumns = db.prepare("pragma table_info(scan_jobs)").all() as { name: string }[];
 
-    expect(profileColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["scan_interval_minutes", "next_scheduled_scan_at"]));
+    expect(profileColumns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["scan_interval_minutes", "next_scheduled_scan_at", "stream_delivery_mode"]),
+    );
     expect(scanColumns.map((column) => column.name)).toEqual(
       expect.arrayContaining([
         "profile_id",
