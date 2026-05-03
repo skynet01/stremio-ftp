@@ -141,8 +141,14 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
     };
   }
 
-  const animeEpisode = shouldParseAnimeAbsolute(ftpPath, options) ? withoutExtension.match(/^(?<title>.+?)[\s._-]+(?:-|ep(?:isode)?[\s._-]*)?(?<episode>\d{1,3})(?:v\d+)?(?:[\s._-]+|$)/i) : null;
+  const animeEpisode = shouldAttemptAnimeAbsolute(ftpPath, options)
+    ? withoutExtension.match(/^(?<title>.+?)[\s._-]+(?:-|ep(?:isode)?[\s._-]*)?(?<episode>\d{1,3})(?:v\d+)?(?:[\s._-]+|$)/i)
+    : null;
   if (animeEpisode?.groups) {
+    const parsedTitle = normalizeTitle(stripKnownTokens(animeEpisode.groups.title));
+    if (!shouldUseAnimeAbsolute(ftpPath, options, parsedTitle)) {
+      return parseMoviePath(ftpPath, filename, normalizedFilename, extension, imdbId, quality, withoutExtension, options);
+    }
     return {
       mediaKind: "series",
       catalogKind: "anime",
@@ -150,7 +156,7 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
       filename,
       normalizedFilename,
       extension,
-      parsedTitle: normalizeTitle(stripKnownTokens(animeEpisode.groups.title)),
+      parsedTitle,
       parsedYear: null,
       season: 1,
       episode: Number(animeEpisode.groups.episode),
@@ -160,6 +166,49 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
     };
   }
 
+  return parseMoviePath(ftpPath, filename, normalizedFilename, extension, imdbId, quality, withoutExtension, options);
+}
+
+function animeEnabled(options: ParseMediaOptions) {
+  return options.contentTypes?.anime === true;
+}
+
+function shouldAttemptAnimeAbsolute(ftpPath: string, options: ParseMediaOptions) {
+  if (!animeEnabled(options)) return false;
+  return options.contentTypes?.movies === false || /\banime\b/i.test(ftpPath) || options.libraryLayout === "folders";
+}
+
+function shouldUseAnimeAbsolute(ftpPath: string, options: ParseMediaOptions, parsedTitle: string) {
+  if (options.contentTypes?.movies === false || /\banime\b/i.test(ftpPath)) return true;
+  if (options.libraryLayout !== "folders") return false;
+  const folderTitle = folderTitleOf(ftpPath);
+  if (!folderTitle) return false;
+  return titleAndYearFrom(folderTitle, null, null).title === parsedTitle;
+}
+
+function seriesCatalogKind(ftpPath: string, options: ParseMediaOptions): "series" | "anime" {
+  if (animeEnabled(options) && (!options.contentTypes?.series || /\banime\b/i.test(ftpPath))) return "anime";
+  return "series";
+}
+
+function movieTitleParts(ftpPath: string, withoutExtension: string, yearIndex: number | null, fallbackYear: number | null, options: ParseMediaOptions) {
+  if (options.libraryLayout === "folders") {
+    const folderTitle = folderTitleOf(ftpPath);
+    if (folderTitle) return titleAndYearFrom(folderTitle, null, fallbackYear);
+  }
+  return titleAndYearFrom(withoutExtension, yearIndex, fallbackYear);
+}
+
+function parseMoviePath(
+  ftpPath: string,
+  filename: string,
+  normalizedFilename: string,
+  extension: string,
+  imdbId: string | null,
+  quality: string | null,
+  withoutExtension: string,
+  options: ParseMediaOptions,
+): ParsedMedia {
   const yearMatch = Array.from(withoutExtension.matchAll(/\b(19\d{2}|20\d{2})\b/g)).at(-1);
   const year = yearMatch?.[1];
   const movieTitle = movieTitleParts(ftpPath, withoutExtension, yearMatch?.index ?? null, year ? Number(year) : null, options);
@@ -179,28 +228,6 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
     quality,
     confidence: imdbId ? 90 : year ? 70 : 45,
   };
-}
-
-function animeEnabled(options: ParseMediaOptions) {
-  return options.contentTypes?.anime === true;
-}
-
-function shouldParseAnimeAbsolute(ftpPath: string, options: ParseMediaOptions) {
-  if (!animeEnabled(options)) return false;
-  return options.contentTypes?.movies === false || /\banime\b/i.test(ftpPath);
-}
-
-function seriesCatalogKind(ftpPath: string, options: ParseMediaOptions): "series" | "anime" {
-  if (animeEnabled(options) && (!options.contentTypes?.series || /\banime\b/i.test(ftpPath))) return "anime";
-  return "series";
-}
-
-function movieTitleParts(ftpPath: string, withoutExtension: string, yearIndex: number | null, fallbackYear: number | null, options: ParseMediaOptions) {
-  if (options.libraryLayout === "folders") {
-    const folderTitle = folderTitleOf(ftpPath);
-    if (folderTitle) return titleAndYearFrom(folderTitle, null, fallbackYear);
-  }
-  return titleAndYearFrom(withoutExtension, yearIndex, fallbackYear);
 }
 
 function titleAndYearFrom(value: string, yearIndex: number | null, fallbackYear: number | null) {

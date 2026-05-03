@@ -100,6 +100,21 @@ describe("media parser", () => {
     });
   });
 
+  it("parses folder-mode anime absolute episodes when file title matches the folder", () => {
+    expect(
+      parseMediaPath("/Afro Samurai (2007)/Afro Samurai.01_3DFF_FSBS.mkv", {
+        contentTypes: { movies: true, series: true, anime: true },
+        libraryLayout: "folders",
+      }),
+    ).toMatchObject({
+      mediaKind: "series",
+      catalogKind: "anime",
+      parsedTitle: "afro samurai",
+      season: 1,
+      episode: 1,
+    });
+  });
+
   it("does not classify 3d movie filenames as anime when anime and movies are both enabled", () => {
     expect(
       parseMediaPath("/3D Movies/Ready Player One 2018/Ready.Player.One.2018.3D.BluRay.Half-SBS.x.DTS-HD.MA.7.1-FGT_1080p_hevc.mkv", {
