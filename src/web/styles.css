@@ -687,20 +687,31 @@ input:-webkit-autofill:active {
 
 .library-settings {
   margin-top: 24px;
-  padding-top: 22px;
-  border-top: 1px solid var(--line-soft);
+  border: 1px solid rgba(168, 224, 99, 0.13);
+  border-radius: 12px;
+  padding: 22px;
+  background:
+    linear-gradient(180deg, rgba(168, 224, 99, 0.055), rgba(168, 224, 99, 0.014)),
+    rgba(255, 255, 255, 0.018);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035) inset;
 }
 
 .library-settings-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
+  margin-bottom: 18px;
+}
+
+.library-settings-header h3 {
+  margin: 0;
+  color: var(--cream);
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.05;
 }
 
 .catalog-toggle {
-  margin-top: 0;
+  margin-top: 8px;
   color: var(--accent);
 }
 
@@ -712,10 +723,27 @@ input:-webkit-autofill:active {
 
 .content-type-options {
   grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.server-content-row {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.server-content-toggles {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 16px;
+  gap: 10px 18px;
+}
+
+.server-content-toggles .toggle-row {
+  margin-top: 0;
 }
 
 .field-label {
@@ -759,6 +787,18 @@ input:-webkit-autofill:active {
   font-size: 0.74rem;
   letter-spacing: 0;
   text-transform: none;
+}
+
+.install-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.install-notice {
+  margin: 0;
 }
 
 .setup-token-panel {
@@ -845,8 +885,13 @@ input:-webkit-autofill:active {
     grid-template-columns: 1fr;
   }
 
-  .library-settings-header {
-    align-items: flex-start;
+  .server-content-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .install-action-row {
+    align-items: stretch;
     flex-direction: column;
   }
 
@@ -868,12 +913,14 @@ input:-webkit-autofill:active {
   }
 
   .button-row,
-  .button-grid {
+  .button-grid,
+  .install-action-row {
     justify-content: stretch;
   }
 
   .button-row > *,
-  .button-grid > * {
+  .button-grid > *,
+  .install-action-row > * {
     flex: 1 1 100%;
   }
 }

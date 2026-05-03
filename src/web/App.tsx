@@ -707,18 +707,7 @@ export function App() {
     h(
       "div",
       { className: "library-settings-header" },
-      h("span", { className: "field-label" }, "Library settings"),
-      h(
-        "label",
-        { className: "toggle-row catalog-toggle", htmlFor: "catalogEnabled" },
-        h("input", {
-          id: "catalogEnabled",
-          type: "checkbox",
-          checked: catalogEnabled,
-          onChange: (event) => updateCatalogEnabled(event.currentTarget.checked),
-        }),
-        "Show indexed FTP catalog in Stremio",
-      ),
+      h("h3", null, "Library settings"),
     ),
     h(
       "div",
@@ -769,39 +758,58 @@ export function App() {
       h(
         "div",
         { className: "content-type-options", role: "group", "aria-label": "Server content types" },
-        h("span", { className: "field-label" }, "Server content"),
         h(
-          "label",
-          { className: "toggle-row", htmlFor: "catalogMovies" },
-          h("input", {
-            id: "catalogMovies",
-            type: "checkbox",
-            checked: catalogContentTypes.movies,
-            onChange: (event) => updateCatalogContentType("movies", event.currentTarget.checked),
-          }),
-          "Movies",
+          "div",
+          { className: "server-content-row" },
+          h("span", { className: "field-label" }, "Server content"),
+          h(
+            "div",
+            { className: "server-content-toggles" },
+            h(
+              "label",
+              { className: "toggle-row", htmlFor: "catalogMovies" },
+              h("input", {
+                id: "catalogMovies",
+                type: "checkbox",
+                checked: catalogContentTypes.movies,
+                onChange: (event) => updateCatalogContentType("movies", event.currentTarget.checked),
+              }),
+              "Movies",
+            ),
+            h(
+              "label",
+              { className: "toggle-row", htmlFor: "catalogSeries" },
+              h("input", {
+                id: "catalogSeries",
+                type: "checkbox",
+                checked: catalogContentTypes.series,
+                onChange: (event) => updateCatalogContentType("series", event.currentTarget.checked),
+              }),
+              "Series",
+            ),
+            h(
+              "label",
+              { className: "toggle-row", htmlFor: "catalogAnime" },
+              h("input", {
+                id: "catalogAnime",
+                type: "checkbox",
+                checked: catalogContentTypes.anime,
+                onChange: (event) => updateCatalogContentType("anime", event.currentTarget.checked),
+              }),
+              "Anime",
+            ),
+          ),
         ),
         h(
           "label",
-          { className: "toggle-row", htmlFor: "catalogSeries" },
+          { className: "toggle-row catalog-toggle", htmlFor: "catalogEnabled" },
           h("input", {
-            id: "catalogSeries",
+            id: "catalogEnabled",
             type: "checkbox",
-            checked: catalogContentTypes.series,
-            onChange: (event) => updateCatalogContentType("series", event.currentTarget.checked),
+            checked: catalogEnabled,
+            onChange: (event) => updateCatalogEnabled(event.currentTarget.checked),
           }),
-          "Series",
-        ),
-        h(
-          "label",
-          { className: "toggle-row", htmlFor: "catalogAnime" },
-          h("input", {
-            id: "catalogAnime",
-            type: "checkbox",
-            checked: catalogContentTypes.anime,
-            onChange: (event) => updateCatalogContentType("anime", event.currentTarget.checked),
-          }),
-          "Anime",
+          "Show indexed FTP catalog in Stremio",
         ),
       ),
     ),
@@ -836,7 +844,6 @@ export function App() {
     ),
     profileReady
       ? [
-          h(Notice, { key: "message" }, profileMessage),
           manifestUrl
             ? h(
                 "div",
@@ -861,7 +868,8 @@ export function App() {
             : null,
           h(
             "div",
-            { key: "actions", className: "button-row" },
+            { key: "actions", className: "install-action-row" },
+            h(Notice, { key: "message", className: "install-notice" }, profileMessage),
             stremioInstallUrl ? h("a", { className: "primary-button button-link", href: stremioInstallUrl }, "Install in Stremio") : null,
           ),
         ]

@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/web/App";
 import {
@@ -98,10 +98,16 @@ describe("App", () => {
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/");
     expect(screen.getByRole("button", { name: "Test connection" })).toBeTruthy();
     expect(screen.getByText("Index status")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Library settings" })).toBeTruthy();
     expect(screen.getByLabelText("TMDB API key")).toBeTruthy();
     expect(screen.getByLabelText("Library layout")).toBeTruthy();
     expect(screen.getByLabelText("Stream delivery")).toBeTruthy();
-    expect(screen.getByLabelText("Anime")).toBeTruthy();
+    const serverContent = screen.getByRole("group", { name: "Server content types" });
+    expect(within(serverContent).getByText("Server content")).toBeTruthy();
+    expect(within(serverContent).getByLabelText("Movies")).toBeTruthy();
+    expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
+    expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
+    expect(within(serverContent).getByLabelText("Show indexed FTP catalog in Stremio")).toBeTruthy();
     expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.2.0`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "https://github.com/skynet01/stremio-ftp" }).getAttribute("href")).toBe(
@@ -227,6 +233,7 @@ describe("App", () => {
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/Movies\n/TV");
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toBeTruthy();
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toHaveClass("notification");
+    expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.").parentElement).toHaveClass("install-action-row");
     expect(screen.getByText("42")).toBeTruthy();
     expect(screen.getByText(/May 02, 2026, 3:45 PM/)).toBeTruthy();
     expect(screen.getByText(/Passed May 02, 2026, 3:40 PM/)).toBeTruthy();
