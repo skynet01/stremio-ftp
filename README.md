@@ -8,7 +8,7 @@ By default this is a stream-source addon: open a movie or episode from another S
 
 ## Features
 
-- Web configuration portal at `/configure`, optionally protected by `/configure?setup=...`
+- Web configuration portal at `/configure`, with setup-token entry for private deployments
 - Per-user profiles using browser UID plus passphrase, with no signup system
 - Encrypted FTP credential storage
 - FTP, explicit FTPS, and implicit FTPS support through `basic-ftp`
@@ -66,6 +66,7 @@ PORT=7000
 CONFIG_DIR=/config
 SETUP_TOKEN=replace-with-a-stable-random-secret-at-least-16-characters
 STREMIO_FTP_SETUP_TOKEN=alternate-name-for-SETUP_TOKEN
+ALLOW_PUBLIC_PROFILE_API=false
 TMDB_API_KEY=optional-tmdb-api-key-for-catalog-metadata
 LOG_LEVEL=info
 CRAWLER_CONCURRENCY=2
@@ -85,8 +86,9 @@ Notes:
 
 - `BASE_URL` must be the public origin, without a trailing slash.
 - `CONFIG_ENCRYPTION_KEY` must stay stable across container rebuilds and restarts.
-- `SETUP_TOKEN` protects `/configure` and profile-management APIs when set. If omitted, the portal and profile APIs are open to anyone who can reach the hosted addon.
+- `SETUP_TOKEN` protects `/configure` and profile-management APIs. It is required unless `ALLOW_PUBLIC_PROFILE_API=true`.
 - `STREMIO_FTP_SETUP_TOKEN` is accepted as an alternate name for `SETUP_TOKEN`.
+- `ALLOW_PUBLIC_PROFILE_API=true` preserves the older no-token behavior for trusted or otherwise restricted deployments. If enabled, anyone who can reach the hosted addon can create profiles and submit FTP settings.
 - `TMDB_API_KEY` is optional. Set it as the server default if users will enable the FTP catalog option and you want posters, backdrops, descriptions, and release years from TMDB. Users can override it per profile in the portal.
 - SQLite is stored at `$CONFIG_DIR/stremio-ftp.sqlite`.
 - `PROFILE_RATE_LIMIT_MAX` limits profile actions per client IP per rate-limit window.
@@ -105,6 +107,7 @@ Create `.env`:
 BASE_URL=https://stremio-ftp.example.com
 CONFIG_ENCRYPTION_KEY=replace-with-output-from-openssl-rand-hex-32
 SETUP_TOKEN=replace-with-output-from-openssl-rand-hex-24
+ALLOW_PUBLIC_PROFILE_API=false
 TMDB_API_KEY=
 PORT=7000
 CONFIG_DIR=/config
@@ -141,17 +144,13 @@ Check health:
 curl https://stremio-ftp.example.com/health
 ```
 
-Open the portal. If `SETUP_TOKEN` is set:
-
-```text
-https://stremio-ftp.example.com/configure?setup=YOUR_SETUP_TOKEN
-```
-
-If `SETUP_TOKEN` is empty:
+Open the portal:
 
 ```text
 https://stremio-ftp.example.com/configure
 ```
+
+If `SETUP_TOKEN` is set, enter it in the portal unlock form. Older `?setup=...` links are still imported by the browser and immediately removed from the address bar, but new deployments should avoid putting setup tokens in URLs.
 
 ## Portal Workflow
 
@@ -170,10 +169,10 @@ https://stremio-ftp.example.com/configure
 
 For an existing browser profile:
 
-1. Open `/configure?setup=YOUR_SETUP_TOKEN`, or `/configure` when no setup token is configured.
+1. Open `/configure` and enter the setup token if prompted.
 2. Enter the same browser UID and passphrase.
 3. Click `Unlock profile`.
-4. Saved FTP settings load into the form, including the saved password for the unlocked profile.
+4. Saved FTP settings load into the form. The password field stays blank even when a saved password exists.
 5. Leave the password field blank to keep the saved password when testing or saving.
 
 The portal remembers the last browser UID, passphrase, and manifest URL in that browser's local storage so repeat visits load the profile automatically. Use this only on trusted devices.
@@ -284,7 +283,8 @@ Requirements:
 3. Create a persistent .env file with:
    - BASE_URL=https://YOUR_DOMAIN_HERE
    - CONFIG_ENCRYPTION_KEY=<generate with: openssl rand -hex 32>
-   - SETUP_TOKEN=<optional; generate with: openssl rand -hex 24 if the portal should be private>
+   - SETUP_TOKEN=<generate with: openssl rand -hex 24>
+   - ALLOW_PUBLIC_PROFILE_API=false
    - TMDB_API_KEY=<optional; required for TMDB catalog posters and rich metadata>
    - PORT=7000
    - CONFIG_DIR=/config
@@ -298,12 +298,11 @@ Requirements:
 5. Put the app behind HTTPS using Nginx, Caddy, Traefik, or the existing reverse proxy.
 6. Make sure the public URL forwards to the container and /health returns JSON.
 7. Make sure outbound egress from the server allows FTP/FTPS to the user FTP host and port.
-8. Print the setup portal URL. If SETUP_TOKEN is set, use:
-   https://YOUR_DOMAIN_HERE/configure?setup=<SETUP_TOKEN>
-   If SETUP_TOKEN is not set, use:
+8. Print the setup portal URL:
    https://YOUR_DOMAIN_HERE/configure
+   Tell the operator to enter SETUP_TOKEN in the portal unlock form.
 9. Do not rotate CONFIG_ENCRYPTION_KEY after profiles are created.
-10. Do not expose SETUP_TOKEN publicly when it is configured.
+10. Do not expose SETUP_TOKEN publicly. Only set ALLOW_PUBLIC_PROFILE_API=true for trusted or network-restricted deployments that intentionally need the older public profile API behavior.
 
 After setup, verify:
 - curl https://YOUR_DOMAIN_HERE/health

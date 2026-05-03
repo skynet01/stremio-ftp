@@ -14,6 +14,7 @@ const baseConfig: AppConfig = {
   sqlitePath: ":memory:",
   encryptionKey: "0123456789abcdef0123456789abcdef",
   setupToken: null,
+  allowPublicProfileApi: true,
   tmdbApiKey: null,
   port: 7000,
   logLevel: "error",

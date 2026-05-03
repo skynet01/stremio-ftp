@@ -4,6 +4,7 @@ export type AppConfig = {
   sqlitePath: string;
   encryptionKey: string;
   setupToken: string | null;
+  allowPublicProfileApi: boolean;
   tmdbApiKey: string | null;
   port: number;
   logLevel: "debug" | "info" | "warn" | "error";
@@ -41,12 +42,22 @@ function portValue(env: Record<string, string | undefined>, key: string, fallbac
   return parsed;
 }
 
+function booleanValue(env: Record<string, string | undefined>, key: string, fallback: boolean): boolean {
+  const raw = env[key]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  throw new Error(`${key} must be true or false`);
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env): AppConfig {
   const baseUrl = requireValue(env, "BASE_URL").replace(/\/+$/, "");
   const encryptionKey = requireValue(env, "CONFIG_ENCRYPTION_KEY");
   if (encryptionKey.length < 32) throw new Error("CONFIG_ENCRYPTION_KEY must be at least 32 characters");
   const setupToken = (env.SETUP_TOKEN || env.STREMIO_FTP_SETUP_TOKEN)?.trim() || null;
   if (setupToken && setupToken.length < 16) throw new Error("SETUP_TOKEN must be at least 16 characters");
+  const allowPublicProfileApi = booleanValue(env, "ALLOW_PUBLIC_PROFILE_API", false);
+  if (!setupToken && !allowPublicProfileApi) throw new Error("SETUP_TOKEN is required unless ALLOW_PUBLIC_PROFILE_API=true");
   const tmdbApiKey = env.TMDB_API_KEY?.trim() || null;
 
   const configDir = env.CONFIG_DIR?.trim() || "/config";
@@ -59,6 +70,7 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     sqlitePath: `${configDir.replace(/\/+$/, "")}/stremio-ftp.sqlite`,
     encryptionKey,
     setupToken,
+    allowPublicProfileApi,
     tmdbApiKey,
     port: portValue(env, "PORT", 7000),
     logLevel,

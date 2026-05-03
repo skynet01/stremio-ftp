@@ -15,6 +15,7 @@ const config: AppConfig = {
   sqlitePath: ":memory:",
   encryptionKey: "0123456789abcdef0123456789abcdef",
   setupToken: "setup-secret-123",
+  allowPublicProfileApi: false,
   port: 7000,
   logLevel: "error",
   crawlerConcurrency: 2,

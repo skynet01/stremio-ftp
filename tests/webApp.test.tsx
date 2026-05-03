@@ -13,6 +13,8 @@ import {
   saveCustomization,
   saveFtpSettings,
   saveScanSchedule,
+  saveSetupToken,
+  setupTokenAvailable,
   testFtpSettings,
   unlockProfile,
 } from "../src/web/api";
@@ -27,6 +29,8 @@ vi.mock("../src/web/api", () => ({
   saveCustomization: vi.fn(),
   saveFtpSettings: vi.fn(),
   saveScanSchedule: vi.fn(),
+  saveSetupToken: vi.fn(),
+  setupTokenAvailable: vi.fn(),
   testFtpSettings: vi.fn(),
   unlockProfile: vi.fn(),
 }));
@@ -40,6 +44,8 @@ const rescanIndexMock = vi.mocked(rescanIndex);
 const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
 const saveScanScheduleMock = vi.mocked(saveScanSchedule);
+const saveSetupTokenMock = vi.mocked(saveSetupToken);
+const setupTokenAvailableMock = vi.mocked(setupTokenAvailable);
 const testFtpSettingsMock = vi.mocked(testFtpSettings);
 const unlockProfileMock = vi.mocked(unlockProfile);
 const defaultCatalogOptions = {
@@ -84,6 +90,9 @@ describe("App", () => {
     saveCustomizationMock.mockReset();
     saveFtpSettingsMock.mockReset();
     saveScanScheduleMock.mockReset();
+    saveSetupTokenMock.mockReset();
+    setupTokenAvailableMock.mockReset();
+    setupTokenAvailableMock.mockReturnValue(false);
     testFtpSettingsMock.mockReset();
     unlockProfileMock.mockReset();
   });
@@ -190,7 +199,7 @@ describe("App", () => {
         host: "ftp.example.test",
         port: 2121,
         username: "user",
-        password: "secret",
+        password: "",
         passwordConfigured: true,
         tlsMode: "explicit",
         allowInvalidCertificate: true,
@@ -241,7 +250,8 @@ describe("App", () => {
     expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
     expect(screen.getByDisplayValue("ftp.example.test")).toHaveClass("filled-control");
     expect(screen.getByDisplayValue("2121")).toBeTruthy();
-    expect(screen.getByDisplayValue("secret")).toBeTruthy();
+    expect(screen.queryByDisplayValue("secret")).toBeNull();
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/Movies\n/TV");
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toBeTruthy();
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toHaveClass("notification");
@@ -378,7 +388,7 @@ describe("App", () => {
         host: "ftp.example.test",
         port: 13017,
         username: "user",
-        password: "secret",
+        password: "",
         passwordConfigured: true,
         tlsMode: "explicit",
         allowInvalidCertificate: true,
@@ -407,7 +417,8 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Unlock profile" })).toBeNull();
     expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
-    expect(screen.getByDisplayValue("secret")).toBeTruthy();
+    expect(screen.queryByDisplayValue("secret")).toBeNull();
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
     expect(screen.getByText("7")).toBeTruthy();
     expect(screen.getByText(/May 02, 2026, 3:45 PM/)).toBeTruthy();
     expect(screen.getByText(/Passed May 02, 2026, 3:40 PM/)).toBeTruthy();
@@ -421,6 +432,28 @@ describe("App", () => {
     expect(screen.queryByLabelText("Host")).toBeNull();
     expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
     await waitFor(() => expect(loadSetupStatusMock).toHaveBeenCalled());
+  });
+
+  it("accepts a setup token on /configure without keeping it in the URL", async () => {
+    window.history.pushState({}, "", "/configure");
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Setup token"), { target: { value: "setup-secret-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Unlock configuration" }));
+
+    await waitFor(() => expect(saveSetupTokenMock).toHaveBeenCalledWith("setup-secret-123"));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Setup token required" })).toBeNull());
+    expect(screen.getByLabelText("Host")).toBeTruthy();
+  });
+
+  it("uses an existing setup token session on /configure", async () => {
+    setupTokenAvailableMock.mockReturnValue(true);
+    window.history.pushState({}, "", "/configure");
+    render(<App />);
+
+    expect(screen.queryByRole("heading", { name: "Setup token required" })).toBeNull();
+    expect(screen.getByLabelText("Host")).toBeTruthy();
+    expect(loadSetupStatusMock).not.toHaveBeenCalled();
   });
 
   it("allows /configure without a setup token when the server has no setup token configured", async () => {

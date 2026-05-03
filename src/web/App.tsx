@@ -9,6 +9,8 @@ import {
   saveCustomization,
   saveFtpSettings,
   saveScanSchedule,
+  saveSetupToken,
+  setupTokenAvailable,
   testFtpSettings,
   unlockProfile,
 } from "./api.js";
@@ -89,7 +91,7 @@ function browserUid() {
 }
 
 export function App() {
-  const hasSetupToken = Boolean(new URLSearchParams(window.location.search).get("setup"));
+  const [hasSetupToken, setHasSetupToken] = useState(() => setupTokenAvailable());
   const needsSetupProbe = window.location.pathname === "/configure" && !hasSetupToken;
   const [setupTokenRequired, setSetupTokenRequired] = useState<boolean | null>(() => (needsSetupProbe ? null : false));
   const showSetupTokenMessage = window.location.pathname === "/configure" && !hasSetupToken && setupTokenRequired !== false;
@@ -195,6 +197,13 @@ export function App() {
   function updateRecoveryUid(value: string) {
     setRecoveryUid(value);
     window.localStorage.setItem(STORAGE_KEYS.recoveryUid, value);
+  }
+
+  function unlockConfiguration(setupToken: string) {
+    const trimmed = setupToken.trim();
+    saveSetupToken(trimmed);
+    setHasSetupToken(Boolean(trimmed));
+    setSetupTokenRequired(false);
   }
 
   function applyLoadedFtpConfig(ftpConfig: LoadedFtpConfig) {
@@ -576,7 +585,7 @@ export function App() {
         onCommitDescription={commitAddonDescription}
         onCommitLogo={commitAddonLogo}
       />
-      {showSetupTokenMessage ? <SetupTokenPanel /> : null}
+      {showSetupTokenMessage ? <SetupTokenPanel onSubmit={unlockConfiguration} /> : null}
       {showSetupTokenMessage ? null : (
         <div className="portal-grid">
           <FtpSettingsPanel

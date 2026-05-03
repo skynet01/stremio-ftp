@@ -25,6 +25,7 @@ describe("loadConfig", () => {
     expect(config.scanSchedulerIntervalMs).toBe(60000);
     expect(config.scanProgressAverageItems).toBe(2000);
     expect(config.setupToken).toBe("setup-secret-123");
+    expect(config.allowPublicProfileApi).toBe(false);
     expect(config.tmdbApiKey).toBe("tmdb-key");
   });
 
@@ -32,6 +33,7 @@ describe("loadConfig", () => {
     const config = loadConfig({
       BASE_URL: "https://example.test",
       CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      SETUP_TOKEN: "setup-secret-123",
       SCAN_GLOBAL_CONCURRENCY: "3",
       SCAN_QUEUE_MAX: "75",
       SCAN_COOLDOWN_MS: "120000",
@@ -48,13 +50,34 @@ describe("loadConfig", () => {
     expect(config.scanProgressAverageItems).toBe(5000);
   });
 
-  it("allows setup token to be omitted", () => {
+  it("rejects an omitted setup token unless public profile APIs are explicitly enabled", () => {
+    expect(() =>
+      loadConfig({
+        BASE_URL: "https://example.test",
+        CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      }),
+    ).toThrow("SETUP_TOKEN is required unless ALLOW_PUBLIC_PROFILE_API=true");
+  });
+
+  it("allows setup token to be omitted with explicit public profile API opt-in", () => {
     const config = loadConfig({
       BASE_URL: "https://example.test",
       CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      ALLOW_PUBLIC_PROFILE_API: "true",
     });
 
     expect(config.setupToken).toBeNull();
+    expect(config.allowPublicProfileApi).toBe(true);
+  });
+
+  it("rejects invalid public profile API opt-in values", () => {
+    expect(() =>
+      loadConfig({
+        BASE_URL: "https://example.test",
+        CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+        ALLOW_PUBLIC_PROFILE_API: "yes",
+      }),
+    ).toThrow("ALLOW_PUBLIC_PROFILE_API must be true or false");
   });
 
   it("rejects missing required values", () => {

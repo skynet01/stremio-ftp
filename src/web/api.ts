@@ -66,13 +66,41 @@ export type ConnectionStatus = {
   ok: boolean | null;
 };
 
-const setupToken = new URLSearchParams(window.location.search).get("setup") || "";
+const SETUP_TOKEN_STORAGE_KEY = "stremio-ftp-setup-token";
+let setupToken = loadSetupToken();
+
+export function setupTokenAvailable() {
+  return Boolean(setupToken);
+}
+
+export function saveSetupToken(token: string) {
+  setupToken = token.trim();
+  if (setupToken) {
+    window.sessionStorage.setItem(SETUP_TOKEN_STORAGE_KEY, setupToken);
+  } else {
+    window.sessionStorage.removeItem(SETUP_TOKEN_STORAGE_KEY);
+  }
+}
 
 function authHeaders() {
   return {
     "Content-Type": "application/json",
     ...(setupToken ? { "x-setup-token": setupToken } : {}),
   };
+}
+
+function loadSetupToken() {
+  const params = new URLSearchParams(window.location.search);
+  const queryToken = params.get("setup")?.trim() || "";
+  if (queryToken) {
+    window.sessionStorage.setItem(SETUP_TOKEN_STORAGE_KEY, queryToken);
+    params.delete("setup");
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+    window.history.replaceState(window.history.state, "", nextUrl);
+    return queryToken;
+  }
+  return window.sessionStorage.getItem(SETUP_TOKEN_STORAGE_KEY)?.trim() || "";
 }
 
 export type FtpConfigRequest = {

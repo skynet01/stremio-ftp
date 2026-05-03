@@ -13,6 +13,7 @@ function config(): AppConfig {
     sqlitePath: ":memory:",
     encryptionKey: "0123456789abcdef0123456789abcdef",
     setupToken: "setup-secret-123",
+    allowPublicProfileApi: false,
     port: 7000,
     logLevel: "error",
     crawlerConcurrency: 2,
@@ -311,7 +312,7 @@ describe("profile routes", () => {
         host: "ftp.example.test",
         port: 2121,
         username: "user",
-        password: "secret",
+        password: "",
         passwordConfigured: true,
         tlsMode: "explicit",
         allowInvalidCertificate: true,
@@ -349,7 +350,7 @@ describe("profile routes", () => {
     });
   });
 
-  it("allows profile APIs without a setup token when setup protection is disabled", async () => {
+  it("rejects profile APIs without a setup token by default", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const app = createApp({ ...config(), setupToken: null }, db);
@@ -357,9 +358,35 @@ describe("profile routes", () => {
     const response = await request(app)
       .post("/api/profile")
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(403);
+
+    expect(response.body).toEqual({ error: "Invalid setup token" });
+  });
+
+  it("allows profile APIs without a setup token when public profile APIs are explicitly enabled", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), setupToken: null, allowPublicProfileApi: true }, db);
+
+    const response = await request(app)
+      .post("/api/profile")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(201);
 
     expect(response.body.manifestUrl).toMatch(/^https:\/\/addon\.example\.test\/u\/.+\/manifest\.json$/);
+  });
+
+  it("does not accept setup tokens from query strings on profile APIs", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    const response = await request(app)
+      .post("/api/profile?setup=setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(403);
+
+    expect(response.body).toEqual({ error: "Invalid setup token" });
   });
 
   it("preserves the stored FTP password when editing with a blank password", async () => {
@@ -419,6 +446,7 @@ describe("profile routes", () => {
       host: "ftp2.example.test",
       port: 2121,
       username: "user2",
+      password: "",
       passwordConfigured: true,
       tlsMode: "none",
       roots: ["/TV"],

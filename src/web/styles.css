@@ -56,14 +56,18 @@ textarea {
 input,
 select,
 textarea {
-  font-family: "DM Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 input.filled-control,
 select.filled-control,
 textarea.filled-control {
   color: var(--accent);
-  text-shadow: 0 0 12px rgba(168, 224, 99, 0.26);
+  border-bottom-color: rgba(168, 224, 99, 0.78);
+  box-shadow:
+    0 8px 22px -18px rgba(168, 224, 99, 0.95),
+    inset 0 -1px 0 rgba(168, 224, 99, 0.46);
+  text-shadow: 0 0 12px rgba(168, 224, 99, 0.3);
 }
 
 button,
@@ -260,7 +264,7 @@ textarea:focus-visible,
   max-width: min(780px, 100%);
   border-bottom-color: var(--accent);
   color: var(--cream);
-  font-family: "DM Sans", system-ui, sans-serif;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: clamp(3rem, 8vw, 6.4rem);
   font-weight: 650;
   line-height: 0.9;
@@ -448,6 +452,7 @@ textarea {
   outline: 0;
   transition:
     border-color 160ms ease,
+    box-shadow 160ms ease,
     color 160ms ease;
 }
 
@@ -810,6 +815,22 @@ input:-webkit-autofill:active {
 
 .setup-token-panel {
   max-width: 760px;
+}
+
+.setup-token-form {
+  display: grid;
+  max-width: 420px;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.setup-token-form label {
+  color: var(--cream-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 .site-footer {

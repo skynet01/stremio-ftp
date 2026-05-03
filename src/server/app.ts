@@ -53,7 +53,7 @@ export function createApp(
   scanScheduler.unref();
   app.use("/api/profile", requireSetupToken(config));
   app.get("/api/setup", (_req, res) => {
-    res.json({ setupTokenRequired: Boolean(config.setupToken) });
+    res.json({ setupTokenRequired: Boolean(config.setupToken) || !config.allowPublicProfileApi });
   });
   app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue));
   app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
@@ -89,7 +89,8 @@ function stremioCors(): express.RequestHandler {
 
 function requireSetupToken(config: AppConfig): express.RequestHandler {
   return (req, res, next) => {
-    if (!config.setupToken) return next();
+    if (!config.setupToken && config.allowPublicProfileApi) return next();
+    if (!config.setupToken) return res.status(403).json({ error: "Invalid setup token" });
     const provided = setupTokenFromRequest(req);
     if (!provided || !safeEqual(provided, config.setupToken)) {
       return res.status(403).json({ error: "Invalid setup token" });
@@ -100,9 +101,7 @@ function requireSetupToken(config: AppConfig): express.RequestHandler {
 
 function setupTokenFromRequest(req: express.Request) {
   const header = req.header("x-setup-token");
-  if (header) return header;
-  const query = req.query.setup;
-  return typeof query === "string" ? query : null;
+  return header || null;
 }
 
 function safeEqual(a: string, b: string) {
