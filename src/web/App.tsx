@@ -31,6 +31,7 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
   libraryLayout: "auto",
 };
 const GITHUB_URL = "https://github.com/skynet01/stremio-ftp";
+const APP_VERSION = __APP_VERSION__;
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
   return h("span", { className: `badge badge-${tone}` }, children);
@@ -969,7 +970,7 @@ export function App() {
     h(
       "footer",
       { className: "site-footer" },
-      h("p", null, `Copyright ${currentYear} Stremio FTP Addon.`),
+      h("p", null, `Copyright ${currentYear} Stremio FTP Addon. v${APP_VERSION}`),
       h("p", null, "Not responsible for files, streams, or other content hosted on connected servers."),
       h("a", { href: GITHUB_URL, target: "_blank", rel: "noreferrer" }, GITHUB_URL),
     ),
