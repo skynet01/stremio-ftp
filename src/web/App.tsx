@@ -30,6 +30,7 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
   catalogContentTypes: { movies: true, series: true, anime: false },
   libraryLayout: "auto",
 };
+const GITHUB_URL = "https://github.com/skynet01/stremio-ftp";
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
   return h("span", { className: `badge badge-${tone}` }, children);
@@ -123,6 +124,7 @@ export function App() {
   const [customizationMessage, setCustomizationMessage] = useState("Click the title, subtitle, or avatar to customize the Stremio addon.");
 
   const profileReady = profileState === "created" || profileState === "unlocked";
+  const currentYear = new Date().getFullYear();
 
   useEffect(() => {
     if (!needsSetupProbe) return;
@@ -963,6 +965,13 @@ export function App() {
         ),
       ),
       installPanel,
+    ),
+    h(
+      "footer",
+      { className: "site-footer" },
+      h("p", null, `Copyright ${currentYear} Stremio FTP Addon.`),
+      h("p", null, "Not responsible for files, streams, or other content hosted on connected servers."),
+      h("a", { href: GITHUB_URL, target: "_blank", rel: "noreferrer" }, GITHUB_URL),
     ),
   );
 }

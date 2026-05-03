@@ -71,6 +71,11 @@ describe("App", () => {
     expect(screen.getByLabelText("TMDB API key")).toBeTruthy();
     expect(screen.getByLabelText("Library layout")).toBeTruthy();
     expect(screen.getByLabelText("Anime")).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon.`)).toBeTruthy();
+    expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "https://github.com/skynet01/stremio-ftp" }).getAttribute("href")).toBe(
+      "https://github.com/skynet01/stremio-ftp",
+    );
   });
 
   it("renders when crypto.randomUUID is unavailable", () => {

@@ -695,6 +695,38 @@ input:-webkit-autofill:active {
   max-width: 760px;
 }
 
+.site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 18px;
+  margin-top: clamp(24px, 4vw, 46px);
+  padding-top: 22px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  line-height: 1.55;
+}
+
+.site-footer p {
+  margin: 0;
+}
+
+.site-footer a {
+  color: var(--accent);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.site-footer a:hover {
+  color: var(--accent-2);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
 .toggle-row {
   display: inline-flex;
   align-items: center;
