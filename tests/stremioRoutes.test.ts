@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/server/app";
@@ -6,6 +7,7 @@ import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
 import { MediaRepository } from "../src/server/media/mediaRepository";
 import { ProfileService } from "../src/server/profiles/profileService";
+import { stremioRoutes } from "../src/server/stremio/routes";
 
 const config: AppConfig = {
   baseUrl: "https://addon.example.test",
@@ -25,6 +27,7 @@ const config: AppConfig = {
 
 describe("stremio routes", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -608,5 +611,35 @@ describe("stremio routes", () => {
 
     expect(response.body).toEqual({ streams: [] });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("logs unexpected stream resolution errors without exposing secrets", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    const app = express();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ meta: { id: "tt0133093", name: "The Matrix", releaseInfo: "1999" } }),
+      })),
+    );
+
+    app.use(
+      stremioRoutes(config, service, {
+        findMovie: () => {
+          throw new Error("resolver failed token=abcdefghijklmnopqrstuvwxyz123456");
+        },
+      } as unknown as MediaRepository),
+    );
+
+    const response = await request(app).get(`/u/${created.installUrlToken}/stream/movie/tt0133093.json`).expect(200);
+
+    expect(response.body).toEqual({ streams: [] });
+    expect(errorSpy).toHaveBeenCalledWith("Stream resolution error:", expect.stringContaining("resolver failed"));
+    expect(String(errorSpy.mock.calls[0][1])).not.toContain("abcdefghijklmnopqrstuvwxyz123456");
   });
 });

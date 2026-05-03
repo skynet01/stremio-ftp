@@ -4,7 +4,7 @@ Stremio FTP is a self-hosted Stremio source addon that lets users stream movies 
 
 By default this is a stream-source addon: open a movie or episode from another Stremio catalog, and this addon appears as a streaming option when the clicked title is found in the indexed FTP library. Profiles can also enable optional FTP catalogs so indexed movies, series, anime, and unresolved files appear in Stremio with TMDB posters and metadata where possible.
 
-![Stremio FTP configuration portal](Screenshot.jpg)
+![Stremio FTP configuration portal](https://raw.githubusercontent.com/skynet01/stremio-ftp/7c391e985c34338b441c8f61ff2b252a75ae9b12/Screenshot.jpg)
 
 ## Features
 

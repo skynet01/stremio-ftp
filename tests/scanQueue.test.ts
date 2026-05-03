@@ -71,6 +71,16 @@ async function waitForStatus(queue: ScanQueue, profileId: number, status: string
   throw new Error(`Timed out waiting for ${status}`);
 }
 
+async function waitForEstimatedStatus(queue: ScanQueue, profileId: number) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    const current = queue.getProfileScanStatus(profileId);
+    if (current.status === "running" && current.estimatedSecondsRemaining !== null) return current;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for scan estimate");
+}
+
 describe("ScanQueue", () => {
   it("locks duplicate scans for the same profile while a scan is running", async () => {
     let listCalls = 0;
@@ -141,6 +151,29 @@ describe("ScanQueue", () => {
     expect(finished.mediaItems).toBe(2);
     expect(finished.finishedAt).toEqual(expect.any(String));
     expect(profileService.getIndexStatus(profileId).mediaItems).toBe(2);
+  });
+
+  it("caps scan progress ETA at one day", async () => {
+    const releaseList = deferred<Array<{ name: string; path: string; type: "file"; size: number }>>();
+    const { profileService, queue } = createHarness(
+      async () => ({
+        list: async () => releaseList.promise,
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, scanProgressAverageItems: 1_000_000 },
+    );
+    const profileId = await createProfileWithFtp(profileService);
+
+    queue.enqueueProfileScan(profileId, "manual");
+
+    try {
+      const running = await waitForEstimatedStatus(queue, profileId);
+      expect(running.estimatedSecondsRemaining).toBe(86_400);
+    } finally {
+      releaseList.resolve([]);
+      await waitForStatus(queue, profileId, "succeeded").catch(() => undefined);
+    }
   });
 
   it("enqueues due scheduled scans and advances the next scheduled time", async () => {

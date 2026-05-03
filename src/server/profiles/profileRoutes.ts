@@ -2,7 +2,6 @@ import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
-import type { MediaRepository } from "../media/mediaRepository.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
 import { DEFAULT_ADDON_CUSTOMIZATION, DuplicateProfileError, ProfileService } from "./profileService.js";
 
@@ -59,7 +58,6 @@ function urls(baseUrl: string, token: string) {
 export function profileRoutes(
   config: AppConfig,
   service: ProfileService,
-  mediaRepository: MediaRepository,
   ftpClientFactory: FtpClientFactory,
   scanQueue: ScanQueue,
 ) {

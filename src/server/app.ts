@@ -55,7 +55,7 @@ export function createApp(
   app.get("/api/setup", (_req, res) => {
     res.json({ setupTokenRequired: Boolean(config.setupToken) });
   });
-  app.use("/api", profileRoutes(config, profileService, mediaRepository, ftpClientFactory, scanQueue));
+  app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue));
   app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 

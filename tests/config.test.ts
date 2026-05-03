@@ -95,4 +95,15 @@ describe("loadConfig", () => {
       ).toThrow("PORT must be a positive integer");
     }
   });
+
+  it("lists valid log levels when rejecting invalid LOG_LEVEL", () => {
+    expect(() =>
+      loadConfig({
+        BASE_URL: "https://example.test",
+        CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+        SETUP_TOKEN: "setup-secret-123",
+        LOG_LEVEL: "verbose",
+      }),
+    ).toThrow("LOG_LEVEL must be one of: debug, info, warn, error");
+  });
 });

@@ -1,5 +1,4 @@
-import { Copy, Github, RefreshCw } from "lucide-react";
-import { createElement as h, type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createProfile,
   loadCustomization,
@@ -14,10 +13,24 @@ import {
   unlockProfile,
 } from "./api.js";
 import { APP_CHANGELOG } from "./changelog.js";
+import { ChangelogDrawer } from "./components/ChangelogDrawer.js";
+import { Footer } from "./components/Footer.js";
+import { FtpSettingsPanel } from "./components/FtpSettingsPanel.js";
+import { HeroPanel } from "./components/HeroPanel.js";
+import { IndexStatusPanel } from "./components/IndexStatusPanel.js";
+import { InstallPanel } from "./components/InstallPanel.js";
+import { SetupTokenPanel } from "./components/SetupTokenPanel.js";
+import { Topbar } from "./components/Topbar.js";
+import { scanIsActive } from "./components/ui.js";
 import type { AddonCustomization, ConnectionStatus, IndexStatus, LoadedFtpConfig, ScanSchedule, ScanStatus } from "./api.js";
+import type { ChangelogEntry } from "./types.js";
 
-type StatusTone = "green" | "amber" | "red" | "gray";
-type ChangelogEntry = { hash: string; subject: string };
+type ProfileState = "new" | "creating" | "created" | "unlocked" | "error";
+type IndexState = "idle" | "working" | "ready" | "error";
+type TlsMode = "none" | "explicit" | "implicit";
+type LibraryLayout = "auto" | "folders" | "flat";
+type StreamDeliveryMode = "proxy" | "direct";
+
 const STORAGE_KEYS = {
   recoveryUid: "stremio-ftp-recovery-uid",
   passphrase: "stremio-ftp-passphrase",
@@ -60,64 +73,6 @@ const DEFAULT_SCAN_SCHEDULE: ScanSchedule = {
 };
 const GITHUB_COMMITS_API = "https://api.github.com/repos/skynet01/stremio-ftp/commits?per_page=6";
 
-function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
-  return h("span", { className: `badge badge-${tone}` }, children);
-}
-
-function field(label: string, id: string, control: ReactNode, className = "field-stack") {
-  return h("div", { className }, h("label", { htmlFor: id }, label), control);
-}
-
-function Notice({ children, className = "" }: { children?: ReactNode; className?: string }) {
-  return h("p", { className: `notice notification ${className}`.trim(), role: "status" }, children);
-}
-
-function formatScanTime(lastScanAt: string | null) {
-  if (!lastScanAt) return "Never";
-  const date = new Date(lastScanAt);
-  if (Number.isNaN(date.getTime())) return lastScanAt;
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function formatConnectionStatus(status: ConnectionStatus) {
-  if (!status.lastTestedAt) return "Untested";
-  return `${status.ok ? "Passed" : "Failed"} ${formatScanTime(status.lastTestedAt)}`;
-}
-
-function formatNextScan(nextScheduledScanAt: string | null) {
-  if (!nextScheduledScanAt) return "Not scheduled";
-  const date = new Date(nextScheduledScanAt);
-  if (Number.isNaN(date.getTime())) return nextScheduledScanAt;
-  const diffMs = date.getTime() - Date.now();
-  if (diffMs <= 0) return "Due now";
-  const minutes = Math.ceil(diffMs / 60_000);
-  if (minutes < 60) return `in ${minutes}m`;
-  const hours = Math.ceil(minutes / 60);
-  if (hours < 48) return `in ${hours}h`;
-  return formatScanTime(nextScheduledScanAt);
-}
-
-function formatEta(seconds: number | null) {
-  if (seconds === null) return "Estimating";
-  if (seconds < 60) return `${seconds}s left`;
-  return `${Math.ceil(seconds / 60)}m left`;
-}
-
-function scanIsActive(status: ScanStatus) {
-  return status.status === "queued" || status.status === "running";
-}
-
-function filledClass(value: string | number | boolean | null | undefined, extra = "") {
-  const filled = typeof value === "boolean" ? value : String(value ?? "").trim().length > 0;
-  return [extra, filled ? "filled-control" : ""].filter(Boolean).join(" ");
-}
-
 function browserUid() {
   const cryptoApi = globalThis.crypto;
   if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
@@ -150,13 +105,13 @@ export function App() {
   const [port, setPort] = useState("21");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [tlsMode, setTlsMode] = useState("explicit");
+  const [tlsMode, setTlsMode] = useState<TlsMode>("explicit");
   const [allowInvalidCertificate, setAllowInvalidCertificate] = useState(false);
   const [rootPaths, setRootPaths] = useState("/");
-  const [profileState, setProfileState] = useState<"new" | "creating" | "created" | "unlocked" | "error">("new");
+  const [profileState, setProfileState] = useState<ProfileState>("new");
   const [profileMessage, setProfileMessage] = useState("Create or unlock this browser profile to install the addon.");
   const [ftpMessage, setFtpMessage] = useState("Save FTP settings, then refresh the index.");
-  const [indexState, setIndexState] = useState<"idle" | "working" | "ready" | "error">("idle");
+  const [indexState, setIndexState] = useState<IndexState>("idle");
   const [mediaItems, setMediaItems] = useState<number | null>(null);
   const [lastScanAt, setLastScanAt] = useState<string | null>(null);
   const [scanStatus, setScanStatus] = useState<ScanStatus>(DEFAULT_SCAN_STATUS);
@@ -170,8 +125,8 @@ export function App() {
   const [catalogEnabled, setCatalogEnabled] = useState(DEFAULT_CUSTOMIZATION.catalogEnabled);
   const [catalogTmdbApiKey, setCatalogTmdbApiKey] = useState(DEFAULT_CUSTOMIZATION.catalogTmdbApiKey || "");
   const [catalogContentTypes, setCatalogContentTypes] = useState(DEFAULT_CUSTOMIZATION.catalogContentTypes!);
-  const [libraryLayout, setLibraryLayout] = useState<"auto" | "folders" | "flat">(DEFAULT_CUSTOMIZATION.libraryLayout || "auto");
-  const [streamDeliveryMode, setStreamDeliveryMode] = useState<"proxy" | "direct">(DEFAULT_CUSTOMIZATION.streamDeliveryMode || "proxy");
+  const [libraryLayout, setLibraryLayout] = useState<LibraryLayout>(DEFAULT_CUSTOMIZATION.libraryLayout || "auto");
+  const [streamDeliveryMode, setStreamDeliveryMode] = useState<StreamDeliveryMode>(DEFAULT_CUSTOMIZATION.streamDeliveryMode || "proxy");
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingLogo, setEditingLogo] = useState(false);
@@ -194,8 +149,6 @@ export function App() {
     const rememberedPassphrase = window.localStorage.getItem(STORAGE_KEYS.passphrase);
     if (!rememberedPassphrase) return;
     void restoreRememberedProfile(rememberedPassphrase);
-    // Restore once from this browser's persisted session.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setupTokenRequired]);
 
   useEffect(() => {
@@ -204,8 +157,6 @@ export function App() {
       void refreshScanStatus();
     }, 1000);
     return () => window.clearInterval(timer);
-    // Poll only while the current scan is active.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileReady, scanStatus.status]);
 
   useEffect(() => {
@@ -221,7 +172,7 @@ export function App() {
             const message = typeof item?.commit?.message === "string" ? item.commit.message.split("\n")[0] : "";
             return sha && message ? { hash: sha, subject: message } : null;
           })
-          .filter(Boolean) as ChangelogEntry[];
+          .filter((entry): entry is ChangelogEntry => Boolean(entry));
         if (commits.length) setChangelogEntries(commits);
       })
       .catch(() => undefined);
@@ -241,6 +192,11 @@ export function App() {
     rememberInstall(manifest, stremioInstall);
   }
 
+  function updateRecoveryUid(value: string) {
+    setRecoveryUid(value);
+    window.localStorage.setItem(STORAGE_KEYS.recoveryUid, value);
+  }
+
   function applyLoadedFtpConfig(ftpConfig: LoadedFtpConfig) {
     setHost(ftpConfig.host);
     setPort(String(ftpConfig.port));
@@ -249,11 +205,7 @@ export function App() {
     setTlsMode(ftpConfig.tlsMode);
     setAllowInvalidCertificate(ftpConfig.allowInvalidCertificate);
     setRootPaths(ftpConfig.roots.join("\n"));
-    setFtpMessage(
-      ftpConfig.passwordConfigured
-        ? "Saved FTP settings loaded."
-        : "Saved FTP settings loaded.",
-    );
+    setFtpMessage("Saved FTP settings loaded.");
   }
 
   function applyLoadedIndexStatus(indexStatus: IndexStatus) {
@@ -462,7 +414,7 @@ export function App() {
       port: Number(port),
       username,
       password,
-      tlsMode: tlsMode as "none" | "explicit" | "implicit",
+      tlsMode,
       allowInvalidCertificate,
       roots: rootPaths
         .split(/\r?\n|,/)
@@ -580,12 +532,12 @@ export function App() {
     void saveAddonBranding({ ...normalizedCustomization(), catalogContentTypes: nextContentTypes });
   }
 
-  function updateLibraryLayout(nextLayout: "auto" | "folders" | "flat") {
+  function updateLibraryLayout(nextLayout: LibraryLayout) {
     setLibraryLayout(nextLayout);
     void saveAddonBranding({ ...normalizedCustomization(), libraryLayout: nextLayout });
   }
 
-  function updateStreamDeliveryMode(nextMode: "proxy" | "direct") {
+  function updateStreamDeliveryMode(nextMode: StreamDeliveryMode) {
     setStreamDeliveryMode(nextMode);
     void saveAddonBranding({ ...normalizedCustomization(), streamDeliveryMode: nextMode });
   }
@@ -594,652 +546,100 @@ export function App() {
     void saveAddonBranding({ ...normalizedCustomization(), catalogTmdbApiKey: catalogTmdbApiKey.trim() });
   }
 
-  const passphraseField = field(
-    "Passphrase",
-    "passphrase",
-    h("input", {
-      id: "passphrase",
-      type: "password",
-      className: filledClass(passphrase),
-      value: passphrase,
-      autoComplete: "current-password",
-      onChange: (event) => setPassphrase(event.currentTarget.value),
-      placeholder: "Minimum 8 characters",
-    }),
-  );
-
-  const recoveryField = field(
-    "Recovery UID",
-    "recoveryUid",
-    h(
-      "div",
-      { className: "inline-control" },
-      h("input", {
-        id: "recoveryUid",
-        className: filledClass(recoveryUid),
-        value: recoveryUid,
-        onChange: (event) => {
-          setRecoveryUid(event.currentTarget.value);
-          window.localStorage.setItem(STORAGE_KEYS.recoveryUid, event.currentTarget.value);
-        },
-      }),
-      h(
-        "button",
-        {
-          type: "button",
-          className: "icon-button",
-          "aria-label": "Copy recovery UID",
-          onClick: () => void navigator.clipboard?.writeText(recoveryUid),
-        },
-        h(Copy, { size: 18, "aria-hidden": true }),
-      ),
-    ),
-  );
-
-  const hostField = field(
-    "Host",
-    "host",
-    h("input", {
-      id: "host",
-      className: filledClass(host),
-      value: host,
-      onChange: (event) => setHost(event.currentTarget.value),
-      placeholder: "ftp.example.com",
-    }),
-    "field-stack host-field",
-  );
-
-  const portField = field(
-    "Port",
-    "port",
-    h("input", {
-      id: "port",
-      inputMode: "numeric",
-      className: filledClass(port),
-      value: port,
-      onChange: (event) => setPort(event.currentTarget.value),
-    }),
-    "field-stack port-field",
-  );
-
-  const usernameField = field(
-    "Username",
-    "username",
-    h("input", {
-      id: "username",
-      className: filledClass(username),
-      value: username,
-      autoComplete: "username",
-      onChange: (event) => setUsername(event.currentTarget.value),
-    }),
-    "field-stack username-field",
-  );
-
-  const passwordField = field(
-    "Password",
-    "password",
-    h("input", {
-      id: "password",
-      type: "password",
-      className: filledClass(password),
-      value: password,
-      autoComplete: "new-password",
-      onChange: (event) => setPassword(event.currentTarget.value),
-      placeholder: "FTP account password",
-    }),
-    "field-stack password-field",
-  );
-
-  const securityField = h(
-    "div",
-    { className: "field-stack tls-field" },
-    h("label", { htmlFor: "tlsMode" }, "TLS mode"),
-    h(
-      "select",
-      {
-        id: "tlsMode",
-        className: filledClass(tlsMode),
-        value: tlsMode,
-        onChange: (event) => setTlsMode((event.currentTarget as HTMLSelectElement).value),
-      },
-      h("option", { value: "none" }, "Disabled"),
-      h("option", { value: "explicit" }, "Explicit TLS"),
-      h("option", { value: "implicit" }, "Implicit TLS"),
-    ),
-    h(
-      "label",
-      { className: "toggle-row compact-toggle-row", htmlFor: "allowInvalidCertificate" },
-      h("input", {
-        id: "allowInvalidCertificate",
-        type: "checkbox",
-        checked: allowInvalidCertificate,
-        onChange: (event) => setAllowInvalidCertificate(event.currentTarget.checked),
-      }),
-      "Allow invalid certificate",
-    ),
-  );
-
-  const rootPathsField = field(
-    "Root paths",
-    "rootPaths",
-    h("textarea", {
-      id: "rootPaths",
-      className: filledClass(rootPaths),
-      value: rootPaths,
-      onChange: (event) => setRootPaths((event.currentTarget as HTMLTextAreaElement).value),
-      rows: 4,
-    }),
-    "field-stack root-paths-field",
-  );
-
-  const librarySettings = h(
-    "div",
-    { className: "library-settings" },
-    h(
-      "div",
-      { className: "library-settings-header" },
-      h("h3", null, "Library settings"),
-    ),
-    h(
-      "div",
-      { className: "library-settings-grid" },
-      field(
-        "TMDB API key",
-        "catalogTmdbApiKey",
-        h("input", {
-          id: "catalogTmdbApiKey",
-          className: filledClass(catalogTmdbApiKey),
-          value: catalogTmdbApiKey,
-          placeholder: "Use server default",
-          onChange: (event) => setCatalogTmdbApiKey(event.currentTarget.value),
-          onBlur: commitCatalogTmdbApiKey,
-        }),
-      ),
-      field(
-        "Library layout",
-        "libraryLayout",
-        h(
-          "select",
-          {
-            id: "libraryLayout",
-            className: filledClass(libraryLayout),
-            value: libraryLayout,
-            onChange: (event) => updateLibraryLayout((event.currentTarget as HTMLSelectElement).value as "auto" | "folders" | "flat"),
-          },
-          h("option", { value: "auto" }, "Auto detect"),
-          h("option", { value: "folders" }, "Organized by folders"),
-          h("option", { value: "flat" }, "Single folder of files"),
-        ),
-      ),
-      field(
-        "Stream delivery",
-        "streamDeliveryMode",
-        h(
-          "select",
-          {
-            id: "streamDeliveryMode",
-            className: filledClass(streamDeliveryMode),
-            value: streamDeliveryMode,
-            onChange: (event) => updateStreamDeliveryMode((event.currentTarget as HTMLSelectElement).value as "proxy" | "direct"),
-          },
-          h("option", { value: "proxy" }, "Proxy through addon"),
-          h("option", { value: "direct" }, "Direct FTP URL"),
-        ),
-      ),
-      h(
-        "div",
-        { className: "content-type-options", role: "group", "aria-label": "Server content types" },
-        h(
-          "div",
-          { className: "server-content-row" },
-          h("span", { className: "field-label" }, "Server content"),
-          h(
-            "div",
-            { className: "server-content-toggles" },
-            h(
-              "label",
-              { className: "toggle-row", htmlFor: "catalogMovies" },
-              h("input", {
-                id: "catalogMovies",
-                type: "checkbox",
-                checked: catalogContentTypes.movies,
-                onChange: (event) => updateCatalogContentType("movies", event.currentTarget.checked),
-              }),
-              "Movies",
-            ),
-            h(
-              "label",
-              { className: "toggle-row", htmlFor: "catalogSeries" },
-              h("input", {
-                id: "catalogSeries",
-                type: "checkbox",
-                checked: catalogContentTypes.series,
-                onChange: (event) => updateCatalogContentType("series", event.currentTarget.checked),
-              }),
-              "Series",
-            ),
-            h(
-              "label",
-              { className: "toggle-row", htmlFor: "catalogAnime" },
-              h("input", {
-                id: "catalogAnime",
-                type: "checkbox",
-                checked: catalogContentTypes.anime,
-                onChange: (event) => updateCatalogContentType("anime", event.currentTarget.checked),
-              }),
-              "Anime",
-            ),
-          ),
-        ),
-        h(
-          "label",
-          { className: "toggle-row catalog-toggle", htmlFor: "catalogEnabled" },
-          h("input", {
-            id: "catalogEnabled",
-            type: "checkbox",
-            checked: catalogEnabled,
-            onChange: (event) => updateCatalogEnabled(event.currentTarget.checked),
-          }),
-          "Show indexed FTP catalog in Stremio",
-        ),
-      ),
-    ),
-    streamDeliveryMode === "direct"
-      ? h(
-          "p",
-          { className: "direct-stream-warning" },
-          "Direct FTP sends FTP URLs to Stremio clients. Some clients may not support it, and credentials can be visible in the stream URL, but playback no longer depends on the addon server bandwidth.",
-        )
-      : null,
-  );
-
-  const installPanel = h(
-    "section",
-    { className: "panel install-panel", "aria-labelledby": "install-heading" },
-    h(
-      "div",
-      { className: "panel-header" },
-      h(
-        "div",
-        null,
-        h("span", { className: "section-label" }, "Install"),
-        h("h2", { id: "install-heading" }, profileReady ? "Manifest" : "Profile setup"),
-        h(
-          "p",
-          null,
-          profileReady
-            ? "Use this private manifest URL in Stremio."
-            : "Enter your passphrase once. This browser will load the profile automatically next time.",
-        ),
-      ),
-    ),
-    profileReady
-      ? [
-          manifestUrl
-            ? h(
-                "div",
-                { key: "manifest", className: "manifest-url" },
-                h("span", null, "Manifest URL"),
-                h(
-                  "div",
-                  { className: "inline-control" },
-                  h("code", null, manifestUrl),
-                  h(
-                    "button",
-                    {
-                      type: "button",
-                      className: "icon-button",
-                      "aria-label": "Copy manifest URL",
-                      onClick: () => void navigator.clipboard?.writeText(manifestUrl),
-                    },
-                    h(Copy, { size: 18, "aria-hidden": true }),
-                  ),
-                ),
-              )
-            : null,
-          h(
-            "div",
-            { key: "actions", className: "install-action-row" },
-            h(Notice, { key: "message", className: "install-notice" }, profileMessage),
-            stremioInstallUrl ? h("a", { className: "primary-button button-link", href: stremioInstallUrl }, "Install in Stremio") : null,
-          ),
-        ]
-      : [
-          h("div", { key: "fields", className: "profile-grid" }, recoveryField, passphraseField),
-          h(Notice, { key: "message" }, profileMessage),
-          h(
-            "div",
-            { key: "actions", className: "button-row" },
-            h(
-              "button",
-              {
-                type: "button",
-                className: "primary-button",
-                "aria-label": "Create profile",
-                disabled: profileState === "creating",
-                onClick: () => void saveProfile(),
-              },
-              profileState === "creating" ? "Working..." : "Create profile",
-            ),
-            h(
-              "button",
-              {
-                type: "button",
-                className: "secondary-button",
-                "aria-label": "Unlock profile",
-                disabled: profileState === "creating",
-                onClick: () => void unlockExistingProfile(),
-              },
-              "Unlock profile",
-            ),
-          ),
-        ],
-  );
-
-  const hero = h(
-    "section",
-    { className: "hero" },
-    h("span", { className: "section-label" }, "Private source addon"),
-    editingName
-      ? h("input", {
-          className: filledClass(addonName, "hero-title-input"),
-          "aria-label": "Addon name",
-          value: addonName,
-          autoFocus: true,
-          maxLength: 80,
-          onChange: (event) => setAddonName(event.currentTarget.value),
-          onBlur: commitAddonName,
-          onKeyDown: (event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") {
-              setAddonName(addonName.trim() || DEFAULT_CUSTOMIZATION.addonName);
-              setEditingName(false);
-            }
-          },
-        })
-      : h(
-          "button",
-          {
-            type: "button",
-            className: "editable-title",
-            "aria-label": "Edit addon name",
-            onClick: () => setEditingName(true),
-          },
-          h("h1", null, addonName),
-        ),
-    editingDescription
-      ? h("textarea", {
-          className: filledClass(addonDescription, "hero-description-input"),
-          "aria-label": "Addon description",
-          value: addonDescription,
-          autoFocus: true,
-          maxLength: 260,
-          rows: 3,
-          onChange: (event) => setAddonDescription((event.currentTarget as HTMLTextAreaElement).value),
-          onBlur: commitAddonDescription,
-          onKeyDown: (event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") {
-              setAddonDescription(addonDescription.trim() || DEFAULT_CUSTOMIZATION.addonDescription);
-              setEditingDescription(false);
-            }
-          },
-        })
-      : h(
-          "button",
-          {
-            type: "button",
-            className: "editable-description",
-            "aria-label": "Edit addon description",
-            onClick: () => setEditingDescription(true),
-          },
-          h("p", null, addonDescription),
-    ),
-    h(Notice, { className: "customization-notice" }, customizationMessage),
-    editingLogo
-      ? h(
-          "div",
-          { className: "avatar-editor" },
-          h("label", { htmlFor: "addonLogoUrl" }, "Addon avatar URL"),
-          h("input", {
-            id: "addonLogoUrl",
-            className: filledClass(addonLogoUrl),
-            value: addonLogoUrl,
-            autoFocus: true,
-            placeholder: "https://example.com/logo.png",
-            onChange: (event) => setAddonLogoUrl(event.currentTarget.value),
-            onBlur: commitAddonLogo,
-            onKeyDown: (event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
-              if (event.key === "Escape") setEditingLogo(false);
-            },
-          }),
-        )
-      : null,
-  );
-
-  const setupTokenPanel = h(
-    "section",
-    { className: "panel setup-token-panel", "aria-labelledby": "setup-token-heading" },
-    h("span", { className: "section-label" }, "Configuration locked"),
-    h("h2", { id: "setup-token-heading" }, "Setup token required"),
-    h(Notice, null, "Open the configure page with your setup token to manage FTP credentials and generate a private Stremio manifest."),
-  );
-
-  return h(
-    "main",
-    { className: "app-shell" },
-    h(
-      "header",
-      { className: "topbar" },
-      h(
-        "div",
-        { className: "brand-lockup" },
-        h(
-          "button",
-          {
-            type: "button",
-            className: "brand-mark",
-            "aria-label": "Edit addon avatar",
-            style: addonLogoUrl ? { backgroundImage: `url(${addonLogoUrl})` } : undefined,
-            onClick: () => setEditingLogo(true),
-          },
-          addonLogoUrl ? h("span", { className: "visually-hidden" }, "Addon avatar") : "TVA",
-        ),
-        h("div", null, h("p", { className: "brand-title" }, addonName), h("p", null, "Configure your private Stremio source")),
-      ),
-      h(StatusBadge, { tone: profileReady ? "green" : "gray" }, profileState === "created" ? "Ready to install" : profileState === "unlocked" ? "Unlocked" : "Not installed"),
-    ),
-    hero,
-    showSetupTokenMessage ? setupTokenPanel : null,
-    showSetupTokenMessage
-      ? null
-      : h(
-      "div",
-      { className: "portal-grid" },
-      h(
-        "section",
-        { className: "panel ftp-panel", "aria-labelledby": "ftp-heading" },
-        h(
-          "div",
-          { className: "panel-header" },
-          h(
-            "div",
-            null,
-            h("span", { className: "section-label" }, "Source"),
-            h("h2", { id: "ftp-heading" }, "FTP settings"),
-            h("p", null, "Add the server, choose the folders to scan, then save it to your profile."),
-          ),
-        ),
-        h(
-          "form",
-          { className: "ftp-form" },
-          h("div", { className: "field-grid ftp-field-grid" }, hostField, portField, usernameField, passwordField, securityField, rootPathsField),
-          librarySettings,
-          h(
-            "div",
-            { className: "button-row" },
-            h(
-              "button",
-              { type: "button", className: "secondary-button", disabled: !profileReady || indexState === "working", onClick: () => void testConnection() },
-              "Test connection",
-            ),
-            h(
-              "button",
-              {
-                type: "button",
-                className: "primary-button",
-                "aria-label": "Save FTP settings",
-                disabled: !profileReady || indexState === "working",
-                onClick: () => void saveFtp(),
-              },
-              "Save FTP settings",
-            ),
-          ),
-        ),
-      ),
-      h(
-        "section",
-        { className: "panel status-panel", "aria-labelledby": "status-heading" },
-        h(
-          "div",
-          { className: "panel-header" },
-          h(
-            "div",
-            null,
-            h("span", { className: "section-label" }, "Library"),
-            h("h2", { id: "status-heading" }, "Index status"),
-            h("p", null, "Refresh after changing FTP folders."),
-          ),
-          h(StatusBadge, { tone: indexState === "ready" ? "green" : indexState === "error" ? "red" : indexState === "working" ? "amber" : "gray" }, indexState === "working" ? "Scanning" : indexState === "ready" ? "Ready" : indexState === "error" ? "Needs attention" : "Idle"),
-        ),
-        h(
-          "dl",
-          { className: "status-list" },
-          h("div", null, h("dt", null, "Last scan"), h("dd", null, formatScanTime(lastScanAt))),
-          h("div", null, h("dt", null, "Next scan"), h("dd", null, formatNextScan(scanSchedule.nextScheduledScanAt))),
-          h("div", null, h("dt", null, "Media items"), h("dd", null, mediaItems === null ? "0" : String(mediaItems))),
-          h(
-            "div",
-            null,
-            h("dt", null, "Connection"),
-            h(
-              "dd",
-              null,
-              h(
-                StatusBadge,
-                {
-                  tone: connectionStatus.ok === true ? "green" : connectionStatus.ok === false ? "red" : host ? "gray" : "red",
-                },
-                connectionStatus.lastTestedAt ? formatConnectionStatus(connectionStatus) : host ? "Untested" : "Missing host",
-              ),
-            ),
-          ),
-        ),
-        h(
-          "div",
-          { className: "scan-controls" },
-          field(
-            "Rescan frequency",
-            "scanInterval",
-            h(
-              "select",
-              {
-                id: "scanInterval",
-                className: filledClass(scanSchedule.intervalMinutes),
-                value: String(scanSchedule.intervalMinutes),
-                disabled: !profileReady,
-                onChange: (event) => void updateScanSchedule(Number((event.currentTarget as HTMLSelectElement).value)),
-              },
-              h("option", { value: "0" }, "Manual only"),
-              h("option", { value: "360" }, "Every 6 hours"),
-              h("option", { value: "720" }, "Every 12 hours"),
-              h("option", { value: "1440" }, "Daily"),
-              h("option", { value: "10080" }, "Weekly"),
-            ),
-          ),
-          h(
-            "div",
-            { className: "scan-progress-block" },
-            h(
-              "div",
-              { className: "scan-progress-meta" },
-              h("span", null, scanStatus.status === "idle" ? "No active scan" : scanStatus.status),
-              h("span", null, scanIsActive(scanStatus) ? formatEta(scanStatus.estimatedSecondsRemaining) : `${scanStatus.progressPercent}%`),
-            ),
-            h(
-              "div",
-              {
-                className: "scan-progress",
-                role: "progressbar",
-                "aria-valuemin": 0,
-                "aria-valuemax": 100,
-                "aria-valuenow": scanStatus.progressPercent,
-              },
-              h("span", { style: { width: `${scanStatus.progressPercent}%` } }),
-            ),
-            scanStatus.currentPath ? h("p", { className: "scan-current-path" }, scanStatus.currentPath) : null,
-          ),
-        ),
-        h(Notice, null, ftpMessage),
-        h(
-          "div",
-          { className: "button-grid" },
-          h(
-            "button",
-            {
-              type: "button",
-              className: "secondary-button",
-              disabled: !profileReady || scanIsActive(scanStatus),
-              onClick: () => void refreshIndex(),
-            },
-            [h(RefreshCw, { key: "icon", size: 17, "aria-hidden": true }), "Rescan"],
-          ),
-        ),
-      ),
-      installPanel,
-    ),
-    h(
-      "footer",
-      { className: "site-footer" },
-      h("p", null, `Copyright ${currentYear} Stremio FTP Addon. v${APP_VERSION}`),
-      h("p", null, "Not responsible for files, streams, or other content hosted on connected servers."),
-      h("button", { type: "button", className: "footer-link-button", onClick: () => setChangelogOpen(true) }, "Changelog"),
-      h(
-        "a",
-        { href: GITHUB_URL, target: "_blank", rel: "noreferrer", className: "footer-icon-link", "aria-label": "GitHub repository" },
-        h(Github, { size: 18, "aria-hidden": true }),
-      ),
-    ),
-    changelogOpen
-      ? h(
-          "div",
-          { className: "changelog-backdrop" },
-          h(
-            "aside",
-            { className: "changelog-drawer", role: "dialog", "aria-modal": true, "aria-labelledby": "changelog-heading" },
-            h(
-              "div",
-              { className: "changelog-header" },
-              h("div", null, h("span", { className: "section-label" }, `v${APP_VERSION}`), h("h2", { id: "changelog-heading" }, "Latest changes")),
-              h("button", { type: "button", className: "secondary-button", onClick: () => setChangelogOpen(false) }, "Close"),
-            ),
-            changelogEntries.length
-              ? h(
-                  "ol",
-                  { className: "changelog-list" },
-                  changelogEntries.map((commit) =>
-                    h(
-                      "li",
-                      { key: commit.hash },
-                      h("code", null, commit.hash),
-                      h("span", null, commit.subject),
-                    ),
-                  ),
-                )
-              : h(Notice, null, "No commit metadata was available for this build."),
-          ),
-        )
-      : null,
+  return (
+    <main className="app-shell">
+      <Topbar
+        addonName={addonName}
+        addonLogoUrl={addonLogoUrl}
+        profileReady={profileReady}
+        profileState={profileState}
+        onEditLogo={() => setEditingLogo(true)}
+      />
+      <HeroPanel
+        addonName={addonName}
+        addonDescription={addonDescription}
+        addonLogoUrl={addonLogoUrl}
+        customizationMessage={customizationMessage}
+        editingName={editingName}
+        editingDescription={editingDescription}
+        editingLogo={editingLogo}
+        defaultCustomization={DEFAULT_CUSTOMIZATION}
+        onAddonNameChange={setAddonName}
+        onAddonDescriptionChange={setAddonDescription}
+        onAddonLogoUrlChange={setAddonLogoUrl}
+        onEditName={() => setEditingName(true)}
+        onEditDescription={() => setEditingDescription(true)}
+        onStopEditingName={() => setEditingName(false)}
+        onStopEditingDescription={() => setEditingDescription(false)}
+        onStopEditingLogo={() => setEditingLogo(false)}
+        onCommitName={commitAddonName}
+        onCommitDescription={commitAddonDescription}
+        onCommitLogo={commitAddonLogo}
+      />
+      {showSetupTokenMessage ? <SetupTokenPanel /> : null}
+      {showSetupTokenMessage ? null : (
+        <div className="portal-grid">
+          <FtpSettingsPanel
+            host={host}
+            port={port}
+            username={username}
+            password={password}
+            tlsMode={tlsMode}
+            allowInvalidCertificate={allowInvalidCertificate}
+            rootPaths={rootPaths}
+            catalogTmdbApiKey={catalogTmdbApiKey}
+            libraryLayout={libraryLayout}
+            streamDeliveryMode={streamDeliveryMode}
+            catalogContentTypes={catalogContentTypes}
+            catalogEnabled={catalogEnabled}
+            profileReady={profileReady}
+            indexState={indexState}
+            onHostChange={setHost}
+            onPortChange={setPort}
+            onUsernameChange={setUsername}
+            onPasswordChange={setPassword}
+            onTlsModeChange={setTlsMode}
+            onAllowInvalidCertificateChange={setAllowInvalidCertificate}
+            onRootPathsChange={setRootPaths}
+            onCatalogTmdbApiKeyChange={setCatalogTmdbApiKey}
+            onCommitCatalogTmdbApiKey={commitCatalogTmdbApiKey}
+            onLibraryLayoutChange={updateLibraryLayout}
+            onStreamDeliveryModeChange={updateStreamDeliveryMode}
+            onCatalogContentTypeChange={updateCatalogContentType}
+            onCatalogEnabledChange={updateCatalogEnabled}
+            onTestConnection={() => void testConnection()}
+            onSaveFtp={() => void saveFtp()}
+          />
+          <IndexStatusPanel
+            indexState={indexState}
+            lastScanAt={lastScanAt}
+            scanSchedule={scanSchedule}
+            mediaItems={mediaItems}
+            connectionStatus={connectionStatus}
+            host={host}
+            scanStatus={scanStatus}
+            ftpMessage={ftpMessage}
+            profileReady={profileReady}
+            onUpdateScanSchedule={(intervalMinutes) => void updateScanSchedule(intervalMinutes)}
+            onRefreshIndex={() => void refreshIndex()}
+          />
+          <InstallPanel
+            profileReady={profileReady}
+            manifestUrl={manifestUrl}
+            stremioInstallUrl={stremioInstallUrl}
+            profileMessage={profileMessage}
+            profileState={profileState}
+            recoveryUid={recoveryUid}
+            passphrase={passphrase}
+            onRecoveryUidChange={updateRecoveryUid}
+            onPassphraseChange={setPassphrase}
+            onCreateProfile={() => void saveProfile()}
+            onUnlockProfile={() => void unlockExistingProfile()}
+          />
+        </div>
+      )}
+      <Footer appVersion={APP_VERSION} currentYear={currentYear} githubUrl={GITHUB_URL} onOpenChangelog={() => setChangelogOpen(true)} />
+      {changelogOpen ? <ChangelogDrawer appVersion={APP_VERSION} entries={changelogEntries} onClose={() => setChangelogOpen(false)} /> : null}
+    </main>
   );
 }

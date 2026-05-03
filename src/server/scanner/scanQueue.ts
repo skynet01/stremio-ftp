@@ -5,6 +5,9 @@ import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { MediaRepository } from "../media/mediaRepository.js";
 import type { ProfileService } from "../profiles/profileService.js";
 
+const MAX_ESTIMATED_SECONDS_REMAINING = 24 * 60 * 60;
+const SCAN_JOB_ROW_ERROR = "Invalid scan job row";
+
 export type ScanTrigger = "manual" | "scheduled";
 export type ScanJobStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped";
 
@@ -61,37 +64,43 @@ export class ScanQueue {
   }
 
   enqueueProfileScan(profileId: number, trigger: ScanTrigger): ProfileScanStatus {
-    const active = this.activeJobForProfile(profileId);
-    if (active) return this.rowToStatus(active);
+    const result = this.db.transaction((): ProfileScanStatus | number => {
+      const active = this.activeJobForProfile(profileId);
+      if (active) return this.rowToStatus(active);
 
-    if (trigger === "manual") {
-      const cooldownStatus = this.cooldownStatus(profileId);
-      if (cooldownStatus) return cooldownStatus;
-    }
+      if (trigger === "manual") {
+        const cooldownStatus = this.cooldownStatus(profileId);
+        if (cooldownStatus) return cooldownStatus;
+      }
 
-    const queuedCount = this.db.prepare("select count(*) as count from scan_jobs where status = 'queued'").get() as { count: number };
-    if (queuedCount.count >= this.config.scanQueueMax) {
-      return this.insertSkippedJob(profileId, trigger, "Scan queue is full.");
-    }
+      const queuedCount = countFromRow(this.db.prepare("select count(*) as count from scan_jobs where status = 'queued'").get());
+      if (queuedCount >= this.config.scanQueueMax) {
+        return this.insertSkippedJob(profileId, trigger, "Scan queue is full.");
+      }
 
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `
-        insert into scan_jobs (profile_id, status, trigger, progress_percent, message, queued_at)
-        values (?, 'queued', ?, 0, 'Waiting for scan worker.', ?)
-      `,
-      )
-      .run(profileId, trigger, now);
+      const now = new Date().toISOString();
+      const insert = this.db
+        .prepare(
+          `
+          insert into scan_jobs (profile_id, status, trigger, progress_percent, message, queued_at)
+          values (?, 'queued', ?, 0, 'Waiting for scan worker.', ?)
+        `,
+        )
+        .run(profileId, trigger, now);
+      return Number(insert.lastInsertRowid);
+    })();
+
+    if (typeof result !== "number") return result;
     this.pump();
-    return this.getJobStatus(Number(result.lastInsertRowid));
+    return this.getJobStatus(result);
   }
 
   getProfileScanStatus(profileId: number): ProfileScanStatus {
     const row = this.db
       .prepare("select * from scan_jobs where profile_id = ? order by id desc limit 1")
-      .get(profileId) as ScanJobRow | undefined;
-    if (!row) {
+      .get(profileId);
+    const scanJob = optionalScanJobRow(row);
+    if (!scanJob) {
       return {
         id: null,
         status: "idle",
@@ -110,11 +119,11 @@ export class ScanQueue {
         mediaItems: this.mediaRepository.countForProfile(profileId),
       };
     }
-    return this.rowToStatus(row);
+    return this.rowToStatus(scanJob);
   }
 
   getJobStatus(jobId: number): ProfileScanStatus {
-    const row = this.db.prepare("select * from scan_jobs where id = ?").get(jobId) as ScanJobRow | undefined;
+    const row = optionalScanJobRow(this.db.prepare("select * from scan_jobs where id = ?").get(jobId));
     if (!row) throw new Error("Scan job not found");
     return this.rowToStatus(row);
   }
@@ -134,10 +143,11 @@ export class ScanQueue {
     while (this.activeCount < this.config.scanGlobalConcurrency) {
       const row = this.db
         .prepare("select * from scan_jobs where status = 'queued' order by queued_at asc, id asc limit 1")
-        .get() as ScanJobRow | undefined;
-      if (!row) return;
-      if (this.running.has(row.profile_id)) return;
-      this.startJob(row);
+        .get();
+      const scanJob = optionalScanJobRow(row);
+      if (!scanJob) return;
+      if (this.running.has(scanJob.profile_id)) return;
+      this.startJob(scanJob);
     }
   }
 
@@ -217,7 +227,10 @@ export class ScanQueue {
     const progressPercent = Math.min(95, Math.max(1, Math.round((progress.entriesSeen / estimatedTotal) * 100)));
     const entriesRemaining = Math.max(0, estimatedTotal - progress.entriesSeen);
     const entriesPerSecond = Math.max(0.01, progress.entriesSeen / elapsedSeconds);
-    const estimatedSecondsRemaining = Math.round(entriesRemaining / entriesPerSecond);
+    const estimatedSecondsRemaining = Math.min(
+      MAX_ESTIMATED_SECONDS_REMAINING,
+      Math.round(entriesRemaining / entriesPerSecond),
+    );
 
     this.db
       .prepare(
@@ -260,7 +273,7 @@ export class ScanQueue {
   }
 
   private cooldownStatus(profileId: number) {
-    const row = this.db
+    const result = this.db
       .prepare(
         `
         select *
@@ -273,7 +286,8 @@ export class ScanQueue {
         limit 1
       `,
       )
-      .get(profileId) as ScanJobRow | undefined;
+      .get(profileId);
+    const row = optionalScanJobRow(result);
     if (!row?.finished_at) return null;
 
     const finishedAt = new Date(row.finished_at).getTime();
@@ -296,7 +310,7 @@ export class ScanQueue {
   }
 
   private activeJobForProfile(profileId: number) {
-    return this.db
+    const row = this.db
       .prepare(
         `
         select *
@@ -307,7 +321,8 @@ export class ScanQueue {
         limit 1
       `,
       )
-      .get(profileId) as ScanJobRow | undefined;
+      .get(profileId);
+    return optionalScanJobRow(row);
   }
 
   private rowToStatus(row: ScanJobRow): ProfileScanStatus {
@@ -344,5 +359,87 @@ export class ScanQueue {
       `,
       )
       .run(now);
+  }
+}
+
+function countFromRow(row: unknown): number {
+  if (!isRecord(row) || typeof row.count !== "number") throw new Error("Invalid count row");
+  return row.count;
+}
+
+function optionalScanJobRow(row: unknown): ScanJobRow | undefined {
+  if (row === undefined) return undefined;
+  return scanJobRow(row);
+}
+
+function scanJobRow(row: unknown): ScanJobRow {
+  if (!isRecord(row)) throw new Error(SCAN_JOB_ROW_ERROR);
+  return {
+    id: numberField(row, "id"),
+    profile_id: numberField(row, "profile_id"),
+    status: persistedScanStatus(row.status),
+    trigger: scanTrigger(row.trigger),
+    progress_percent: numberField(row, "progress_percent"),
+    entries_seen: numberField(row, "entries_seen"),
+    files_seen: numberField(row, "files_seen"),
+    directories_seen: numberField(row, "directories_seen"),
+    current_path: nullableStringField(row, "current_path"),
+    estimated_seconds_remaining: nullableNumberField(row, "estimated_seconds_remaining"),
+    message: nullableStringField(row, "message"),
+    error: nullableStringField(row, "error"),
+    queued_at: stringField(row, "queued_at"),
+    started_at: nullableStringField(row, "started_at"),
+    finished_at: nullableStringField(row, "finished_at"),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function numberField(row: Record<string, unknown>, key: keyof ScanJobRow): number {
+  const value = row[key];
+  if (typeof value !== "number") throw new Error(`${SCAN_JOB_ROW_ERROR}: ${String(key)}`);
+  return value;
+}
+
+function nullableNumberField(row: Record<string, unknown>, key: keyof ScanJobRow): number | null {
+  const value = row[key];
+  if (value === null || typeof value === "number") return value;
+  throw new Error(`${SCAN_JOB_ROW_ERROR}: ${String(key)}`);
+}
+
+function stringField(row: Record<string, unknown>, key: keyof ScanJobRow): string {
+  const value = row[key];
+  if (typeof value !== "string") throw new Error(`${SCAN_JOB_ROW_ERROR}: ${String(key)}`);
+  return value;
+}
+
+function nullableStringField(row: Record<string, unknown>, key: keyof ScanJobRow): string | null {
+  const value = row[key];
+  if (value === null || typeof value === "string") return value;
+  throw new Error(`${SCAN_JOB_ROW_ERROR}: ${String(key)}`);
+}
+
+function persistedScanStatus(value: unknown): ScanJobRow["status"] {
+  switch (value) {
+    case "queued":
+    case "running":
+    case "succeeded":
+    case "failed":
+    case "skipped":
+      return value;
+    default:
+      throw new Error(`${SCAN_JOB_ROW_ERROR}: status`);
+  }
+}
+
+function scanTrigger(value: unknown): ScanTrigger {
+  switch (value) {
+    case "manual":
+    case "scheduled":
+      return value;
+    default:
+      throw new Error(`${SCAN_JOB_ROW_ERROR}: trigger`);
   }
 }

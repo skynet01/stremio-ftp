@@ -4,6 +4,11 @@ dist/
 coverage/
 .env
 .config/
+.config-ui/
+HANDOFF.md
+REDDIT_POST.md
+TODO.md
+Screenshot.jpg
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

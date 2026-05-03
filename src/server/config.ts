@@ -20,6 +20,8 @@ export type AppConfig = {
   scanProgressAverageItems: number;
 };
 
+const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+
 function requireValue(env: NodeJS.ProcessEnv | Record<string, string | undefined>, key: string): string {
   const value = env[key]?.trim();
   if (!value) throw new Error(`${key} is required`);
@@ -49,7 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
 
   const configDir = env.CONFIG_DIR?.trim() || "/config";
   const logLevel = (env.LOG_LEVEL || "info") as AppConfig["logLevel"];
-  if (!["debug", "info", "warn", "error"].includes(logLevel)) throw new Error("LOG_LEVEL is invalid");
+  if (!LOG_LEVELS.includes(logLevel)) throw new Error(`LOG_LEVEL must be one of: ${LOG_LEVELS.join(", ")}`);
 
   return {
     baseUrl,

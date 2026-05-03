@@ -4,6 +4,7 @@ import type { MediaRepository } from "../media/mediaRepository.js";
 import { fetchCinemetaMeta } from "../metadata/cinemetaClient.js";
 import { tmdbCatalogMeta, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
 import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization, type ProfileService } from "../profiles/profileService.js";
+import { redactSecrets } from "../logging/redact.js";
 import { publicManifest, tokenManifest } from "./manifest.js";
 import { resolveStreams, streamForMatch } from "./streamResolver.js";
 
@@ -62,7 +63,8 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
         ftpConfig,
       });
       res.json({ streams });
-    } catch {
+    } catch (error) {
+      console.error("Stream resolution error:", loggableError(error));
       res.json({ streams: [] });
     }
   });
@@ -194,6 +196,11 @@ function stringParam(value: string | string[] | undefined): string {
 function internalFileId(id: string): number | null {
   const match = id.match(/^ftp:(\d+)$/);
   return match ? Number(match[1]) : null;
+}
+
+function loggableError(error: unknown): string {
+  if (error instanceof Error) return redactSecrets(error.stack || error.message);
+  return redactSecrets(String(error));
 }
 
 function otherCatalogMeta(item: {
