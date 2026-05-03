@@ -253,12 +253,17 @@ export class MediaRepository {
     const rows = this.db
       .prepare(
         `
-        select id, media_kind, filename, parsed_title, parsed_year, quality, size_bytes
-        from media_files
-        where profile_id = ?
-          and imdb_id is null
-          and parsed_title is not null
-        order by parsed_title asc, filename asc
+        select mf.id, mf.media_kind, mf.filename, mf.parsed_title, mf.parsed_year, mf.quality, mf.size_bytes
+        from media_files mf
+        join (
+          select parsed_title, parsed_year, min(id) as id
+          from media_files
+          where profile_id = ?
+            and imdb_id is null
+            and parsed_title is not null
+          group by parsed_title, parsed_year
+        ) grouped on grouped.id = mf.id
+        order by mf.parsed_title asc, mf.filename asc
         limit ? offset ?
       `,
       )
@@ -273,6 +278,36 @@ export class MediaRepository {
     }>;
 
     return rows.map(toOtherCatalogItem);
+  }
+
+  otherCatalogStreams(profileId: number, representativeFileId: number): MediaMatch[] {
+    const base = this.db
+      .prepare(
+        `
+        select parsed_title, parsed_year
+        from media_files
+        where profile_id = ?
+          and id = ?
+          and imdb_id is null
+      `,
+      )
+      .get(profileId, representativeFileId) as { parsed_title: string; parsed_year: number | null } | undefined;
+    if (!base) return [];
+
+    const rows = this.db
+      .prepare(
+        `
+        select id, ftp_path, filename, quality, size_bytes
+        from media_files
+        where profile_id = ?
+          and imdb_id is null
+          and parsed_title = ?
+          and (parsed_year is ? or parsed_year = ?)
+        order by size_bytes desc, filename asc
+      `,
+      )
+      .all(profileId, base.parsed_title, base.parsed_year, base.parsed_year) as MediaFileRow[];
+    return rows.map(toMediaMatch);
   }
 
   otherCatalogItem(profileId: number, fileId: number): OtherCatalogItem | null {

@@ -267,6 +267,63 @@ describe("stremio routes", () => {
     ]);
   });
 
+  it("groups duplicate unresolved Other catalog variants into one item with multiple streams", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: true,
+    });
+    const repository = new MediaRepository(db);
+    for (const filename of ["Home.Video.2024.1080p.mp4", "Home.Video.2024.2160p.mkv"]) {
+      repository.upsertParsedFile(created.profileId, {
+        mediaKind: "movie",
+        catalogKind: "movie",
+        ftpPath: `/misc/${filename}`,
+        filename,
+        normalizedFilename: filename.toLowerCase(),
+        extension: filename.endsWith(".mp4") ? "mp4" : "mkv",
+        parsedTitle: "home video",
+        parsedYear: 2024,
+        season: null,
+        episode: null,
+        imdbId: null,
+        quality: filename.includes("2160p") ? "2160p" : "1080p",
+        confidence: 45,
+        sizeBytes: 1024 * 1024,
+      });
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ results: [] }),
+      })),
+    );
+    const app = createApp({ ...config, tmdbApiKey: "tmdb-key" }, db);
+
+    const otherCatalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-other.json`).expect(200);
+
+    expect(otherCatalog.body.metas).toHaveLength(1);
+    expect(otherCatalog.body.metas[0]).toMatchObject({
+      id: expect.stringMatching(/^ftp:\d+$/),
+      name: "Home Video",
+    });
+
+    const stream = await request(app)
+      .get(`/u/${created.installUrlToken}/stream/movie/${otherCatalog.body.metas[0].id}.json`)
+      .expect(200);
+    expect(stream.body.streams).toHaveLength(2);
+    expect(stream.body.streams.map((item: { behaviorHints: { filename: string } }) => item.behaviorHints.filename).sort()).toEqual([
+      "Home.Video.2024.1080p.mp4",
+      "Home.Video.2024.2160p.mkv",
+    ]);
+  });
+
   it("uses profile TMDB key and anime content settings for anime catalog lookup", async () => {
     const db = new Database(":memory:");
     migrate(db);

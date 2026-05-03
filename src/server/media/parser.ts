@@ -35,8 +35,12 @@ function stripKnownTokens(value: string): string {
   return value
     .replace(/[\._-]+/g, " ")
     .replace(/\bweb[\s._-]?dl\b/gi, " ")
+    .replace(/\bvr[\s._-]?sbs\b/gi, " ")
     .replace(/\bhalf[\s._-]?sbs\b/gi, " ")
-    .replace(/\b(2160p|1080p|720p|480p|4k|bluray|webrip|hdtv|x264|x265|hevc|aac|dts|3dff|fsbs|hsbs|sbs)\b/gi, " ")
+    .replace(/\bai[\s._-]?upscaled\b/gi, " ")
+    .replace(/\bdts[\s._-]?hd\b/gi, " ")
+    .replace(/\b(2160p|1080p|720p|480p|4k|bluray|webrip|hdtv|x264|x265|hevc|aac|dts|truehd|atmos|ma|rife|remastered|multiaudio\d*|dirtyhippie|fgt|3dff|fsbs|hsbs|sbs|3d|3840x)\b/gi, " ")
+    .replace(/\b\d+(?:fps|v\d+)\b/gi, " ")
     .replace(/\btt\d{7,8}\b/gi, " ");
 }
 
@@ -137,7 +141,7 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
     };
   }
 
-  const animeEpisode = animeEnabled(options) ? withoutExtension.match(/^(?<title>.+?)[\s._-]+(?:-|ep(?:isode)?[\s._-]*)?(?<episode>\d{1,3})(?:v\d+)?(?:[\s._-]+|$)/i) : null;
+  const animeEpisode = shouldParseAnimeAbsolute(ftpPath, options) ? withoutExtension.match(/^(?<title>.+?)[\s._-]+(?:-|ep(?:isode)?[\s._-]*)?(?<episode>\d{1,3})(?:v\d+)?(?:[\s._-]+|$)/i) : null;
   if (animeEpisode?.groups) {
     return {
       mediaKind: "series",
@@ -158,7 +162,7 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
 
   const yearMatch = Array.from(withoutExtension.matchAll(/\b(19\d{2}|20\d{2})\b/g)).at(-1);
   const year = yearMatch?.[1];
-  const titleBeforeYear = movieTitleSource(ftpPath, withoutExtension, yearMatch?.index ?? null, options);
+  const movieTitle = movieTitleParts(ftpPath, withoutExtension, yearMatch?.index ?? null, year ? Number(year) : null, options);
 
   return {
     mediaKind: "movie",
@@ -167,8 +171,8 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
     filename,
     normalizedFilename,
     extension,
-    parsedTitle: normalizeTitle(stripKnownTokens(titleBeforeYear)),
-    parsedYear: year ? Number(year) : null,
+    parsedTitle: movieTitle.title,
+    parsedYear: movieTitle.year,
     season: null,
     episode: null,
     imdbId,
@@ -181,15 +185,31 @@ function animeEnabled(options: ParseMediaOptions) {
   return options.contentTypes?.anime === true;
 }
 
+function shouldParseAnimeAbsolute(ftpPath: string, options: ParseMediaOptions) {
+  if (!animeEnabled(options)) return false;
+  return options.contentTypes?.movies === false || /\banime\b/i.test(ftpPath);
+}
+
 function seriesCatalogKind(ftpPath: string, options: ParseMediaOptions): "series" | "anime" {
   if (animeEnabled(options) && (!options.contentTypes?.series || /\banime\b/i.test(ftpPath))) return "anime";
   return "series";
 }
 
-function movieTitleSource(ftpPath: string, withoutExtension: string, yearIndex: number | null, options: ParseMediaOptions) {
+function movieTitleParts(ftpPath: string, withoutExtension: string, yearIndex: number | null, fallbackYear: number | null, options: ParseMediaOptions) {
   if (options.libraryLayout === "folders") {
     const folderTitle = folderTitleOf(ftpPath);
-    if (folderTitle) return folderTitle;
+    if (folderTitle) return titleAndYearFrom(folderTitle, null, fallbackYear);
   }
-  return yearIndex !== null ? withoutExtension.slice(0, yearIndex) : stripKnownTokens(withoutExtension);
+  return titleAndYearFrom(withoutExtension, yearIndex, fallbackYear);
+}
+
+function titleAndYearFrom(value: string, yearIndex: number | null, fallbackYear: number | null) {
+  const match = yearIndex === null ? Array.from(value.matchAll(/\b(19\d{2}|20\d{2})\b/g)).at(-1) : null;
+  const index = yearIndex ?? match?.index ?? null;
+  const year = fallbackYear ?? (match?.[1] ? Number(match[1]) : null);
+  const titleSource = index !== null ? value.slice(0, index) : value;
+  return {
+    title: normalizeTitle(stripKnownTokens(titleSource)),
+    year,
+  };
 }

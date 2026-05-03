@@ -100,6 +100,34 @@ describe("media parser", () => {
     });
   });
 
+  it("does not classify 3d movie filenames as anime when anime and movies are both enabled", () => {
+    expect(
+      parseMediaPath("/3D Movies/Ready Player One 2018/Ready.Player.One.2018.3D.BluRay.Half-SBS.x.DTS-HD.MA.7.1-FGT_1080p_hevc.mkv", {
+        contentTypes: { movies: true, series: true, anime: true },
+        libraryLayout: "folders",
+      }),
+    ).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "ready player one",
+      parsedYear: 2018,
+    });
+  });
+
+  it("extracts movie title and year from folder names in folder layout", () => {
+    expect(
+      parseMediaPath("/3D Movies/Avatar 2009/Avatar_REMASTERED_3D-HSBS_1080p_MultiAudio2.mkv", {
+        contentTypes: { movies: true, series: true, anime: true },
+        libraryLayout: "folders",
+      }),
+    ).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "avatar",
+      parsedYear: 2009,
+    });
+  });
+
   it("ignores unsupported files", () => {
     expect(parseMediaPath("/TV/Show/notes.txt")).toBeNull();
   });

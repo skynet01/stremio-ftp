@@ -30,8 +30,8 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
 
     const fileId = internalFileId(id);
     if (fileId) {
-      const file = mediaRepository.getFileForProfile(profileId, fileId);
-      return res.json({ streams: file ? [directFileStream(config.baseUrl, installToken, file)] : [] });
+      const files = mediaRepository.otherCatalogStreams(profileId, fileId);
+      return res.json({ streams: files.map((file) => directFileStream(config.baseUrl, installToken, file)) });
     }
 
     try {
