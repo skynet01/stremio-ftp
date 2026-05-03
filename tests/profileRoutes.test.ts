@@ -20,6 +20,7 @@ function config(): AppConfig {
     maxOnDemandSearchMs: 4500,
     profileRateLimitWindowMs: 60000,
     profileRateLimitMax: 30,
+    tmdbApiKey: null,
   };
 }
 
@@ -277,7 +278,24 @@ describe("profile routes", () => {
         lastScanAt: null,
         mediaItems: 0,
       },
+      connectionStatus: {
+        lastTestedAt: null,
+        ok: null,
+      },
     });
+  });
+
+  it("allows profile APIs without a setup token when setup protection is disabled", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), setupToken: null }, db);
+
+    const response = await request(app)
+      .post("/api/profile")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    expect(response.body.manifestUrl).toMatch(/^https:\/\/addon\.example\.test\/u\/.+\/manifest\.json$/);
   });
 
   it("preserves the stored FTP password when editing with a blank password", async () => {
@@ -381,7 +399,7 @@ describe("profile routes", () => {
       })
       .expect(200);
 
-    await request(app)
+    const testResponse = await request(app)
       .post("/api/profile/ftp/test")
       .set("x-setup-token", "setup-secret-123")
       .send({
@@ -398,6 +416,22 @@ describe("profile routes", () => {
         },
       })
       .expect(200);
+
+    expect(testResponse.body).toEqual({
+      ok: true,
+      connectionStatus: {
+        lastTestedAt: expect.any(String),
+        ok: true,
+      },
+    });
+
+    const loaded = await request(app)
+      .post("/api/profile/ftp/load")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(loaded.body.connectionStatus).toEqual(testResponse.body.connectionStatus);
   });
 
   it("saves and loads profile addon customization", async () => {
@@ -421,6 +455,7 @@ describe("profile routes", () => {
           addonName: "Archive 3D",
           addonLogoUrl: "https://cdn.example.test/logo.png",
           addonDescription: "Stream the archive from my FTP server.",
+          catalogEnabled: true,
         },
       })
       .expect(200);
@@ -436,6 +471,7 @@ describe("profile routes", () => {
         addonName: "Archive 3D",
         addonLogoUrl: "https://cdn.example.test/logo.png",
         addonDescription: "Stream the archive from my FTP server.",
+        catalogEnabled: true,
       },
     });
   });

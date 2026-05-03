@@ -7,6 +7,7 @@ import {
   createProfile,
   loadCustomization,
   loadFtpSettings,
+  loadSetupStatus,
   rescanIndex,
   saveCustomization,
   saveFtpSettings,
@@ -18,6 +19,7 @@ vi.mock("../src/web/api", () => ({
   createProfile: vi.fn(),
   loadCustomization: vi.fn(),
   loadFtpSettings: vi.fn(),
+  loadSetupStatus: vi.fn(),
   rescanIndex: vi.fn(),
   saveCustomization: vi.fn(),
   saveFtpSettings: vi.fn(),
@@ -28,6 +30,7 @@ vi.mock("../src/web/api", () => ({
 const createProfileMock = vi.mocked(createProfile);
 const loadCustomizationMock = vi.mocked(loadCustomization);
 const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
+const loadSetupStatusMock = vi.mocked(loadSetupStatus);
 const rescanIndexMock = vi.mocked(rescanIndex);
 const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
@@ -41,6 +44,8 @@ describe("App", () => {
     createProfileMock.mockReset();
     loadCustomizationMock.mockReset();
     loadFtpSettingsMock.mockReset();
+    loadSetupStatusMock.mockReset();
+    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: true });
     rescanIndexMock.mockReset();
     saveCustomizationMock.mockReset();
     saveFtpSettingsMock.mockReset();
@@ -133,12 +138,17 @@ describe("App", () => {
         lastScanAt: "2026-05-02T22:45:00.000Z",
         mediaItems: 42,
       },
+      connectionStatus: {
+        lastTestedAt: "2026-05-02T22:40:00.000Z",
+        ok: true,
+      },
     });
     loadCustomizationMock.mockResolvedValue({
       customization: {
         addonName: "Archive 3D",
         addonLogoUrl: "https://cdn.example.test/logo.png",
         addonDescription: "Stream the archive from my FTP server.",
+        catalogEnabled: false,
       },
     });
 
@@ -165,12 +175,15 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Unlock profile" })).toBeNull();
     expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
+    expect(screen.getByDisplayValue("ftp.example.test")).toHaveClass("filled-control");
     expect(screen.getByDisplayValue("2121")).toBeTruthy();
     expect(screen.getByDisplayValue("secret")).toBeTruthy();
     expect((screen.getByLabelText("Root paths") as HTMLTextAreaElement).value).toBe("/Movies\n/TV");
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toBeTruthy();
+    expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toHaveClass("notification");
     expect(screen.getByText("42")).toBeTruthy();
-    expect(screen.getByText(/2026/)).toBeTruthy();
+    expect(screen.getByText(/May 02, 2026, 3:45 PM/)).toBeTruthy();
+    expect(screen.getByText(/Passed May 02, 2026, 3:40 PM/)).toBeTruthy();
   });
 
   it("saves edited addon name and avatar after profile setup", async () => {
@@ -199,7 +212,8 @@ describe("App", () => {
         customization: {
           addonName: "Archive 3D",
           addonLogoUrl: "",
-          addonDescription: "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
+          addonDescription: "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+          catalogEnabled: false,
         },
       }),
     );
@@ -216,6 +230,7 @@ describe("App", () => {
           addonName: "Archive 3D",
           addonLogoUrl: "",
           addonDescription: "Stream the archive from my FTP server.",
+          catalogEnabled: false,
         },
       }),
     );
@@ -232,6 +247,7 @@ describe("App", () => {
           addonName: "Archive 3D",
           addonLogoUrl: "https://cdn.example.test/logo.png",
           addonDescription: "Stream the archive from my FTP server.",
+          catalogEnabled: false,
         },
       }),
     );
@@ -269,6 +285,7 @@ describe("App", () => {
           addonName: "Archive 3D",
           addonLogoUrl: "https://cdn.example.test/logo.png",
           addonDescription: "Stream the archive from my FTP server.",
+          catalogEnabled: false,
         },
       }),
     );
@@ -283,7 +300,8 @@ describe("App", () => {
       customization: {
         addonName: "Stremio FTP Addon",
         addonLogoUrl: "",
-        addonDescription: "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
+        addonDescription: "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+        catalogEnabled: false,
       },
     });
     loadFtpSettingsMock.mockResolvedValue({
@@ -301,6 +319,10 @@ describe("App", () => {
         lastScanAt: "2026-05-02T22:45:00.000Z",
         mediaItems: 7,
       },
+      connectionStatus: {
+        lastTestedAt: "2026-05-02T22:40:00.000Z",
+        ok: true,
+      },
     });
 
     render(<App />);
@@ -316,25 +338,38 @@ describe("App", () => {
     expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
     expect(screen.getByDisplayValue("secret")).toBeTruthy();
     expect(screen.getByText("7")).toBeTruthy();
-    expect(screen.getByText(/2026/)).toBeTruthy();
+    expect(screen.getByText(/May 02, 2026, 3:45 PM/)).toBeTruthy();
+    expect(screen.getByText(/Passed May 02, 2026, 3:40 PM/)).toBeTruthy();
   });
 
-  it("shows only the setup token message on /configure without a token", () => {
+  it("shows only the setup token message on /configure without a token when setup is locked", async () => {
     window.history.pushState({}, "", "/configure");
     render(<App />);
 
     expect(screen.getByRole("heading", { name: "Setup token required" })).toBeTruthy();
     expect(screen.queryByLabelText("Host")).toBeNull();
     expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
+    await waitFor(() => expect(loadSetupStatusMock).toHaveBeenCalled());
   });
 
-  it("does not auto-load a saved profile on /configure without a setup token", () => {
+  it("allows /configure without a setup token when the server has no setup token configured", async () => {
+    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false });
+    window.history.pushState({}, "", "/configure");
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Setup token required" })).toBeNull());
+    expect(screen.getByLabelText("Host")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create profile" })).toBeTruthy();
+  });
+
+  it("does not auto-load a saved profile on /configure without a setup token when setup is locked", async () => {
     window.history.pushState({}, "", "/configure");
     window.localStorage.setItem("stremio-ftp-recovery-uid", "remembered-browser");
     window.localStorage.setItem("stremio-ftp-passphrase", "passphrase");
 
     render(<App />);
 
+    await waitFor(() => expect(loadSetupStatusMock).toHaveBeenCalled());
     expect(loadFtpSettingsMock).not.toHaveBeenCalled();
     expect(unlockProfileMock).not.toHaveBeenCalled();
   });
@@ -383,7 +418,13 @@ describe("App", () => {
       stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
     });
     saveFtpSettingsMock.mockResolvedValue({ ok: true });
-    testFtpSettingsMock.mockResolvedValue({ ok: true });
+    testFtpSettingsMock.mockResolvedValue({
+      ok: true,
+      connectionStatus: {
+        lastTestedAt: "2026-05-02T22:40:00.000Z",
+        ok: true,
+      },
+    });
     rescanIndexMock.mockResolvedValue({ filesSeen: 3, mediaItems: 3, lastScanAt: "2026-05-02T22:45:00.000Z" });
 
     render(<App />);
@@ -415,11 +456,59 @@ describe("App", () => {
       });
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    await waitFor(() => expect(testFtpSettingsMock).toHaveBeenCalledWith({
+      browserUid: recoveryUidValue,
+      passphrase: "passphrase",
+      ftpConfig: {
+        host: "ftp.example.test",
+        port: 21,
+        username: "user",
+        password: "secret",
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/Movies"],
+      },
+    }));
+    expect(screen.getByText(/Passed/)).toBeTruthy();
+
     fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
     await waitFor(() => expect(rescanIndexMock).toHaveBeenCalledWith({ browserUid: recoveryUidValue, passphrase: "passphrase" }));
     expect(await screen.findByText("Indexed 3 media files.")).toBeTruthy();
     expect(screen.getByText("3")).toBeTruthy();
-    expect(screen.getByText(/2026/)).toBeTruthy();
+    expect(screen.getByText(/May 02, 2026, 3:45 PM/)).toBeTruthy();
+  });
+
+  it("saves the catalog toggle after profile setup", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("link", { name: "Install in Stremio" });
+
+    fireEvent.click(screen.getByLabelText("Show indexed FTP catalog in Stremio"));
+
+    await waitFor(() =>
+      expect(saveCustomizationMock).toHaveBeenCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Stremio FTP Addon",
+          addonLogoUrl: "",
+          addonDescription:
+            "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+          catalogEnabled: true,
+        },
+      }),
+    );
   });
 
   it("creates the profile and saves filled FTP settings in one setup action", async () => {

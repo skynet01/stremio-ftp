@@ -7,6 +7,7 @@ describe("loadConfig", () => {
       BASE_URL: "https://example.test/",
       CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
       SETUP_TOKEN: "setup-secret-123",
+      TMDB_API_KEY: "tmdb-key",
       PORT: "8123",
       LOG_LEVEL: "debug",
       CONFIG_DIR: "/tmp/stremio-ftp-test",
@@ -18,16 +19,20 @@ describe("loadConfig", () => {
     expect(config.sqlitePath).toBe("/tmp/stremio-ftp-test/stremio-ftp.sqlite");
     expect(config.maxOnDemandSearchMs).toBe(4500);
     expect(config.setupToken).toBe("setup-secret-123");
+    expect(config.tmdbApiKey).toBe("tmdb-key");
+  });
+
+  it("allows setup token to be omitted", () => {
+    const config = loadConfig({
+      BASE_URL: "https://example.test",
+      CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+    });
+
+    expect(config.setupToken).toBeNull();
   });
 
   it("rejects missing required values", () => {
     expect(() => loadConfig({})).toThrow("BASE_URL is required");
-    expect(() =>
-      loadConfig({
-        BASE_URL: "https://example.test",
-        CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
-      }),
-    ).toThrow("SETUP_TOKEN is required");
   });
 
   it("rejects fractional numeric values", () => {

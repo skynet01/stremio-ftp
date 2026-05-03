@@ -22,11 +22,17 @@ export type AddonCustomization = {
   addonName: string;
   addonLogoUrl: string;
   addonDescription: string;
+  catalogEnabled: boolean;
 };
 
 export type IndexStatus = {
   lastScanAt: string | null;
   mediaItems: number;
+};
+
+export type ConnectionStatus = {
+  lastTestedAt: string | null;
+  ok: boolean | null;
 };
 
 const setupToken = new URLSearchParams(window.location.search).get("setup") || "";
@@ -64,6 +70,10 @@ export type RescanResponse = {
   filesSeen: number;
   lastScanAt: string;
   mediaItems: number;
+};
+
+export type SetupStatusResponse = {
+  setupTokenRequired: boolean;
 };
 
 async function readJson<T extends object>(response: Response): Promise<T> {
@@ -104,13 +114,18 @@ export async function unlockProfile(request: CreateProfileRequest): Promise<Unlo
   return readJson<UnlockProfileResponse>(response);
 }
 
-export async function testFtpSettings(request: AuthenticatedFtpRequest): Promise<{ ok: true }> {
+export async function loadSetupStatus(): Promise<SetupStatusResponse> {
+  const response = await fetch("/api/setup", { headers: authHeaders() });
+  return readJson<SetupStatusResponse>(response);
+}
+
+export async function testFtpSettings(request: AuthenticatedFtpRequest): Promise<{ ok: true; connectionStatus: ConnectionStatus }> {
   const response = await fetch("/api/profile/ftp/test", {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(request),
   });
-  return readJson<{ ok: true }>(response);
+  return readJson<{ ok: true; connectionStatus: ConnectionStatus }>(response);
 }
 
 export async function saveFtpSettings(request: AuthenticatedFtpRequest): Promise<{ ok: true }> {
@@ -122,13 +137,13 @@ export async function saveFtpSettings(request: AuthenticatedFtpRequest): Promise
   return readJson<{ ok: true }>(response);
 }
 
-export async function loadFtpSettings(request: CreateProfileRequest): Promise<{ ftpConfig: LoadedFtpConfig; indexStatus: IndexStatus }> {
+export async function loadFtpSettings(request: CreateProfileRequest): Promise<{ ftpConfig: LoadedFtpConfig; indexStatus: IndexStatus; connectionStatus: ConnectionStatus }> {
   const response = await fetch("/api/profile/ftp/load", {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(request),
   });
-  return readJson<{ ftpConfig: LoadedFtpConfig; indexStatus: IndexStatus }>(response);
+  return readJson<{ ftpConfig: LoadedFtpConfig; indexStatus: IndexStatus; connectionStatus: ConnectionStatus }>(response);
 }
 
 export async function loadCustomization(request: CreateProfileRequest): Promise<{ customization: AddonCustomization }> {

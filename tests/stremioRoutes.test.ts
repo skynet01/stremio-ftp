@@ -20,6 +20,7 @@ const config: AppConfig = {
   maxOnDemandSearchMs: 4500,
   profileRateLimitWindowMs: 600000,
   profileRateLimitMax: 30,
+  tmdbApiKey: null,
 };
 
 describe("stremio routes", () => {
@@ -56,6 +57,7 @@ describe("stremio routes", () => {
       addonName: "Archive 3D",
       addonLogoUrl: "https://cdn.example.test/logo.png",
       addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: false,
     });
     const app = createApp(config, db);
 
@@ -64,6 +66,205 @@ describe("stremio routes", () => {
     expect(response.body.name).toBe("Archive 3D");
     expect(response.body.logo).toBe("https://cdn.example.test/logo.png");
     expect(response.body.description).toBe("Stream the archive from my FTP server.");
+  });
+
+  it("serves an optional FTP catalog with TMDB poster metadata", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: true,
+    });
+    const repository = new MediaRepository(db);
+    repository.upsertParsedFile(created.profileId, {
+      mediaKind: "movie",
+      ftpPath: "/movies/The.Matrix.1999.1080p.mkv",
+      filename: "The.Matrix.1999.1080p.mkv",
+      normalizedFilename: "the matrix 1999 1080p",
+      extension: "mkv",
+      parsedTitle: "matrix",
+      parsedYear: 1999,
+      season: null,
+      episode: null,
+      imdbId: "tt0133093",
+      quality: "1080p",
+      confidence: 95,
+      sizeBytes: 1024 * 1024,
+    });
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        movie_results: [
+          {
+            title: "The Matrix",
+            overview: "A hacker discovers reality.",
+            poster_path: "/poster.jpg",
+            backdrop_path: "/backdrop.jpg",
+            release_date: "1999-03-31",
+          },
+        ],
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ ...config, tmdbApiKey: "tmdb-key" }, db);
+
+    const manifest = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
+    const catalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-movies.json`).expect(200);
+
+    expect(manifest.body.resources).toEqual(["stream", "catalog", "meta"]);
+    expect(manifest.body.catalogs).toEqual([
+      { type: "movie", id: "ftp-movies", name: "Archive 3D Movies", extra: [{ name: "skip" }] },
+      { type: "series", id: "ftp-series", name: "Archive 3D Series", extra: [{ name: "skip" }] },
+      { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: [{ name: "skip" }] },
+    ]);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/3/find/tt0133093");
+    expect(catalog.body.metas).toEqual([
+      {
+        id: "tt0133093",
+        type: "movie",
+        name: "The Matrix",
+        poster: "https://image.tmdb.org/t/p/w500/poster.jpg",
+        background: "https://image.tmdb.org/t/p/w500/backdrop.jpg",
+        description: "A hacker discovers reality.",
+        releaseInfo: "1999",
+      },
+    ]);
+  });
+
+  it("resolves catalog items without filename IMDb ids through TMDB search", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: true,
+    });
+    const repository = new MediaRepository(db);
+    repository.upsertParsedFile(created.profileId, {
+      mediaKind: "movie",
+      ftpPath: "/movies/Zack.Snyders.Justice.League.2021.1080p.mkv",
+      filename: "Zack.Snyders.Justice.League.2021.1080p.mkv",
+      normalizedFilename: "zack snyders justice league 2021 1080p",
+      extension: "mkv",
+      parsedTitle: "zack snyders justice league",
+      parsedYear: 2021,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: "1080p",
+      confidence: 70,
+      sizeBytes: 1024 * 1024,
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              id: 791373,
+              title: "Zack Snyder's Justice League",
+              overview: "Determined to ensure Superman's sacrifice was not in vain.",
+              poster_path: "/justice.jpg",
+              backdrop_path: "/justice-bg.jpg",
+              release_date: "2021-03-18",
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ imdb_id: "tt12361974" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ ...config, tmdbApiKey: "tmdb-key" }, db);
+
+    const catalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-movies.json`).expect(200);
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/3/search/movie");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/3/movie/791373/external_ids");
+    expect(catalog.body.metas).toEqual([
+      {
+        id: "tt12361974",
+        type: "movie",
+        name: "Zack Snyder's Justice League",
+        poster: "https://image.tmdb.org/t/p/w500/justice.jpg",
+        background: "https://image.tmdb.org/t/p/w500/justice-bg.jpg",
+        description: "Determined to ensure Superman's sacrifice was not in vain.",
+        releaseInfo: "2021",
+      },
+    ]);
+  });
+
+  it("serves unrecognized indexed files in a separate Other catalog with direct streams", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: true,
+    });
+    const repository = new MediaRepository(db);
+    repository.upsertParsedFile(created.profileId, {
+      mediaKind: "movie",
+      ftpPath: "/misc/Home.Video.2024.mp4",
+      filename: "Home.Video.2024.mp4",
+      normalizedFilename: "home video 2024",
+      extension: "mp4",
+      parsedTitle: "home video",
+      parsedYear: 2024,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: null,
+      confidence: 45,
+      sizeBytes: 1024 * 1024,
+    });
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ results: [] }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ ...config, tmdbApiKey: "tmdb-key" }, db);
+
+    const movieCatalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-movies.json`).expect(200);
+    const otherCatalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-other.json`).expect(200);
+
+    expect(movieCatalog.body.metas).toEqual([]);
+    expect(otherCatalog.body.metas).toHaveLength(1);
+    expect(otherCatalog.body.metas[0]).toMatchObject({
+      id: expect.stringMatching(/^ftp:\d+$/),
+      type: "movie",
+      name: "Home Video",
+      description: "Home.Video.2024.mp4",
+      releaseInfo: "2024",
+    });
+
+    const stream = await request(app)
+      .get(`/u/${created.installUrlToken}/stream/movie/${otherCatalog.body.metas[0].id}.json`)
+      .expect(200);
+    expect(stream.body.streams).toEqual([
+      {
+        name: "FTP Source",
+        description: "Home.Video.2024.mp4\n1 MB",
+        url: `https://addon.example.test/proxy/${created.installUrlToken}/${otherCatalog.body.metas[0].id.replace("ftp:", "")}`,
+        behaviorHints: {
+          notWebReady: true,
+          filename: "Home.Video.2024.mp4",
+          videoSize: 1024 * 1024,
+        },
+      },
+    ]);
   });
 
   it("returns CORS headers for public manifest and stream routes", async () => {

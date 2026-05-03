@@ -15,6 +15,23 @@ export type MediaMatch = {
   sizeBytes: number | null;
 };
 
+export type CatalogItem = {
+  mediaKind: "movie" | "series";
+  parsedTitle: string;
+  parsedYear: number | null;
+  imdbId: string | null;
+};
+
+export type OtherCatalogItem = {
+  id: number;
+  mediaKind: "movie" | "series";
+  filename: string;
+  parsedTitle: string;
+  parsedYear: number | null;
+  quality: string | null;
+  sizeBytes: number | null;
+};
+
 type MediaFileRow = {
   id: number;
   ftp_path: string;
@@ -28,6 +45,26 @@ function toMediaMatch(row: MediaFileRow): MediaMatch {
     id: row.id,
     ftpPath: row.ftp_path,
     filename: row.filename,
+    quality: row.quality,
+    sizeBytes: row.size_bytes,
+  };
+}
+
+function toOtherCatalogItem(row: {
+  id: number;
+  media_kind: "movie" | "series";
+  filename: string;
+  parsed_title: string;
+  parsed_year: number | null;
+  quality: string | null;
+  size_bytes: number | null;
+}): OtherCatalogItem {
+  return {
+    id: row.id,
+    mediaKind: row.media_kind,
+    filename: row.filename,
+    parsedTitle: row.parsed_title,
+    parsedYear: row.parsed_year,
     quality: row.quality,
     sizeBytes: row.size_bytes,
   };
@@ -176,6 +213,85 @@ export class MediaRepository {
     return row.count;
   }
 
+  catalogItems(profileId: number, mediaKind: "movie" | "series", limit: number, skip: number): CatalogItem[] {
+    const rows = this.db
+      .prepare(
+        `
+        select media_kind, parsed_title, parsed_year, imdb_id, max(confidence) as max_confidence
+        from media_files
+        where profile_id = ?
+          and media_kind = ?
+          and parsed_title is not null
+        group by media_kind, parsed_title, parsed_year, imdb_id
+        order by max_confidence desc, parsed_title asc
+        limit ? offset ?
+      `,
+      )
+      .all(profileId, mediaKind, limit, skip) as Array<{
+      media_kind: "movie" | "series";
+      parsed_title: string;
+      parsed_year: number | null;
+      imdb_id: string | null;
+    }>;
+
+    return rows.map((row) => ({
+      mediaKind: row.media_kind,
+      parsedTitle: row.parsed_title,
+      parsedYear: row.parsed_year,
+      imdbId: row.imdb_id,
+    }));
+  }
+
+  otherCatalogItems(profileId: number, limit: number, skip: number): OtherCatalogItem[] {
+    const rows = this.db
+      .prepare(
+        `
+        select id, media_kind, filename, parsed_title, parsed_year, quality, size_bytes
+        from media_files
+        where profile_id = ?
+          and imdb_id is null
+          and parsed_title is not null
+        order by parsed_title asc, filename asc
+        limit ? offset ?
+      `,
+      )
+      .all(profileId, limit, skip) as Array<{
+      id: number;
+      media_kind: "movie" | "series";
+      filename: string;
+      parsed_title: string;
+      parsed_year: number | null;
+      quality: string | null;
+      size_bytes: number | null;
+    }>;
+
+    return rows.map(toOtherCatalogItem);
+  }
+
+  otherCatalogItem(profileId: number, fileId: number): OtherCatalogItem | null {
+    const row = this.db
+      .prepare(
+        `
+        select id, media_kind, filename, parsed_title, parsed_year, quality, size_bytes
+        from media_files
+        where profile_id = ?
+          and id = ?
+      `,
+      )
+      .get(profileId, fileId) as
+      | {
+          id: number;
+          media_kind: "movie" | "series";
+          filename: string;
+          parsed_title: string;
+          parsed_year: number | null;
+          quality: string | null;
+          size_bytes: number | null;
+        }
+      | undefined;
+
+    return row ? toOtherCatalogItem(row) : null;
+  }
 }
 
 function normalizeRootPath(path: string) {

@@ -31,6 +31,7 @@ const customizationSchema = z.object({
     .max(2048)
     .refine((value) => !value || /^https?:\/\//i.test(value), "Logo URL must start with http:// or https://"),
   addonDescription: z.string().trim().min(1).max(260),
+  catalogEnabled: z.boolean().default(false),
 });
 const saveCustomizationSchema = createSchema.extend({ customization: customizationSchema });
 
@@ -106,8 +107,11 @@ export function profileRoutes(
       } finally {
         await client.close();
       }
-      res.json({ ok: true });
+      const connectionStatus = { lastTestedAt: new Date().toISOString(), ok: true };
+      service.saveConnectionStatus(unlocked.profileId, connectionStatus);
+      res.json({ ok: true, connectionStatus });
     } catch (error) {
+      service.saveConnectionStatus(unlocked.profileId, { lastTestedAt: new Date().toISOString(), ok: false });
       res.status(400).json({ error: ftpErrorMessage(error, "Unable to connect to FTP server") });
     }
   });
@@ -148,6 +152,7 @@ export function profileRoutes(
           roots: ftpConfig.roots,
         },
         indexStatus: service.getIndexStatus(unlocked.profileId),
+        connectionStatus: service.getConnectionStatus(unlocked.profileId),
       });
     } catch {
       res.status(401).json({ error: "Invalid passphrase" });

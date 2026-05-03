@@ -3,7 +3,8 @@ export type AppConfig = {
   configDir: string;
   sqlitePath: string;
   encryptionKey: string;
-  setupToken: string;
+  setupToken: string | null;
+  tmdbApiKey: string | null;
   port: number;
   logLevel: "debug" | "info" | "warn" | "error";
   crawlerConcurrency: number;
@@ -36,8 +37,9 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
   const baseUrl = requireValue(env, "BASE_URL").replace(/\/+$/, "");
   const encryptionKey = requireValue(env, "CONFIG_ENCRYPTION_KEY");
   if (encryptionKey.length < 32) throw new Error("CONFIG_ENCRYPTION_KEY must be at least 32 characters");
-  const setupToken = requireValue(env, "SETUP_TOKEN");
-  if (setupToken.length < 16) throw new Error("SETUP_TOKEN must be at least 16 characters");
+  const setupToken = (env.SETUP_TOKEN || env.STREMIO_FTP_SETUP_TOKEN)?.trim() || null;
+  if (setupToken && setupToken.length < 16) throw new Error("SETUP_TOKEN must be at least 16 characters");
+  const tmdbApiKey = env.TMDB_API_KEY?.trim() || null;
 
   const configDir = env.CONFIG_DIR?.trim() || "/config";
   const logLevel = (env.LOG_LEVEL || "info") as AppConfig["logLevel"];
@@ -49,6 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     sqlitePath: `${configDir.replace(/\/+$/, "")}/stremio-ftp.sqlite`,
     encryptionKey,
     setupToken,
+    tmdbApiKey,
     port: portValue(env, "PORT", 7000),
     logLevel,
     crawlerConcurrency: numberValue(env, "CRAWLER_CONCURRENCY", 2),

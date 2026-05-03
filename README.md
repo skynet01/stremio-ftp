@@ -2,17 +2,19 @@
 
 Stremio FTP is a self-hosted Stremio source addon that lets users stream movies and series episodes from their own FTP or FTPS server. It exposes a web configuration portal where a user saves FTP credentials, scans the FTP library, and receives a private Stremio manifest URL.
 
-The addon does not provide catalogs. It is a stream-source addon: open a movie or episode from another Stremio catalog, and this addon appears as a streaming option when the clicked title is found in the indexed FTP library.
+By default this is a stream-source addon: open a movie or episode from another Stremio catalog, and this addon appears as a streaming option when the clicked title is found in the indexed FTP library. Profiles can also enable an optional FTP catalog so indexed movies and series appear as browsable Stremio catalogs with TMDB posters and metadata.
 
 ## Features
 
-- Web configuration portal at `/configure?setup=...`
+- Web configuration portal at `/configure`, optionally protected by `/configure?setup=...`
 - Per-user profiles using browser UID plus passphrase, with no signup system
 - Encrypted FTP credential storage
 - FTP, explicit FTPS, and implicit FTPS support through `basic-ftp`
 - Optional invalid-certificate allowance for self-signed or seedbox FTP certificates
 - Movies and series episode filename parsing
 - Manual index refresh from the portal
+- Optional movie and series catalogs generated from the indexed FTP library
+- Optional TMDB metadata enrichment for catalog posters, descriptions, and artwork
 - Private per-profile manifest URLs for Stremio
 - HTTP range proxy streaming from FTP to Stremio
 - Docker and Docker Compose deployment
@@ -21,7 +23,8 @@ The addon does not provide catalogs. It is a stream-source addon: open a movie o
 ## Important Caveats
 
 - Use this only with media you own, are licensed to access, or are otherwise legally allowed to stream.
-- The addon does not include metadata catalogs. Install another Stremio catalog addon for browsing.
+- Catalogs are off by default per profile. Enable `Show indexed FTP catalog in Stremio` in the portal if you want this addon to expose browsable FTP catalogs.
+- TMDB enrichment requires `TMDB_API_KEY`. Without it, catalog items that already have IMDb IDs can still appear with basic title/year metadata but no TMDB poster art.
 - Scans are manual. Background scheduled rescans are not implemented yet.
 - The manifest install token is shown when a profile is created. The server stores only a hash of it, so unlocking an existing profile can load FTP settings but cannot reconstruct an old install URL.
 - The generated manifest URL can stream indexed files for that profile. Keep it private.
@@ -45,7 +48,6 @@ Required:
 ```bash
 BASE_URL=https://stremio-ftp.example.com
 CONFIG_ENCRYPTION_KEY=replace-with-a-stable-random-secret-at-least-32-characters
-SETUP_TOKEN=replace-with-a-stable-random-secret-at-least-16-characters
 ```
 
 Optional:
@@ -53,6 +55,9 @@ Optional:
 ```bash
 PORT=7000
 CONFIG_DIR=/config
+SETUP_TOKEN=replace-with-a-stable-random-secret-at-least-16-characters
+STREMIO_FTP_SETUP_TOKEN=alternate-name-for-SETUP_TOKEN
+TMDB_API_KEY=optional-tmdb-api-key-for-catalog-metadata
 LOG_LEVEL=info
 CRAWLER_CONCURRENCY=2
 FTP_TIMEOUT_MS=15000
@@ -65,7 +70,9 @@ Notes:
 
 - `BASE_URL` must be the public origin, without a trailing slash.
 - `CONFIG_ENCRYPTION_KEY` must stay stable across container rebuilds and restarts.
-- `SETUP_TOKEN` protects `/configure` and profile-management APIs.
+- `SETUP_TOKEN` protects `/configure` and profile-management APIs when set. If omitted, the portal and profile APIs are open to anyone who can reach the hosted addon.
+- `STREMIO_FTP_SETUP_TOKEN` is accepted as an alternate name for `SETUP_TOKEN`.
+- `TMDB_API_KEY` is optional. Set it if users will enable the FTP catalog option and you want posters, backdrops, descriptions, and release years from TMDB.
 - SQLite is stored at `$CONFIG_DIR/stremio-ftp.sqlite`.
 - `PROFILE_RATE_LIMIT_MAX` limits profile actions per client IP per rate-limit window.
 
@@ -77,6 +84,7 @@ Create `.env`:
 BASE_URL=https://stremio-ftp.example.com
 CONFIG_ENCRYPTION_KEY=replace-with-output-from-openssl-rand-hex-32
 SETUP_TOKEN=replace-with-output-from-openssl-rand-hex-24
+TMDB_API_KEY=
 PORT=7000
 CONFIG_DIR=/config
 LOG_LEVEL=info
@@ -106,10 +114,16 @@ Check health:
 curl https://stremio-ftp.example.com/health
 ```
 
-Open the portal:
+Open the portal. If `SETUP_TOKEN` is set:
 
 ```text
 https://stremio-ftp.example.com/configure?setup=YOUR_SETUP_TOKEN
+```
+
+If `SETUP_TOKEN` is empty:
+
+```text
+https://stremio-ftp.example.com/configure
 ```
 
 ## Portal Workflow
@@ -119,11 +133,12 @@ https://stremio-ftp.example.com/configure?setup=YOUR_SETUP_TOKEN
 3. Click `Create profile`. If the FTP form is complete, the portal creates the profile and saves FTP settings in one action.
 4. Click `Test connection`.
 5. Click `Rescan`.
-6. Install the generated Stremio manifest URL.
+6. Optionally enable `Show indexed FTP catalog in Stremio`.
+7. Install the generated Stremio manifest URL.
 
 For an existing browser profile:
 
-1. Open `/configure?setup=YOUR_SETUP_TOKEN`.
+1. Open `/configure?setup=YOUR_SETUP_TOKEN`, or `/configure` when no setup token is configured.
 2. Enter the same browser UID and passphrase.
 3. Click `Unlock profile`.
 4. Saved FTP settings load into the form. The saved password is not shown.
@@ -164,6 +179,7 @@ Run development server:
 BASE_URL=http://127.0.0.1:7000 \
 CONFIG_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef \
 SETUP_TOKEN=dev-setup-token-123456 \
+TMDB_API_KEY= \
 CONFIG_DIR=.config \
 PORT=7000 \
 npm run dev
@@ -176,6 +192,7 @@ npm run build
 BASE_URL=http://127.0.0.1:7000 \
 CONFIG_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef \
 SETUP_TOKEN=dev-setup-token-123456 \
+TMDB_API_KEY= \
 CONFIG_DIR=.config \
 PORT=7000 \
 npm start
@@ -235,7 +252,8 @@ Requirements:
 3. Create a persistent .env file with:
    - BASE_URL=https://YOUR_DOMAIN_HERE
    - CONFIG_ENCRYPTION_KEY=<generate with: openssl rand -hex 32>
-   - SETUP_TOKEN=<generate with: openssl rand -hex 24>
+   - SETUP_TOKEN=<optional; generate with: openssl rand -hex 24 if the portal should be private>
+   - TMDB_API_KEY=<optional; required for TMDB catalog posters and rich metadata>
    - PORT=7000
    - CONFIG_DIR=/config
    - LOG_LEVEL=info
@@ -248,10 +266,12 @@ Requirements:
 5. Put the app behind HTTPS using Nginx, Caddy, Traefik, or the existing reverse proxy.
 6. Make sure the public URL forwards to the container and /health returns JSON.
 7. Make sure outbound egress from the server allows FTP/FTPS to the user FTP host and port.
-8. Print the setup portal URL:
+8. Print the setup portal URL. If SETUP_TOKEN is set, use:
    https://YOUR_DOMAIN_HERE/configure?setup=<SETUP_TOKEN>
+   If SETUP_TOKEN is not set, use:
+   https://YOUR_DOMAIN_HERE/configure
 9. Do not rotate CONFIG_ENCRYPTION_KEY after profiles are created.
-10. Do not expose SETUP_TOKEN publicly.
+10. Do not expose SETUP_TOKEN publicly when it is configured.
 
 After setup, verify:
 - curl https://YOUR_DOMAIN_HERE/health

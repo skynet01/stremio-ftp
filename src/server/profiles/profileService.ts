@@ -22,6 +22,7 @@ export type AddonCustomization = {
   addonName: string;
   addonLogoUrl: string;
   addonDescription: string;
+  catalogEnabled: boolean;
 };
 
 export type IndexStatus = {
@@ -29,11 +30,17 @@ export type IndexStatus = {
   mediaItems: number;
 };
 
+export type ConnectionStatus = {
+  lastTestedAt: string | null;
+  ok: boolean | null;
+};
+
 export const DEFAULT_ADDON_CUSTOMIZATION: AddonCustomization = {
   addonName: "Stremio FTP Addon",
   addonLogoUrl: "",
   addonDescription:
-    "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
+    "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+  catalogEnabled: false,
 };
 
 export class DuplicateProfileError extends Error {
@@ -99,21 +106,29 @@ export class ProfileService {
   }
 
   getAddonCustomization(profileId: number): AddonCustomization {
-    const row = this.db.prepare("select addon_name, addon_logo_url, addon_description from profiles where id = ?").get(profileId) as
-      | { addon_name: string | null; addon_logo_url: string | null; addon_description: string | null }
+    const row = this.db.prepare("select addon_name, addon_logo_url, addon_description, catalog_enabled from profiles where id = ?").get(profileId) as
+      | { addon_name: string | null; addon_logo_url: string | null; addon_description: string | null; catalog_enabled: number }
       | undefined;
     if (!row) throw new ProfileNotFoundError();
     return {
       addonName: row.addon_name?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonName,
       addonLogoUrl: row.addon_logo_url?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonLogoUrl,
       addonDescription: row.addon_description?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonDescription,
+      catalogEnabled: Boolean(row.catalog_enabled),
     };
   }
 
   saveAddonCustomization(profileId: number, customization: AddonCustomization) {
     const result = this.db
-      .prepare("update profiles set addon_name = ?, addon_logo_url = ?, addon_description = ?, updated_at = ? where id = ?")
-      .run(customization.addonName, customization.addonLogoUrl, customization.addonDescription, new Date().toISOString(), profileId);
+      .prepare("update profiles set addon_name = ?, addon_logo_url = ?, addon_description = ?, catalog_enabled = ?, updated_at = ? where id = ?")
+      .run(
+        customization.addonName,
+        customization.addonLogoUrl,
+        customization.addonDescription,
+        customization.catalogEnabled ? 1 : 0,
+        new Date().toISOString(),
+        profileId,
+      );
     if (result.changes === 0) throw new ProfileNotFoundError();
   }
 
@@ -132,6 +147,24 @@ export class ProfileService {
     const result = this.db
       .prepare("update profiles set last_indexed_at = ?, indexed_media_count = ?, updated_at = ? where id = ?")
       .run(status.lastScanAt, status.mediaItems, new Date().toISOString(), profileId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
+  }
+
+  getConnectionStatus(profileId: number): ConnectionStatus {
+    const row = this.db.prepare("select last_ftp_tested_at, last_ftp_test_ok from profiles where id = ?").get(profileId) as
+      | { last_ftp_tested_at: string | null; last_ftp_test_ok: number | null }
+      | undefined;
+    if (!row) throw new ProfileNotFoundError();
+    return {
+      lastTestedAt: row.last_ftp_tested_at,
+      ok: row.last_ftp_test_ok === null ? null : Boolean(row.last_ftp_test_ok),
+    };
+  }
+
+  saveConnectionStatus(profileId: number, status: ConnectionStatus) {
+    const result = this.db
+      .prepare("update profiles set last_ftp_tested_at = ?, last_ftp_test_ok = ?, updated_at = ? where id = ?")
+      .run(status.lastTestedAt, status.ok === null ? null : status.ok ? 1 : 0, new Date().toISOString(), profileId);
     if (result.changes === 0) throw new ProfileNotFoundError();
   }
 

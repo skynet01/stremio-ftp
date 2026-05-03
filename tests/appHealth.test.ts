@@ -25,6 +25,7 @@ describe("app health", () => {
       maxOnDemandSearchMs: 4500,
       profileRateLimitWindowMs: 600000,
       profileRateLimitMax: 30,
+      tmdbApiKey: null,
     };
     const response = await request(createApp(config, db)).get("/health").expect(200);
     expect(response.body).toEqual({ ok: true, service: "stremio-ftp", baseUrl: "https://addon.example.test" });
@@ -46,6 +47,7 @@ describe("app health", () => {
       maxOnDemandSearchMs: 4500,
       profileRateLimitWindowMs: 600000,
       profileRateLimitMax: 30,
+      tmdbApiKey: null,
     };
 
     const response = await request(createApp(config, db)).get("/health").expect(200);
@@ -72,6 +74,7 @@ describe("app health", () => {
       maxOnDemandSearchMs: 4500,
       profileRateLimitWindowMs: 600000,
       profileRateLimitMax: 30,
+      tmdbApiKey: null,
     };
 
     const response = await request(createApp(config, db, { publicDir }))
@@ -101,6 +104,7 @@ describe("app health", () => {
       maxOnDemandSearchMs: 4500,
       profileRateLimitWindowMs: 600000,
       profileRateLimitMax: 30,
+      tmdbApiKey: null,
     };
 
     const missingToken = await request(createApp(config, db, { publicDir })).get("/configure").expect(200);

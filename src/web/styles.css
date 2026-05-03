@@ -53,6 +53,12 @@ textarea {
   font: inherit;
 }
 
+input.filled-control,
+select.filled-control,
+textarea.filled-control {
+  color: var(--accent);
+}
+
 button,
 .button-link {
   min-height: 44px;
@@ -600,7 +606,7 @@ input:-webkit-autofill:active {
 
 .status-list dd {
   margin: 0;
-  color: var(--cream);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -618,7 +624,7 @@ input:-webkit-autofill:active {
   border: 1px solid rgba(168, 224, 99, 0.22);
   border-radius: 10px;
   padding: 10px 12px;
-  color: var(--cream-dim);
+  color: var(--accent);
   background:
     linear-gradient(180deg, rgba(168, 224, 99, 0.075), rgba(168, 224, 99, 0.018)),
     rgba(255, 255, 255, 0.018);
@@ -628,6 +634,11 @@ input:-webkit-autofill:active {
   box-shadow:
     0 0 0 1px rgba(168, 224, 99, 0.035) inset,
     0 18px 46px -32px rgba(168, 224, 99, 0.85);
+}
+
+.catalog-toggle {
+  margin-top: 14px;
+  color: var(--accent);
 }
 
 .manifest-url {

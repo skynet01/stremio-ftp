@@ -48,6 +48,9 @@ export function createApp(
   const mediaRepository = new MediaRepository(db);
   const ftpClientFactory = options.ftpClientFactory ?? createBasicFtpClient;
   app.use("/api/profile", requireSetupToken(config));
+  app.get("/api/setup", (_req, res) => {
+    res.json({ setupTokenRequired: Boolean(config.setupToken) });
+  });
   app.use("/api", profileRoutes(config, profileService, mediaRepository, ftpClientFactory));
   app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
@@ -82,6 +85,7 @@ function stremioCors(): express.RequestHandler {
 
 function requireSetupToken(config: AppConfig): express.RequestHandler {
   return (req, res, next) => {
+    if (!config.setupToken) return next();
     const provided = setupTokenFromRequest(req);
     if (!provided || !safeEqual(provided, config.setupToken)) {
       return res.status(403).json({ error: "Invalid setup token" });

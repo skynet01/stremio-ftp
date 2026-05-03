@@ -4,13 +4,14 @@ import {
   createProfile,
   loadCustomization,
   loadFtpSettings,
+  loadSetupStatus,
   rescanIndex,
   saveCustomization,
   saveFtpSettings,
   testFtpSettings,
   unlockProfile,
 } from "./api.js";
-import type { AddonCustomization, IndexStatus, LoadedFtpConfig } from "./api.js";
+import type { AddonCustomization, ConnectionStatus, IndexStatus, LoadedFtpConfig } from "./api.js";
 
 type StatusTone = "green" | "amber" | "red" | "gray";
 const STORAGE_KEYS = {
@@ -23,7 +24,8 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
   addonName: "Stremio FTP Addon",
   addonLogoUrl: "",
   addonDescription:
-    "Stream movies and series episodes from your own FTP server in Stremio. Save credentials in a private browser profile, scan folders, then install the generated manifest URL.",
+    "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+  catalogEnabled: false,
 };
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
@@ -51,6 +53,16 @@ function formatScanTime(lastScanAt: string | null) {
   }).format(date);
 }
 
+function formatConnectionStatus(status: ConnectionStatus) {
+  if (!status.lastTestedAt) return "Untested";
+  return `${status.ok ? "Passed" : "Failed"} ${formatScanTime(status.lastTestedAt)}`;
+}
+
+function filledClass(value: string | number | boolean | null | undefined, extra = "") {
+  const filled = typeof value === "boolean" ? value : String(value ?? "").trim().length > 0;
+  return [extra, filled ? "filled-control" : ""].filter(Boolean).join(" ");
+}
+
 function browserUid() {
   const cryptoApi = globalThis.crypto;
   if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
@@ -68,7 +80,9 @@ function browserUid() {
 
 export function App() {
   const hasSetupToken = Boolean(new URLSearchParams(window.location.search).get("setup"));
-  const showSetupTokenMessage = window.location.pathname === "/configure" && !hasSetupToken;
+  const needsSetupProbe = window.location.pathname === "/configure" && !hasSetupToken;
+  const [setupTokenRequired, setSetupTokenRequired] = useState<boolean | null>(() => (needsSetupProbe ? null : false));
+  const showSetupTokenMessage = window.location.pathname === "/configure" && !hasSetupToken && setupTokenRequired !== false;
   const [recoveryUid, setRecoveryUid] = useState(() => {
     const stored = window.localStorage.getItem(STORAGE_KEYS.recoveryUid);
     if (stored) return stored;
@@ -90,11 +104,13 @@ export function App() {
   const [indexState, setIndexState] = useState<"idle" | "working" | "ready" | "error">("idle");
   const [mediaItems, setMediaItems] = useState<number | null>(null);
   const [lastScanAt, setLastScanAt] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({ lastTestedAt: null, ok: null });
   const [manifestUrl, setManifestUrl] = useState<string | null>(null);
   const [stremioInstallUrl, setStremioInstallUrl] = useState<string | null>(null);
   const [addonName, setAddonName] = useState(DEFAULT_CUSTOMIZATION.addonName);
   const [addonLogoUrl, setAddonLogoUrl] = useState(DEFAULT_CUSTOMIZATION.addonLogoUrl);
   const [addonDescription, setAddonDescription] = useState(DEFAULT_CUSTOMIZATION.addonDescription);
+  const [catalogEnabled, setCatalogEnabled] = useState(DEFAULT_CUSTOMIZATION.catalogEnabled);
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingLogo, setEditingLogo] = useState(false);
@@ -103,13 +119,20 @@ export function App() {
   const profileReady = profileState === "created" || profileState === "unlocked";
 
   useEffect(() => {
-    if (showSetupTokenMessage) return;
+    if (!needsSetupProbe) return;
+    void loadSetupStatus()
+      .then((status) => setSetupTokenRequired(status.setupTokenRequired))
+      .catch(() => setSetupTokenRequired(true));
+  }, []);
+
+  useEffect(() => {
+    if (showSetupTokenMessage || setupTokenRequired === null) return;
     const rememberedPassphrase = window.localStorage.getItem(STORAGE_KEYS.passphrase);
     if (!rememberedPassphrase) return;
     void restoreRememberedProfile(rememberedPassphrase);
     // Restore once from this browser's persisted session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [setupTokenRequired]);
 
   function rememberInstall(manifest: string, stremioInstall: string) {
     setManifestUrl(manifest);
@@ -145,10 +168,15 @@ export function App() {
     if (indexStatus.lastScanAt) setIndexState("ready");
   }
 
+  function applyConnectionStatus(status: ConnectionStatus) {
+    setConnectionStatus(status);
+  }
+
   function applyCustomization(customization: AddonCustomization) {
     setAddonName(customization.addonName || DEFAULT_CUSTOMIZATION.addonName);
     setAddonLogoUrl(customization.addonLogoUrl || "");
     setAddonDescription(customization.addonDescription || DEFAULT_CUSTOMIZATION.addonDescription);
+    setCatalogEnabled(customization.catalogEnabled ?? DEFAULT_CUSTOMIZATION.catalogEnabled);
   }
 
   function normalizedCustomization(): AddonCustomization {
@@ -156,6 +184,7 @@ export function App() {
       addonName: addonName.trim() || DEFAULT_CUSTOMIZATION.addonName,
       addonLogoUrl: addonLogoUrl.trim(),
       addonDescription: addonDescription.trim() || DEFAULT_CUSTOMIZATION.addonDescription,
+      catalogEnabled,
     };
   }
 
@@ -163,7 +192,8 @@ export function App() {
     return (
       customization.addonName !== DEFAULT_CUSTOMIZATION.addonName ||
       customization.addonLogoUrl !== DEFAULT_CUSTOMIZATION.addonLogoUrl ||
-      customization.addonDescription !== DEFAULT_CUSTOMIZATION.addonDescription
+      customization.addonDescription !== DEFAULT_CUSTOMIZATION.addonDescription ||
+      customization.catalogEnabled !== DEFAULT_CUSTOMIZATION.catalogEnabled
     );
   }
 
@@ -172,6 +202,7 @@ export function App() {
       const loaded = await loadFtpSettings({ browserUid: recoveryUid, passphrase: nextPassphrase });
       applyLoadedFtpConfig(loaded.ftpConfig);
       applyLoadedIndexStatus(loaded.indexStatus);
+      applyConnectionStatus(loaded.connectionStatus);
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "No saved FTP settings found.";
@@ -313,7 +344,8 @@ export function App() {
     setIndexState("working");
     setFtpMessage("Testing FTP connection...");
     try {
-      await testFtpSettings({ browserUid: recoveryUid, passphrase, ftpConfig: currentFtpConfig() });
+      const result = await testFtpSettings({ browserUid: recoveryUid, passphrase, ftpConfig: currentFtpConfig() });
+      applyConnectionStatus(result.connectionStatus);
       setIndexState("ready");
       setFtpMessage("FTP connection succeeded.");
     } catch (error) {
@@ -379,12 +411,18 @@ export function App() {
     void saveAddonBranding(normalizedCustomization());
   }
 
+  function updateCatalogEnabled(nextEnabled: boolean) {
+    setCatalogEnabled(nextEnabled);
+    void saveAddonBranding({ ...normalizedCustomization(), catalogEnabled: nextEnabled });
+  }
+
   const passphraseField = field(
     "Passphrase",
     "passphrase",
     h("input", {
       id: "passphrase",
       type: "password",
+      className: filledClass(passphrase),
       value: passphrase,
       autoComplete: "current-password",
       onChange: (event) => setPassphrase(event.currentTarget.value),
@@ -400,6 +438,7 @@ export function App() {
       { className: "inline-control" },
       h("input", {
         id: "recoveryUid",
+        className: filledClass(recoveryUid),
         value: recoveryUid,
         onChange: (event) => {
           setRecoveryUid(event.currentTarget.value);
@@ -424,6 +463,7 @@ export function App() {
     "host",
     h("input", {
       id: "host",
+      className: filledClass(host),
       value: host,
       onChange: (event) => setHost(event.currentTarget.value),
       placeholder: "ftp.example.com",
@@ -437,6 +477,7 @@ export function App() {
     h("input", {
       id: "port",
       inputMode: "numeric",
+      className: filledClass(port),
       value: port,
       onChange: (event) => setPort(event.currentTarget.value),
     }),
@@ -448,6 +489,7 @@ export function App() {
     "username",
     h("input", {
       id: "username",
+      className: filledClass(username),
       value: username,
       autoComplete: "username",
       onChange: (event) => setUsername(event.currentTarget.value),
@@ -461,6 +503,7 @@ export function App() {
     h("input", {
       id: "password",
       type: "password",
+      className: filledClass(password),
       value: password,
       autoComplete: "new-password",
       onChange: (event) => setPassword(event.currentTarget.value),
@@ -477,6 +520,7 @@ export function App() {
       "select",
       {
         id: "tlsMode",
+        className: filledClass(tlsMode),
         value: tlsMode,
         onChange: (event) => setTlsMode((event.currentTarget as HTMLSelectElement).value),
       },
@@ -502,6 +546,7 @@ export function App() {
     "rootPaths",
     h("textarea", {
       id: "rootPaths",
+      className: filledClass(rootPaths),
       value: rootPaths,
       onChange: (event) => setRootPaths((event.currentTarget as HTMLTextAreaElement).value),
       rows: 4,
@@ -598,7 +643,7 @@ export function App() {
     h("span", { className: "section-label" }, "Private source addon"),
     editingName
       ? h("input", {
-          className: "hero-title-input",
+          className: filledClass(addonName, "hero-title-input"),
           "aria-label": "Addon name",
           value: addonName,
           autoFocus: true,
@@ -625,7 +670,7 @@ export function App() {
         ),
     editingDescription
       ? h("textarea", {
-          className: "hero-description-input",
+          className: filledClass(addonDescription, "hero-description-input"),
           "aria-label": "Addon description",
           value: addonDescription,
           autoFocus: true,
@@ -652,6 +697,17 @@ export function App() {
           h("p", null, addonDescription),
         ),
     h(Notice, { className: "customization-notice" }, customizationMessage),
+    h(
+      "label",
+      { className: "toggle-row catalog-toggle", htmlFor: "catalogEnabled" },
+      h("input", {
+        id: "catalogEnabled",
+        type: "checkbox",
+        checked: catalogEnabled,
+        onChange: (event) => updateCatalogEnabled(event.currentTarget.checked),
+      }),
+      "Show indexed FTP catalog in Stremio",
+    ),
     editingLogo
       ? h(
           "div",
@@ -659,6 +715,7 @@ export function App() {
           h("label", { htmlFor: "addonLogoUrl" }, "Addon avatar URL"),
           h("input", {
             id: "addonLogoUrl",
+            className: filledClass(addonLogoUrl),
             value: addonLogoUrl,
             autoFocus: true,
             placeholder: "https://example.com/logo.png",
@@ -776,7 +833,17 @@ export function App() {
             "div",
             null,
             h("dt", null, "Connection"),
-            h("dd", null, h(StatusBadge, { tone: host ? "gray" : "red" }, host ? "Untested" : "Missing host")),
+            h(
+              "dd",
+              null,
+              h(
+                StatusBadge,
+                {
+                  tone: connectionStatus.ok === true ? "green" : connectionStatus.ok === false ? "red" : host ? "gray" : "red",
+                },
+                connectionStatus.lastTestedAt ? formatConnectionStatus(connectionStatus) : host ? "Untested" : "Missing host",
+              ),
+            ),
           ),
         ),
         h(Notice, null, ftpMessage),

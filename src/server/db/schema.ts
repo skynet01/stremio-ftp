@@ -10,8 +10,11 @@ export function migrate(db: Database.Database) {
       addon_name text,
       addon_logo_url text,
       addon_description text,
+      catalog_enabled integer not null default 0 check (catalog_enabled in (0, 1)),
       last_indexed_at text,
       indexed_media_count integer not null default 0 check (indexed_media_count >= 0),
+      last_ftp_tested_at text,
+      last_ftp_test_ok integer check (last_ftp_test_ok is null or last_ftp_test_ok in (0, 1)),
       install_token_hash text not null unique,
       created_at text not null,
       updated_at text not null,
@@ -54,8 +57,11 @@ export function migrate(db: Database.Database) {
   ensureProfileColumn(db, "addon_name", "text");
   ensureProfileColumn(db, "addon_logo_url", "text");
   ensureProfileColumn(db, "addon_description", "text");
+  ensureProfileColumn(db, "catalog_enabled", "integer not null default 0");
   ensureProfileColumn(db, "last_indexed_at", "text");
   ensureProfileColumn(db, "indexed_media_count", "integer not null default 0");
+  ensureProfileColumn(db, "last_ftp_tested_at", "text");
+  ensureProfileColumn(db, "last_ftp_test_ok", "integer");
 }
 
 function ensureProfileColumn(db: Database.Database, name: string, definition: string) {
