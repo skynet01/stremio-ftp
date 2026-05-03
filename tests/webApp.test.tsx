@@ -682,6 +682,86 @@ describe("App", () => {
     expect(screen.getByText(/Direct FTP sends FTP URLs to Stremio clients/)).toBeTruthy();
   });
 
+  it("keeps the FTP catalog enabled when switching to direct stream delivery", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("link", { name: "Install in Stremio" });
+
+    fireEvent.click(screen.getByLabelText("Show indexed FTP catalog in Stremio"));
+    fireEvent.change(screen.getByLabelText("Stream delivery"), { target: { value: "direct" } });
+
+    await waitFor(() =>
+      expect(saveCustomizationMock).toHaveBeenLastCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Stremio FTP Addon",
+          addonLogoUrl: "",
+          addonDescription:
+            "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+          catalogEnabled: true,
+          ...defaultCatalogOptions,
+          streamDeliveryMode: "direct",
+        },
+      }),
+    );
+  });
+
+  it("saves library settings when the FTP settings save button is clicked", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveFtpSettingsMock.mockResolvedValue({ ok: true });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("link", { name: "Install in Stremio" });
+    fireEvent.change(screen.getByLabelText("Host"), { target: { value: "ftp.example.test" } });
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
+    fireEvent.click(screen.getByLabelText("Show indexed FTP catalog in Stremio"));
+    fireEvent.change(screen.getByLabelText("TMDB API key"), { target: { value: "profile-tmdb-key" } });
+    fireEvent.change(screen.getByLabelText("Stream delivery"), { target: { value: "direct" } });
+    await waitFor(() => expect(saveCustomizationMock).toHaveBeenCalled());
+    saveCustomizationMock.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save FTP settings" }));
+
+    await waitFor(() =>
+      expect(saveCustomizationMock).toHaveBeenLastCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Stremio FTP Addon",
+          addonLogoUrl: "",
+          addonDescription:
+            "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+          catalogEnabled: true,
+          catalogTmdbApiKey: "profile-tmdb-key",
+          catalogContentTypes: { movies: true, series: true, anime: false },
+          libraryLayout: "auto",
+          streamDeliveryMode: "direct",
+        },
+      }),
+    );
+  });
+
   it("creates the profile and saves filled FTP settings in one setup action", async () => {
     createProfileMock.mockResolvedValue({
       profileId: 1,

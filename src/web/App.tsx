@@ -470,8 +470,14 @@ export function App() {
     setFtpMessage("Saving FTP settings...");
     try {
       await saveFtpSettings({ browserUid: recoveryUid, passphrase, ftpConfig: currentFtpConfig() });
+      try {
+        await saveCustomization({ browserUid: recoveryUid, passphrase, customization: normalizedCustomization() });
+        setCustomizationMessage("Library settings saved. Reinstall or refresh the addon in Stremio to see catalogs there.");
+      } catch (customizationError) {
+        setCustomizationMessage(customizationError instanceof Error ? customizationError.message : "Unable to save library settings.");
+      }
       setIndexState("ready");
-      setFtpMessage("FTP settings saved. Refresh the index to find files.");
+      setFtpMessage("FTP and library settings saved. Refresh the index to find files.");
     } catch (error) {
       setIndexState("error");
       setFtpMessage(error instanceof Error ? error.message : "Unable to save FTP settings.");

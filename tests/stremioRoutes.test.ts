@@ -569,6 +569,32 @@ describe("stremio routes", () => {
     );
   });
 
+  it("keeps catalogs in the token manifest when direct FTP stream delivery is enabled", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: true,
+      catalogContentTypes: { movies: true, series: true, anime: true },
+      streamDeliveryMode: "direct",
+    });
+    const app = createApp(config, db);
+
+    const response = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
+
+    expect(response.body.resources).toEqual(["stream", "catalog", "meta"]);
+    expect(response.body.catalogs).toEqual([
+      { type: "movie", id: "ftp-movies", name: "Archive 3D Movies", extra: [{ name: "skip" }] },
+      { type: "series", id: "ftp-series", name: "Archive 3D Series", extra: [{ name: "skip" }] },
+      { type: "series", id: "ftp-anime", name: "Archive 3D Anime", extra: [{ name: "skip" }] },
+      { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: [{ name: "skip" }] },
+    ]);
+  });
+
   it("returns empty streams without fetching metadata for malformed Stremio ids", async () => {
     const db = new Database(":memory:");
     migrate(db);
