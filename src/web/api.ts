@@ -37,6 +37,29 @@ export type IndexStatus = {
   mediaItems: number;
 };
 
+export type ScanStatus = {
+  id: number | null;
+  status: "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped";
+  trigger: "manual" | "scheduled" | null;
+  progressPercent: number;
+  entriesSeen: number;
+  filesSeen: number;
+  directoriesSeen: number;
+  currentPath: string | null;
+  estimatedSecondsRemaining: number | null;
+  message: string | null;
+  error: string | null;
+  queuedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  mediaItems: number;
+};
+
+export type ScanSchedule = {
+  intervalMinutes: number;
+  nextScheduledScanAt: string | null;
+};
+
 export type ConnectionStatus = {
   lastTestedAt: string | null;
   ok: boolean | null;
@@ -74,9 +97,17 @@ export type AuthenticatedCustomizationRequest = CreateProfileRequest & {
 };
 
 export type RescanResponse = {
-  filesSeen: number;
-  lastScanAt: string;
-  mediaItems: number;
+  scanStatus: ScanStatus;
+};
+
+export type ScanStatusResponse = {
+  indexStatus: IndexStatus;
+  scanStatus: ScanStatus;
+  scanSchedule: ScanSchedule;
+};
+
+export type SaveScanScheduleRequest = CreateProfileRequest & {
+  intervalMinutes: number;
 };
 
 export type SetupStatusResponse = {
@@ -144,13 +175,25 @@ export async function saveFtpSettings(request: AuthenticatedFtpRequest): Promise
   return readJson<{ ok: true }>(response);
 }
 
-export async function loadFtpSettings(request: CreateProfileRequest): Promise<{ ftpConfig: LoadedFtpConfig; indexStatus: IndexStatus; connectionStatus: ConnectionStatus }> {
+export async function loadFtpSettings(request: CreateProfileRequest): Promise<{
+  ftpConfig: LoadedFtpConfig;
+  indexStatus: IndexStatus;
+  scanStatus: ScanStatus;
+  scanSchedule: ScanSchedule;
+  connectionStatus: ConnectionStatus;
+}> {
   const response = await fetch("/api/profile/ftp/load", {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(request),
   });
-  return readJson<{ ftpConfig: LoadedFtpConfig; indexStatus: IndexStatus; connectionStatus: ConnectionStatus }>(response);
+  return readJson<{
+    ftpConfig: LoadedFtpConfig;
+    indexStatus: IndexStatus;
+    scanStatus: ScanStatus;
+    scanSchedule: ScanSchedule;
+    connectionStatus: ConnectionStatus;
+  }>(response);
 }
 
 export async function loadCustomization(request: CreateProfileRequest): Promise<{ customization: AddonCustomization }> {
@@ -178,4 +221,22 @@ export async function rescanIndex(request: CreateProfileRequest): Promise<Rescan
     body: JSON.stringify(request),
   });
   return readJson<RescanResponse>(response);
+}
+
+export async function loadScanStatus(request: CreateProfileRequest): Promise<ScanStatusResponse> {
+  const response = await fetch("/api/profile/index/status", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<ScanStatusResponse>(response);
+}
+
+export async function saveScanSchedule(request: SaveScanScheduleRequest): Promise<{ scanSchedule: ScanSchedule }> {
+  const response = await fetch("/api/profile/index/schedule", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<{ scanSchedule: ScanSchedule }>(response);
 }

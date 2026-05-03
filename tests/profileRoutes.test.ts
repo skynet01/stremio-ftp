@@ -21,6 +21,12 @@ function config(): AppConfig {
     profileRateLimitWindowMs: 60000,
     profileRateLimitMax: 30,
     tmdbApiKey: null,
+    scanGlobalConcurrency: 1,
+    scanQueueMax: 10,
+    scanCooldownMs: 60000,
+    scanJobTimeoutMs: 1800000,
+    scanSchedulerIntervalMs: 60000,
+    scanProgressAverageItems: 2000,
   };
 }
 
@@ -165,7 +171,7 @@ describe("profile routes", () => {
     expect(response.body).toEqual({ error: "Too many profile attempts" });
   });
 
-  it("saves FTP settings and refreshes the media index", async () => {
+  it("saves FTP settings and enqueues a background media index refresh", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const app = createApp(config(), db, {
@@ -212,9 +218,26 @@ describe("profile routes", () => {
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(200);
 
-    expect(response.body.filesSeen).toBe(1);
-    expect(response.body.mediaItems).toBe(1);
-    expect(response.body.lastScanAt).toEqual(expect.any(String));
+    expect(response.body.scanStatus).toMatchObject({
+      id: expect.any(Number),
+      status: expect.stringMatching(/queued|running|succeeded/),
+      trigger: "manual",
+    });
+
+    let status = response.body.scanStatus;
+    for (let attempt = 0; attempt < 20 && status.status !== "succeeded"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const statusResponse = await request(app)
+        .post("/api/profile/index/status")
+        .set("x-setup-token", "setup-secret-123")
+        .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+        .expect(200);
+      status = statusResponse.body.scanStatus;
+    }
+
+    expect(status.filesSeen).toBe(1);
+    expect(status.mediaItems).toBe(1);
+    expect(status.finishedAt).toEqual(expect.any(String));
 
     const loaded = await request(app)
       .post("/api/profile/ftp/load")
@@ -222,10 +245,30 @@ describe("profile routes", () => {
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(200);
 
-    expect(loaded.body.indexStatus).toEqual({
-      lastScanAt: response.body.lastScanAt,
-      mediaItems: 1,
-    });
+    expect(loaded.body.indexStatus.mediaItems).toBe(1);
+    expect(loaded.body.scanStatus.status).toBe("succeeded");
+    expect(loaded.body.scanSchedule).toEqual({ intervalMinutes: 0, nextScheduledScanAt: null });
+  });
+
+  it("saves scan schedule settings", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    const response = await request(app)
+      .post("/api/profile/index/schedule")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", intervalMinutes: 360 })
+      .expect(200);
+
+    expect(response.body.scanSchedule.intervalMinutes).toBe(360);
+    expect(response.body.scanSchedule.nextScheduledScanAt).toEqual(expect.any(String));
   });
 
   it("loads saved FTP settings with the saved password after authentication", async () => {
@@ -277,6 +320,27 @@ describe("profile routes", () => {
       indexStatus: {
         lastScanAt: null,
         mediaItems: 0,
+      },
+      scanStatus: {
+        id: null,
+        status: "idle",
+        trigger: null,
+        progressPercent: 0,
+        entriesSeen: 0,
+        filesSeen: 0,
+        directoriesSeen: 0,
+        currentPath: null,
+        estimatedSecondsRemaining: null,
+        message: null,
+        error: null,
+        queuedAt: null,
+        startedAt: null,
+        finishedAt: null,
+        mediaItems: 0,
+      },
+      scanSchedule: {
+        intervalMinutes: 0,
+        nextScheduledScanAt: null,
       },
       connectionStatus: {
         lastTestedAt: null,

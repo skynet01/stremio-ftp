@@ -18,8 +18,34 @@ describe("loadConfig", () => {
     expect(config.logLevel).toBe("debug");
     expect(config.sqlitePath).toBe("/tmp/stremio-ftp-test/stremio-ftp.sqlite");
     expect(config.maxOnDemandSearchMs).toBe(4500);
+    expect(config.scanGlobalConcurrency).toBe(2);
+    expect(config.scanQueueMax).toBe(50);
+    expect(config.scanCooldownMs).toBe(900000);
+    expect(config.scanJobTimeoutMs).toBe(1800000);
+    expect(config.scanSchedulerIntervalMs).toBe(60000);
+    expect(config.scanProgressAverageItems).toBe(2000);
     expect(config.setupToken).toBe("setup-secret-123");
     expect(config.tmdbApiKey).toBe("tmdb-key");
+  });
+
+  it("loads scan queue environment values", () => {
+    const config = loadConfig({
+      BASE_URL: "https://example.test",
+      CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      SCAN_GLOBAL_CONCURRENCY: "3",
+      SCAN_QUEUE_MAX: "75",
+      SCAN_COOLDOWN_MS: "120000",
+      SCAN_JOB_TIMEOUT_MS: "900000",
+      SCAN_SCHEDULER_INTERVAL_MS: "30000",
+      SCAN_PROGRESS_AVERAGE_ITEMS: "5000",
+    });
+
+    expect(config.scanGlobalConcurrency).toBe(3);
+    expect(config.scanQueueMax).toBe(75);
+    expect(config.scanCooldownMs).toBe(120000);
+    expect(config.scanJobTimeoutMs).toBe(900000);
+    expect(config.scanSchedulerIntervalMs).toBe(30000);
+    expect(config.scanProgressAverageItems).toBe(5000);
   });
 
   it("allows setup token to be omitted", () => {

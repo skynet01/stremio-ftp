@@ -41,6 +41,11 @@ export type IndexStatus = {
   mediaItems: number;
 };
 
+export type ScanSchedule = {
+  intervalMinutes: number;
+  nextScheduledScanAt: string | null;
+};
+
 export type ConnectionStatus = {
   lastTestedAt: string | null;
   ok: boolean | null;
@@ -74,6 +79,10 @@ export class ProfileService {
     private readonly db: Database.Database,
     private readonly encryptionKey: string,
   ) {}
+
+  get database() {
+    return this.db;
+  }
 
   async createProfile(browserUid: string, passphrase: string) {
     const token = randomToken();
@@ -211,6 +220,41 @@ export class ProfileService {
       .prepare("update profiles set last_indexed_at = ?, indexed_media_count = ?, updated_at = ? where id = ?")
       .run(status.lastScanAt, status.mediaItems, new Date().toISOString(), profileId);
     if (result.changes === 0) throw new ProfileNotFoundError();
+  }
+
+  getScanSchedule(profileId: number): ScanSchedule {
+    const row = this.db.prepare("select scan_interval_minutes, next_scheduled_scan_at from profiles where id = ?").get(profileId) as
+      | { scan_interval_minutes: number; next_scheduled_scan_at: string | null }
+      | undefined;
+    if (!row) throw new ProfileNotFoundError();
+    return {
+      intervalMinutes: row.scan_interval_minutes,
+      nextScheduledScanAt: row.next_scheduled_scan_at,
+    };
+  }
+
+  saveScanSchedule(profileId: number, schedule: ScanSchedule) {
+    const result = this.db
+      .prepare("update profiles set scan_interval_minutes = ?, next_scheduled_scan_at = ?, updated_at = ? where id = ?")
+      .run(schedule.intervalMinutes, schedule.nextScheduledScanAt, new Date().toISOString(), profileId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
+  }
+
+  dueScheduledScanProfileIds(nowIso: string): number[] {
+    const rows = this.db
+      .prepare(
+        `
+        select id
+        from profiles
+        where scan_interval_minutes > 0
+          and next_scheduled_scan_at is not null
+          and next_scheduled_scan_at <= ?
+          and encrypted_ftp_config is not null
+        order by next_scheduled_scan_at asc, id asc
+      `,
+      )
+      .all(nowIso) as { id: number }[];
+    return rows.map((row) => row.id);
   }
 
   getConnectionStatus(profileId: number): ConnectionStatus {

@@ -4,14 +4,16 @@ import {
   createProfile,
   loadCustomization,
   loadFtpSettings,
+  loadScanStatus,
   loadSetupStatus,
   rescanIndex,
   saveCustomization,
   saveFtpSettings,
+  saveScanSchedule,
   testFtpSettings,
   unlockProfile,
 } from "./api.js";
-import type { AddonCustomization, ConnectionStatus, IndexStatus, LoadedFtpConfig } from "./api.js";
+import type { AddonCustomization, ConnectionStatus, IndexStatus, LoadedFtpConfig, ScanSchedule, ScanStatus } from "./api.js";
 
 type StatusTone = "green" | "amber" | "red" | "gray";
 const STORAGE_KEYS = {
@@ -32,6 +34,27 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
 };
 const GITHUB_URL = "https://github.com/skynet01/stremio-ftp";
 const APP_VERSION = __APP_VERSION__;
+const DEFAULT_SCAN_STATUS: ScanStatus = {
+  id: null,
+  status: "idle",
+  trigger: null,
+  progressPercent: 0,
+  entriesSeen: 0,
+  filesSeen: 0,
+  directoriesSeen: 0,
+  currentPath: null,
+  estimatedSecondsRemaining: null,
+  message: null,
+  error: null,
+  queuedAt: null,
+  startedAt: null,
+  finishedAt: null,
+  mediaItems: 0,
+};
+const DEFAULT_SCAN_SCHEDULE: ScanSchedule = {
+  intervalMinutes: 0,
+  nextScheduledScanAt: null,
+};
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
   return h("span", { className: `badge badge-${tone}` }, children);
@@ -61,6 +84,16 @@ function formatScanTime(lastScanAt: string | null) {
 function formatConnectionStatus(status: ConnectionStatus) {
   if (!status.lastTestedAt) return "Untested";
   return `${status.ok ? "Passed" : "Failed"} ${formatScanTime(status.lastTestedAt)}`;
+}
+
+function formatEta(seconds: number | null) {
+  if (seconds === null) return "Estimating";
+  if (seconds < 60) return `${seconds}s left`;
+  return `${Math.ceil(seconds / 60)}m left`;
+}
+
+function scanIsActive(status: ScanStatus) {
+  return status.status === "queued" || status.status === "running";
 }
 
 function filledClass(value: string | number | boolean | null | undefined, extra = "") {
@@ -109,6 +142,8 @@ export function App() {
   const [indexState, setIndexState] = useState<"idle" | "working" | "ready" | "error">("idle");
   const [mediaItems, setMediaItems] = useState<number | null>(null);
   const [lastScanAt, setLastScanAt] = useState<string | null>(null);
+  const [scanStatus, setScanStatus] = useState<ScanStatus>(DEFAULT_SCAN_STATUS);
+  const [scanSchedule, setScanSchedule] = useState<ScanSchedule>(DEFAULT_SCAN_SCHEDULE);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({ lastTestedAt: null, ok: null });
   const [manifestUrl, setManifestUrl] = useState<string | null>(null);
   const [stremioInstallUrl, setStremioInstallUrl] = useState<string | null>(null);
@@ -143,6 +178,16 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setupTokenRequired]);
 
+  useEffect(() => {
+    if (!profileReady || !scanIsActive(scanStatus)) return;
+    const timer = window.setInterval(() => {
+      void refreshScanStatus();
+    }, 1000);
+    return () => window.clearInterval(timer);
+    // Poll only while the current scan is active.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileReady, scanStatus.status]);
+
   function rememberInstall(manifest: string, stremioInstall: string) {
     setManifestUrl(manifest);
     setStremioInstallUrl(stremioInstall);
@@ -175,6 +220,34 @@ export function App() {
     setLastScanAt(indexStatus.lastScanAt);
     setMediaItems(indexStatus.mediaItems);
     if (indexStatus.lastScanAt) setIndexState("ready");
+  }
+
+  function applyScanStatus(status: ScanStatus) {
+    setScanStatus(status);
+    if (scanIsActive(status)) {
+      setIndexState("working");
+      setFtpMessage(status.message || "Scanning FTP library.");
+      return;
+    }
+    if (status.status === "succeeded") {
+      setIndexState("ready");
+      setFtpMessage(status.message || `Indexed ${status.filesSeen} media file${status.filesSeen === 1 ? "" : "s"}.`);
+      setMediaItems(status.mediaItems);
+      return;
+    }
+    if (status.status === "failed") {
+      setIndexState("error");
+      setFtpMessage(status.error || status.message || "Scan failed.");
+      return;
+    }
+    if (status.status === "skipped") {
+      setIndexState("idle");
+      setFtpMessage(status.message || "Scan skipped.");
+    }
+  }
+
+  function applyScanSchedule(schedule: ScanSchedule) {
+    setScanSchedule(schedule);
   }
 
   function applyConnectionStatus(status: ConnectionStatus) {
@@ -220,6 +293,8 @@ export function App() {
       const loaded = await loadFtpSettings({ browserUid: recoveryUid, passphrase: nextPassphrase });
       applyLoadedFtpConfig(loaded.ftpConfig);
       applyLoadedIndexStatus(loaded.indexStatus);
+      applyScanStatus(loaded.scanStatus);
+      applyScanSchedule(loaded.scanSchedule);
       applyConnectionStatus(loaded.connectionStatus);
       return true;
     } catch (error) {
@@ -387,16 +462,32 @@ export function App() {
 
   async function refreshIndex() {
     setIndexState("working");
-    setFtpMessage("Refreshing FTP index...");
+    setFtpMessage("Queueing FTP index refresh...");
     try {
       const result = await rescanIndex({ browserUid: recoveryUid, passphrase });
-      setMediaItems(result.mediaItems);
-      setLastScanAt(result.lastScanAt);
-      setIndexState("ready");
-      setFtpMessage(`Indexed ${result.filesSeen} media file${result.filesSeen === 1 ? "" : "s"}.`);
+      applyScanStatus(result.scanStatus);
     } catch (error) {
       setIndexState("error");
       setFtpMessage(error instanceof Error ? error.message : "Unable to refresh index.");
+    }
+  }
+
+  async function refreshScanStatus() {
+    const result = await loadScanStatus({ browserUid: recoveryUid, passphrase });
+    applyLoadedIndexStatus(result.indexStatus);
+    applyScanStatus(result.scanStatus);
+    applyScanSchedule(result.scanSchedule);
+  }
+
+  async function updateScanSchedule(intervalMinutes: number) {
+    setScanSchedule({ ...scanSchedule, intervalMinutes });
+    if (!profileReady) return;
+    try {
+      const result = await saveScanSchedule({ browserUid: recoveryUid, passphrase, intervalMinutes });
+      applyScanSchedule(result.scanSchedule);
+      setFtpMessage(intervalMinutes > 0 ? "Automatic scan schedule saved." : "Automatic scans disabled.");
+    } catch (error) {
+      setFtpMessage(error instanceof Error ? error.message : "Unable to save scan schedule.");
     }
   }
 
@@ -949,6 +1040,51 @@ export function App() {
             ),
           ),
         ),
+        h(
+          "div",
+          { className: "scan-controls" },
+          field(
+            "Rescan frequency",
+            "scanInterval",
+            h(
+              "select",
+              {
+                id: "scanInterval",
+                className: filledClass(scanSchedule.intervalMinutes),
+                value: String(scanSchedule.intervalMinutes),
+                disabled: !profileReady,
+                onChange: (event) => void updateScanSchedule(Number((event.currentTarget as HTMLSelectElement).value)),
+              },
+              h("option", { value: "0" }, "Manual only"),
+              h("option", { value: "360" }, "Every 6 hours"),
+              h("option", { value: "720" }, "Every 12 hours"),
+              h("option", { value: "1440" }, "Daily"),
+              h("option", { value: "10080" }, "Weekly"),
+            ),
+          ),
+          h(
+            "div",
+            { className: "scan-progress-block" },
+            h(
+              "div",
+              { className: "scan-progress-meta" },
+              h("span", null, scanStatus.status === "idle" ? "No active scan" : scanStatus.status),
+              h("span", null, scanIsActive(scanStatus) ? formatEta(scanStatus.estimatedSecondsRemaining) : `${scanStatus.progressPercent}%`),
+            ),
+            h(
+              "div",
+              {
+                className: "scan-progress",
+                role: "progressbar",
+                "aria-valuemin": 0,
+                "aria-valuemax": 100,
+                "aria-valuenow": scanStatus.progressPercent,
+              },
+              h("span", { style: { width: `${scanStatus.progressPercent}%` } }),
+            ),
+            scanStatus.currentPath ? h("p", { className: "scan-current-path" }, scanStatus.currentPath) : null,
+          ),
+        ),
         h(Notice, null, ftpMessage),
         h(
           "div",
@@ -958,7 +1094,7 @@ export function App() {
             {
               type: "button",
               className: "secondary-button",
-              disabled: !profileReady || indexState === "working",
+              disabled: !profileReady || scanIsActive(scanStatus),
               onClick: () => void refreshIndex(),
             },
             [h(RefreshCw, { key: "icon", size: 17, "aria-hidden": true }), "Rescan"],

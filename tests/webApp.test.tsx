@@ -7,10 +7,12 @@ import {
   createProfile,
   loadCustomization,
   loadFtpSettings,
+  loadScanStatus,
   loadSetupStatus,
   rescanIndex,
   saveCustomization,
   saveFtpSettings,
+  saveScanSchedule,
   testFtpSettings,
   unlockProfile,
 } from "../src/web/api";
@@ -19,10 +21,12 @@ vi.mock("../src/web/api", () => ({
   createProfile: vi.fn(),
   loadCustomization: vi.fn(),
   loadFtpSettings: vi.fn(),
+  loadScanStatus: vi.fn(),
   loadSetupStatus: vi.fn(),
   rescanIndex: vi.fn(),
   saveCustomization: vi.fn(),
   saveFtpSettings: vi.fn(),
+  saveScanSchedule: vi.fn(),
   testFtpSettings: vi.fn(),
   unlockProfile: vi.fn(),
 }));
@@ -30,16 +34,39 @@ vi.mock("../src/web/api", () => ({
 const createProfileMock = vi.mocked(createProfile);
 const loadCustomizationMock = vi.mocked(loadCustomization);
 const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
+const loadScanStatusMock = vi.mocked(loadScanStatus);
 const loadSetupStatusMock = vi.mocked(loadSetupStatus);
 const rescanIndexMock = vi.mocked(rescanIndex);
 const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
+const saveScanScheduleMock = vi.mocked(saveScanSchedule);
 const testFtpSettingsMock = vi.mocked(testFtpSettings);
 const unlockProfileMock = vi.mocked(unlockProfile);
 const defaultCatalogOptions = {
   catalogTmdbApiKey: "",
   catalogContentTypes: { movies: true, series: true, anime: false },
   libraryLayout: "auto",
+};
+const idleScanStatus = {
+  id: null,
+  status: "idle" as const,
+  trigger: null,
+  progressPercent: 0,
+  entriesSeen: 0,
+  filesSeen: 0,
+  directoriesSeen: 0,
+  currentPath: null,
+  estimatedSecondsRemaining: null,
+  message: null,
+  error: null,
+  queuedAt: null,
+  startedAt: null,
+  finishedAt: null,
+  mediaItems: 0,
+};
+const manualScanSchedule = {
+  intervalMinutes: 0,
+  nextScheduledScanAt: null,
 };
 
 describe("App", () => {
@@ -49,11 +76,13 @@ describe("App", () => {
     createProfileMock.mockReset();
     loadCustomizationMock.mockReset();
     loadFtpSettingsMock.mockReset();
+    loadScanStatusMock.mockReset();
     loadSetupStatusMock.mockReset();
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: true });
     rescanIndexMock.mockReset();
     saveCustomizationMock.mockReset();
     saveFtpSettingsMock.mockReset();
+    saveScanScheduleMock.mockReset();
     testFtpSettingsMock.mockReset();
     unlockProfileMock.mockReset();
   });
@@ -155,6 +184,8 @@ describe("App", () => {
         lastTestedAt: "2026-05-02T22:40:00.000Z",
         ok: true,
       },
+      scanStatus: { ...idleScanStatus, mediaItems: 42 },
+      scanSchedule: manualScanSchedule,
     });
     loadCustomizationMock.mockResolvedValue({
       customization: {
@@ -340,6 +371,8 @@ describe("App", () => {
         lastTestedAt: "2026-05-02T22:40:00.000Z",
         ok: true,
       },
+      scanStatus: { ...idleScanStatus, mediaItems: 7 },
+      scanSchedule: manualScanSchedule,
     });
 
     render(<App />);
@@ -442,7 +475,41 @@ describe("App", () => {
         ok: true,
       },
     });
-    rescanIndexMock.mockResolvedValue({ filesSeen: 3, mediaItems: 3, lastScanAt: "2026-05-02T22:45:00.000Z" });
+    rescanIndexMock.mockResolvedValue({
+      scanStatus: {
+        ...idleScanStatus,
+        id: 12,
+        status: "running",
+        trigger: "manual",
+        progressPercent: 25,
+        entriesSeen: 500,
+        filesSeen: 100,
+        directoriesSeen: 12,
+        currentPath: "/Movies",
+        estimatedSecondsRemaining: 45,
+        message: "Scanning FTP library.",
+        queuedAt: "2026-05-02T22:44:00.000Z",
+        startedAt: "2026-05-02T22:44:01.000Z",
+      },
+    });
+    loadScanStatusMock.mockResolvedValue({
+      indexStatus: {
+        lastScanAt: "2026-05-02T22:45:00.000Z",
+        mediaItems: 3,
+      },
+      scanStatus: {
+        ...idleScanStatus,
+        id: 12,
+        status: "succeeded",
+        trigger: "manual",
+        progressPercent: 100,
+        filesSeen: 3,
+        mediaItems: 3,
+        message: "Indexed 3 media files.",
+        finishedAt: "2026-05-02T22:45:00.000Z",
+      },
+      scanSchedule: manualScanSchedule,
+    });
 
     render(<App />);
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
@@ -491,9 +558,45 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
     await waitFor(() => expect(rescanIndexMock).toHaveBeenCalledWith({ browserUid: recoveryUidValue, passphrase: "passphrase" }));
+    expect(await screen.findByText("Scanning FTP library.")).toBeTruthy();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
+    await waitFor(() => expect(loadScanStatusMock).toHaveBeenCalledWith({ browserUid: recoveryUidValue, passphrase: "passphrase" }), {
+      timeout: 2000,
+    });
     expect(await screen.findByText("Indexed 3 media files.")).toBeTruthy();
     expect(screen.getByText("3")).toBeTruthy();
     expect(screen.getByText(/May 02, 2026, 3:45 PM/)).toBeTruthy();
+  });
+
+  it("saves scan frequency after profile setup", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveScanScheduleMock.mockResolvedValue({
+      scanSchedule: {
+        intervalMinutes: 720,
+        nextScheduledScanAt: "2026-05-03T10:00:00.000Z",
+      },
+    });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("link", { name: "Install in Stremio" });
+
+    fireEvent.change(screen.getByLabelText("Rescan frequency"), { target: { value: "720" } });
+
+    await waitFor(() =>
+      expect(saveScanScheduleMock).toHaveBeenCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        intervalMinutes: 720,
+      }),
+    );
   });
 
   it("saves the catalog toggle after profile setup", async () => {

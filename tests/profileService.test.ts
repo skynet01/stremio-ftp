@@ -70,4 +70,32 @@ describe("ProfileService", () => {
 
     expect(() => service.rotateInstallToken(404)).toThrow("Profile not found");
   });
+
+  it("saves scan schedule settings and lists due profiles", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, key);
+    const created = await service.createProfile("browser-uid", "passphrase");
+    service.saveFtpConfig(created.profileId, {
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "explicit",
+      allowInvalidCertificate: true,
+      roots: ["/Media"],
+    });
+
+    service.saveScanSchedule(created.profileId, {
+      intervalMinutes: 360,
+      nextScheduledScanAt: "2026-05-03T06:00:00.000Z",
+    });
+
+    expect(service.getScanSchedule(created.profileId)).toEqual({
+      intervalMinutes: 360,
+      nextScheduledScanAt: "2026-05-03T06:00:00.000Z",
+    });
+    expect(service.dueScheduledScanProfileIds("2026-05-03T05:59:59.000Z")).toEqual([]);
+    expect(service.dueScheduledScanProfileIds("2026-05-03T06:00:00.000Z")).toEqual([created.profileId]);
+  });
 });

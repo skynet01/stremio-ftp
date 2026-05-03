@@ -14,6 +14,7 @@ import { ProfileService } from "./profiles/profileService.js";
 import { profileRoutes } from "./profiles/profileRoutes.js";
 import { createFtpProxyResolver } from "./proxy/ftpProxyResolver.js";
 import { createProxyRouter } from "./proxy/proxyRoutes.js";
+import { ScanQueue } from "./scanner/scanQueue.js";
 import { stremioRoutes } from "./stremio/routes.js";
 
 type AppOptions = {
@@ -47,11 +48,14 @@ export function createApp(
   const profileService = new ProfileService(db, config.encryptionKey);
   const mediaRepository = new MediaRepository(db);
   const ftpClientFactory = options.ftpClientFactory ?? createBasicFtpClient;
+  const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
+  const scanScheduler = setInterval(() => scanQueue.enqueueDueScheduledScans(), config.scanSchedulerIntervalMs);
+  scanScheduler.unref();
   app.use("/api/profile", requireSetupToken(config));
   app.get("/api/setup", (_req, res) => {
     res.json({ setupTokenRequired: Boolean(config.setupToken) });
   });
-  app.use("/api", profileRoutes(config, profileService, mediaRepository, ftpClientFactory));
+  app.use("/api", profileRoutes(config, profileService, mediaRepository, ftpClientFactory, scanQueue));
   app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 

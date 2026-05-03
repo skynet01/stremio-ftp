@@ -20,6 +20,8 @@ export function migrate(db: Database.Database) {
       indexed_media_count integer not null default 0 check (indexed_media_count >= 0),
       last_ftp_tested_at text,
       last_ftp_test_ok integer check (last_ftp_test_ok is null or last_ftp_test_ok in (0, 1)),
+      scan_interval_minutes integer not null default 0 check (scan_interval_minutes >= 0),
+      next_scheduled_scan_at text,
       install_token_hash text not null unique,
       created_at text not null,
       updated_at text not null,
@@ -59,6 +61,27 @@ export function migrate(db: Database.Database) {
     create index if not exists idx_media_movie on media_files(profile_id, media_kind, imdb_id, parsed_title, parsed_year);
     create index if not exists idx_profile_install_tokens_profile_id on profile_install_tokens(profile_id);
 
+    create table if not exists scan_jobs (
+      id integer primary key autoincrement,
+      profile_id integer not null references profiles(id) on delete cascade,
+      status text not null check (status in ('queued', 'running', 'succeeded', 'failed', 'skipped')),
+      trigger text not null check (trigger in ('manual', 'scheduled')),
+      progress_percent integer not null default 0 check (progress_percent between 0 and 100),
+      entries_seen integer not null default 0 check (entries_seen >= 0),
+      files_seen integer not null default 0 check (files_seen >= 0),
+      directories_seen integer not null default 0 check (directories_seen >= 0),
+      current_path text,
+      estimated_seconds_remaining integer check (estimated_seconds_remaining is null or estimated_seconds_remaining >= 0),
+      message text,
+      error text,
+      queued_at text not null,
+      started_at text,
+      finished_at text
+    );
+
+    create index if not exists idx_scan_jobs_profile_status on scan_jobs(profile_id, status);
+    create index if not exists idx_scan_jobs_status_queued on scan_jobs(status, queued_at);
+
   `);
   ensureProfileColumn(db, "addon_name", "text");
   ensureProfileColumn(db, "addon_logo_url", "text");
@@ -73,6 +96,8 @@ export function migrate(db: Database.Database) {
   ensureProfileColumn(db, "indexed_media_count", "integer not null default 0");
   ensureProfileColumn(db, "last_ftp_tested_at", "text");
   ensureProfileColumn(db, "last_ftp_test_ok", "integer");
+  ensureProfileColumn(db, "scan_interval_minutes", "integer not null default 0");
+  ensureProfileColumn(db, "next_scheduled_scan_at", "text");
   ensureMediaColumn(db, "catalog_kind", "text not null default 'movie'");
 }
 

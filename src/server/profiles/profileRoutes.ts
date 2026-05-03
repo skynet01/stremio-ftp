@@ -1,9 +1,9 @@
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
-import { crawlProfileRoot } from "../ftp/crawler.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { MediaRepository } from "../media/mediaRepository.js";
+import type { ScanQueue } from "../scanner/scanQueue.js";
 import { DEFAULT_ADDON_CUSTOMIZATION, DuplicateProfileError, ProfileService } from "./profileService.js";
 
 const createSchema = z.object({
@@ -23,6 +23,9 @@ const ftpConfigSchema = z.object({
 
 const authenticatedSchema = createSchema;
 const saveFtpSchema = createSchema.extend({ ftpConfig: ftpConfigSchema });
+const saveScanScheduleSchema = createSchema.extend({
+  intervalMinutes: z.number().int().min(0).max(10080),
+});
 const customizationSchema = z.object({
   addonName: z.string().trim().min(1).max(80),
   addonLogoUrl: z
@@ -57,6 +60,7 @@ export function profileRoutes(
   service: ProfileService,
   mediaRepository: MediaRepository,
   ftpClientFactory: FtpClientFactory,
+  scanQueue: ScanQueue,
 ) {
   const router = Router();
   const rateLimitProfiles = profileRateLimiter(config.profileRateLimitWindowMs, config.profileRateLimitMax);
@@ -161,6 +165,8 @@ export function profileRoutes(
           roots: ftpConfig.roots,
         },
         indexStatus: service.getIndexStatus(unlocked.profileId),
+        scanStatus: scanQueue.getProfileScanStatus(unlocked.profileId),
+        scanSchedule: service.getScanSchedule(unlocked.profileId),
         connectionStatus: service.getConnectionStatus(unlocked.profileId),
       });
     } catch {
@@ -201,29 +207,43 @@ export function profileRoutes(
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
       const ftpConfig = service.getFtpConfig(unlocked.profileId);
       if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
-      const customization = service.getAddonCustomization(unlocked.profileId);
-
-      let filesSeen = 0;
-      for (const rootPath of ftpConfig.roots) {
-        const result = await crawlProfileRoot({
-          profileId: unlocked.profileId,
-          rootPath,
-          ftpConfig,
-          factory: ftpClientFactory,
-          repo: mediaRepository,
-          parserOptions: {
-            contentTypes: customization.catalogContentTypes,
-            libraryLayout: customization.libraryLayout,
-          },
-        });
-        filesSeen += result.filesSeen;
-      }
-      const lastScanAt = new Date().toISOString();
-      const mediaItems = mediaRepository.countForProfile(unlocked.profileId);
-      service.saveIndexStatus(unlocked.profileId, { lastScanAt, mediaItems });
-      res.json({ filesSeen, lastScanAt, mediaItems });
+      res.json({ scanStatus: scanQueue.enqueueProfileScan(unlocked.profileId, "manual") });
     } catch (error) {
       res.status(400).json({ error: ftpErrorMessage(error, "Unable to refresh FTP index") });
+    }
+  });
+
+  router.post("/profile/index/status", rateLimitProfiles, async (req, res) => {
+    const parsed = authenticatedSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid scan status request" });
+
+    try {
+      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      res.json({
+        indexStatus: service.getIndexStatus(unlocked.profileId),
+        scanStatus: scanQueue.getProfileScanStatus(unlocked.profileId),
+        scanSchedule: service.getScanSchedule(unlocked.profileId),
+      });
+    } catch {
+      res.status(401).json({ error: "Invalid passphrase" });
+    }
+  });
+
+  router.post("/profile/index/schedule", rateLimitProfiles, async (req, res) => {
+    const parsed = saveScanScheduleSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid scan schedule request" });
+
+    try {
+      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      const nextScheduledScanAt =
+        parsed.data.intervalMinutes > 0 ? new Date(Date.now() + parsed.data.intervalMinutes * 60_000).toISOString() : null;
+      service.saveScanSchedule(unlocked.profileId, {
+        intervalMinutes: parsed.data.intervalMinutes,
+        nextScheduledScanAt,
+      });
+      res.json({ scanSchedule: service.getScanSchedule(unlocked.profileId) });
+    } catch {
+      res.status(401).json({ error: "Invalid passphrase" });
     }
   });
 

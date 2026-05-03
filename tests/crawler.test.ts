@@ -54,6 +54,45 @@ describe("crawler", () => {
     expect(repo.findEpisode(profileId, "show name", 2, 5)).toHaveLength(1);
   });
 
+  it("reports crawl progress while walking directories and files", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+    const progress: Array<{ entriesSeen: number; filesSeen: number; directoriesSeen: number; currentPath: string }> = [];
+    const factory: FtpClientFactory = async () => ({
+      list: async (path) =>
+        path === "/"
+          ? [
+              { name: "Movies", path: "/Movies", type: "directory" },
+              { name: "The.Matrix.1999.mkv", path: "/The.Matrix.1999.mkv", type: "file", size: 1000 },
+            ]
+          : [{ name: "Avatar.2009.mkv", path: "/Movies/Avatar.2009.mkv", type: "file", size: 2000 }],
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
+      close: async () => undefined,
+    });
+
+    const result = await crawlProfileRoot({
+      profileId,
+      rootPath: "/",
+      ftpConfig,
+      factory,
+      repo,
+      onProgress: (nextProgress) => progress.push(nextProgress),
+    });
+
+    expect(result.filesSeen).toBe(2);
+    expect(progress.at(0)).toMatchObject({ entriesSeen: 0, filesSeen: 0, directoriesSeen: 1, currentPath: "/" });
+    expect(progress).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ entriesSeen: 2, filesSeen: 1, directoriesSeen: 2, currentPath: "/Movies/Avatar.2009.mkv" }),
+        expect.objectContaining({ entriesSeen: 3, filesSeen: 2, directoriesSeen: 2, currentPath: "/The.Matrix.1999.mkv" }),
+      ]),
+    );
+  });
+
   it("prunes stale files under the crawled root after a successful crawl", async () => {
     const db = new Database(":memory:");
     migrate(db);

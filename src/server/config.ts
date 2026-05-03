@@ -12,6 +12,12 @@ export type AppConfig = {
   maxOnDemandSearchMs: number;
   profileRateLimitWindowMs: number;
   profileRateLimitMax: number;
+  scanGlobalConcurrency: number;
+  scanQueueMax: number;
+  scanCooldownMs: number;
+  scanJobTimeoutMs: number;
+  scanSchedulerIntervalMs: number;
+  scanProgressAverageItems: number;
 };
 
 function requireValue(env: NodeJS.ProcessEnv | Record<string, string | undefined>, key: string): string {
@@ -59,5 +65,11 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     maxOnDemandSearchMs: numberValue(env, "MAX_ON_DEMAND_SEARCH_MS", 4500),
     profileRateLimitWindowMs: numberValue(env, "PROFILE_RATE_LIMIT_WINDOW_MS", 600000),
     profileRateLimitMax: numberValue(env, "PROFILE_RATE_LIMIT_MAX", 20),
+    scanGlobalConcurrency: numberValue(env, "SCAN_GLOBAL_CONCURRENCY", 2),
+    scanQueueMax: numberValue(env, "SCAN_QUEUE_MAX", 50),
+    scanCooldownMs: numberValue(env, "SCAN_COOLDOWN_MS", 900000),
+    scanJobTimeoutMs: numberValue(env, "SCAN_JOB_TIMEOUT_MS", 1800000),
+    scanSchedulerIntervalMs: numberValue(env, "SCAN_SCHEDULER_INTERVAL_MS", 60000),
+    scanProgressAverageItems: numberValue(env, "SCAN_PROGRESS_AVERAGE_ITEMS", 2000),
   };
 }

@@ -13,6 +13,14 @@ export type CrawlProfileRootInput = {
   factory: FtpClientFactory;
   repo: MediaRepository;
   parserOptions?: ParseMediaOptions;
+  onProgress?: (progress: CrawlProgress) => void;
+};
+
+export type CrawlProgress = {
+  entriesSeen: number;
+  filesSeen: number;
+  directoriesSeen: number;
+  currentPath: string;
 };
 
 export async function crawlProfileRoot(input: CrawlProfileRootInput) {
@@ -21,6 +29,11 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
   const visitedDirectories = new Set<string>();
   let filesSeen = 0;
   let entriesSeen = 0;
+  let directoriesSeen = 0;
+
+  function report(currentPath: string) {
+    input.onProgress?.({ entriesSeen, filesSeen, directoriesSeen, currentPath });
+  }
 
   async function walk(path: string, depth: number) {
     if (depth > MAX_CRAWL_DEPTH) throw new Error(`Maximum FTP crawl depth exceeded at ${path}`);
@@ -28,6 +41,8 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     const normalizedPath = normalizeFtpPath(path);
     if (visitedDirectories.has(normalizedPath)) return;
     visitedDirectories.add(normalizedPath);
+    directoriesSeen += 1;
+    report(normalizedPath);
 
     const entries = await client.list(normalizedPath);
     for (const entry of entries) {
@@ -48,6 +63,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
             lastSeenAt: crawlStartedAt,
           });
         }
+        report(entry.path);
       }
     }
   }

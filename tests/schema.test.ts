@@ -76,7 +76,28 @@ describe("schema", () => {
     const tables = db
       .prepare("select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name")
       .all() as { name: string }[];
-    expect(tables.map((row) => row.name)).toEqual(["media_files", "profile_install_tokens", "profiles"]);
+    expect(tables.map((row) => row.name)).toEqual(["media_files", "profile_install_tokens", "profiles", "scan_jobs"]);
+  });
+
+  it("creates scan schedule columns and scan job persistence", () => {
+    const db = createDb();
+    const profileColumns = db.prepare("pragma table_info(profiles)").all() as { name: string }[];
+    const scanColumns = db.prepare("pragma table_info(scan_jobs)").all() as { name: string }[];
+
+    expect(profileColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["scan_interval_minutes", "next_scheduled_scan_at"]));
+    expect(scanColumns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "profile_id",
+        "status",
+        "trigger",
+        "progress_percent",
+        "entries_seen",
+        "files_seen",
+        "directories_seen",
+        "current_path",
+        "estimated_seconds_remaining",
+      ]),
+    );
   });
 
   it("creates media lookup indexes", () => {
