@@ -1,4 +1,4 @@
-import { Copy, RefreshCw } from "lucide-react";
+import { Copy, Github, RefreshCw } from "lucide-react";
 import { createElement as h, type ReactNode, useEffect, useState } from "react";
 import {
   createProfile,
@@ -1182,7 +1182,11 @@ export function App() {
       h("p", null, `Copyright ${currentYear} Stremio FTP Addon. v${APP_VERSION}`),
       h("p", null, "Not responsible for files, streams, or other content hosted on connected servers."),
       h("button", { type: "button", className: "footer-link-button", onClick: () => setChangelogOpen(true) }, "Changelog"),
-      h("a", { href: GITHUB_URL, target: "_blank", rel: "noreferrer" }, GITHUB_URL),
+      h(
+        "a",
+        { href: GITHUB_URL, target: "_blank", rel: "noreferrer", className: "footer-icon-link", "aria-label": "GitHub repository" },
+        h(Github, { size: 18, "aria-hidden": true }),
+      ),
     ),
     changelogOpen
       ? h(
