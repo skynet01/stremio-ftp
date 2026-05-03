@@ -825,16 +825,100 @@ input:-webkit-autofill:active {
   margin: 0;
 }
 
-.site-footer a {
+.site-footer a,
+.footer-link-button {
   color: var(--accent);
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: inherit;
   text-decoration: none;
   overflow-wrap: anywhere;
 }
 
-.site-footer a:hover {
+.footer-link-button {
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  text-transform: none;
+}
+
+.site-footer a:hover,
+.footer-link-button:hover {
   color: var(--accent-2);
   text-decoration: underline;
   text-underline-offset: 4px;
+}
+
+.changelog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(10, 10, 7, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.changelog-drawer {
+  width: min(760px, 100%);
+  max-height: min(76vh, 640px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px 16px 10px 10px;
+  padding: clamp(20px, 3vw, 30px);
+  background:
+    linear-gradient(180deg, rgba(168, 224, 99, 0.06), rgba(168, 224, 99, 0.016)),
+    var(--panel);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.035) inset,
+    0 34px 90px -36px rgba(0, 0, 0, 0.95);
+}
+
+.changelog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.changelog-header h2 {
+  margin: 0;
+  color: var(--cream);
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: clamp(1.75rem, 3vw, 2.6rem);
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.changelog-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changelog-list li {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 14px;
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 12px;
+  color: var(--cream-dim);
+}
+
+.changelog-list code {
+  color: var(--accent);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
 }
 
 .toggle-row {

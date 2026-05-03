@@ -14,7 +14,7 @@ export function publicManifest(customization: Partial<AddonCustomization> = {}) 
   ];
   return {
     id: "community.stremio-ftp",
-    version: "0.2.0",
+    version: "0.2.1",
     name: addonName,
     description: addonDescription,
     resources: catalogEnabled ? ["stream", "catalog", "meta"] : ["stream"],

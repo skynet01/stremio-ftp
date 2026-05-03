@@ -35,6 +35,7 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
 };
 const GITHUB_URL = "https://github.com/skynet01/stremio-ftp";
 const APP_VERSION = __APP_VERSION__;
+const APP_CHANGELOG = __APP_CHANGELOG__;
 const DEFAULT_SCAN_STATUS: ScanStatus = {
   id: null,
   status: "idle",
@@ -172,6 +173,7 @@ export function App() {
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingLogo, setEditingLogo] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
   const [customizationMessage, setCustomizationMessage] = useState("Click the title, subtitle, or avatar to customize the Stremio addon.");
 
   const profileReady = profileState === "created" || profileState === "unlocked";
@@ -1179,7 +1181,38 @@ export function App() {
       { className: "site-footer" },
       h("p", null, `Copyright ${currentYear} Stremio FTP Addon. v${APP_VERSION}`),
       h("p", null, "Not responsible for files, streams, or other content hosted on connected servers."),
+      h("button", { type: "button", className: "footer-link-button", onClick: () => setChangelogOpen(true) }, "Changelog"),
       h("a", { href: GITHUB_URL, target: "_blank", rel: "noreferrer" }, GITHUB_URL),
     ),
+    changelogOpen
+      ? h(
+          "div",
+          { className: "changelog-backdrop" },
+          h(
+            "aside",
+            { className: "changelog-drawer", role: "dialog", "aria-modal": true, "aria-labelledby": "changelog-heading" },
+            h(
+              "div",
+              { className: "changelog-header" },
+              h("div", null, h("span", { className: "section-label" }, `v${APP_VERSION}`), h("h2", { id: "changelog-heading" }, "Latest changes")),
+              h("button", { type: "button", className: "secondary-button", onClick: () => setChangelogOpen(false) }, "Close"),
+            ),
+            APP_CHANGELOG.length
+              ? h(
+                  "ol",
+                  { className: "changelog-list" },
+                  APP_CHANGELOG.map((commit) =>
+                    h(
+                      "li",
+                      { key: commit.hash },
+                      h("code", null, commit.hash),
+                      h("span", null, commit.subject),
+                    ),
+                  ),
+                )
+              : h(Notice, null, "No commit metadata was available for this build."),
+          ),
+        )
+      : null,
   );
 }

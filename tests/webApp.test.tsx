@@ -108,11 +108,23 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Show indexed FTP catalog in Stremio")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.2.0`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.2.1`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "https://github.com/skynet01/stremio-ftp" }).getAttribute("href")).toBe(
       "https://github.com/skynet01/stremio-ftp",
     );
+  });
+
+  it("opens a footer changelog drawer with recent commits", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Changelog" }));
+
+    expect(screen.getByRole("dialog", { name: "Latest changes" })).toBeTruthy();
+    expect(screen.getByText("fix: save library settings with ftp settings")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Latest changes" })).toBeNull();
   });
 
   it("renders when crypto.randomUUID is unavailable", () => {
