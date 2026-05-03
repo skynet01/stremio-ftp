@@ -13,6 +13,12 @@
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://ftpstrem.skynetsource.com/" />
     <meta property="og:title" content="Stremio FTP Addon" />
+    <meta property="og:image" content="https://raw.githubusercontent.com/skynet01/stremio-ftp/main/Screenshot.jpg" />
+    <meta property="og:image:secure_url" content="https://raw.githubusercontent.com/skynet01/stremio-ftp/main/Screenshot.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="3602" />
+    <meta property="og:image:height" content="3402" />
+    <meta property="og:image:alt" content="Stremio FTP Addon configuration portal screenshot" />
     <meta
       property="og:description"
       content="Self-hosted Stremio source addon for streaming movies and series episodes from your own FTP or FTPS server."
@@ -20,6 +26,8 @@
     <meta property="og:site_name" content="Stremio FTP Addon" />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="Stremio FTP Addon" />
+    <meta name="twitter:image" content="https://raw.githubusercontent.com/skynet01/stremio-ftp/main/Screenshot.jpg" />
+    <meta name="twitter:image:alt" content="Stremio FTP Addon configuration portal screenshot" />
     <meta
       name="twitter:description"
       content="Stream movies and series episodes from a private FTP server using a generated Stremio manifest URL."
@@ -27,6 +35,19 @@
     <title>Stremio FTP Addon</title>
   </head>
   <body>
+    <noscript>
+      <main>
+        <h1>Stremio FTP Addon</h1>
+        <p>
+          Stremio FTP Addon is a self-hosted Stremio source addon that streams movies and series episodes from your own
+          FTP or FTPS server through a private generated manifest URL.
+        </p>
+        <p>
+          The configuration portal stores FTP credentials in a browser profile, scans your library, and can expose
+          optional movie, series, anime, and other catalogs with TMDB metadata.
+        </p>
+      </main>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/web/main.tsx"></script>
   </body>

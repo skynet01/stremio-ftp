@@ -10,6 +10,11 @@ describe("static SEO metadata", () => {
     expect(html).toContain('name="robots" content="index,follow"');
     expect(html).toContain('rel="canonical" href="https://ftpstrem.skynetsource.com/"');
     expect(html).toContain('property="og:title" content="Stremio FTP Addon"');
+    expect(html).toContain('property="og:image" content="https://raw.githubusercontent.com/skynet01/stremio-ftp/main/Screenshot.jpg"');
+    expect(html).toContain('property="og:image:alt" content="Stremio FTP Addon configuration portal screenshot"');
     expect(html).toContain('name="twitter:card" content="summary"');
+    expect(html).toContain('name="twitter:image" content="https://raw.githubusercontent.com/skynet01/stremio-ftp/main/Screenshot.jpg"');
+    expect(html).toContain("<noscript>");
+    expect(html).toContain("self-hosted Stremio source addon");
   });
 });
