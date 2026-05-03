@@ -13,6 +13,7 @@ import {
   testFtpSettings,
   unlockProfile,
 } from "./api.js";
+import { APP_CHANGELOG } from "./changelog.js";
 import type { AddonCustomization, ConnectionStatus, IndexStatus, LoadedFtpConfig, ScanSchedule, ScanStatus } from "./api.js";
 
 type StatusTone = "green" | "amber" | "red" | "gray";
@@ -35,7 +36,6 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
 };
 const GITHUB_URL = "https://github.com/skynet01/stremio-ftp";
 const APP_VERSION = __APP_VERSION__;
-const APP_CHANGELOG = __APP_CHANGELOG__;
 const DEFAULT_SCAN_STATUS: ScanStatus = {
   id: null,
   status: "idle",
