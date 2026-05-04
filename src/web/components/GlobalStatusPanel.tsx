@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { GlobalStats } from "../api.js";
 import { formatScanTime } from "./ui.js";
 
@@ -41,35 +41,35 @@ export function GlobalStatusPanel({
       <dl className="status-list global-status-list">
         <div>
           <dt>Items</dt>
-          <dd>{stats.totalItems}</dd>
+          <dd><AnimatedStatValue value={stats.totalItems} /></dd>
         </div>
         <div>
           <dt>Movies</dt>
-          <dd>{stats.movies}</dd>
+          <dd><AnimatedStatValue value={stats.movies} /></dd>
         </div>
         <div>
           <dt>Series</dt>
-          <dd>{stats.series}</dd>
+          <dd><AnimatedStatValue value={stats.series} /></dd>
         </div>
         <div>
           <dt>Anime</dt>
-          <dd>{stats.anime}</dd>
+          <dd><AnimatedStatValue value={stats.anime} /></dd>
         </div>
         <div>
           <dt>Servers</dt>
-          <dd>{stats.servers}</dd>
+          <dd><AnimatedStatValue value={stats.servers} /></dd>
         </div>
         <div>
           <dt>Active scans</dt>
-          <dd>{stats.activeScans}</dd>
+          <dd><AnimatedStatValue value={stats.activeScans} /></dd>
         </div>
         <div>
           <dt>Pending scans</dt>
-          <dd>{stats.pendingScans}</dd>
+          <dd><AnimatedStatValue value={stats.pendingScans} /></dd>
         </div>
         <div>
           <dt>Uncategorized</dt>
-          <dd>{stats.uncategorized}</dd>
+          <dd><AnimatedStatValue value={stats.uncategorized} /></dd>
         </div>
       </dl>
       {scanProgress ? (
@@ -94,4 +94,23 @@ export function GlobalStatusPanel({
       {children}
     </section>
   );
+}
+
+function AnimatedStatValue({ value }: { value: number }) {
+  const previousValue = useRef(value);
+  const [pulse, setPulse] = useState(false);
+
+  useEffect(() => {
+    if (previousValue.current === value) return;
+    previousValue.current = value;
+    setPulse(false);
+    const start = window.setTimeout(() => setPulse(true), 0);
+    const stop = window.setTimeout(() => setPulse(false), 850);
+    return () => {
+      window.clearTimeout(start);
+      window.clearTimeout(stop);
+    };
+  }, [value]);
+
+  return <span className={pulse ? "stat-value stat-value-pulse" : "stat-value"}>{value}</span>;
 }

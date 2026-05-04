@@ -18,10 +18,11 @@ By default this is a stream-source addon: open a movie or episode from another S
 - Movies and series episode filename parsing
 - Manual, scheduled, and delayed auto-start background index refreshes from the portal
 - Halt control for active scans
-- Persisted scan progress with reload-safe status, progress bar, and approximate ETA
+- Persisted scan progress with reload-safe status, progress bar, approximate ETA, and improved repeated-scan estimates from prior successful scans
+- Automatic delayed retry for transient FTP disconnects such as FIN/reset/timeout errors
 - Optional movie, series, anime, and other catalogs generated from the indexed FTP library
 - Optional TMDB metadata enrichment for catalog posters, descriptions, and artwork
-- Per-server TMDB API key override, content type toggles, folder-layout hint, and proxy/direct FTP stream delivery mode
+- Global TMDB API key, plus per-server content type toggles, folder-layout hint, and proxy/direct FTP stream delivery mode
 - Private per-profile manifest URLs for Stremio
 - HTTP range proxy streaming from FTP to Stremio
 - Docker and Docker Compose deployment
@@ -35,7 +36,8 @@ By default this is a stream-source addon: open a movie or episode from another S
 - TMDB enrichment requires `TMDB_API_KEY`. Without it, catalog items that already have IMDb IDs can still appear with basic title/year metadata but no TMDB poster art.
 - After changing FTP or library settings, click `Save FTP settings`. The server schedules a delayed scan for that FTP server about 5 minutes later, unless you manually click `Rescan` first.
 - Scans run in a background queue. New files do not appear as Stremio source options until the next manual or scheduled scan finishes.
-- Scan progress and ETA are best-effort because FTP servers do not provide a full recursive item count before traversal.
+- Scan progress and ETA are best-effort because FTP servers do not provide a full recursive item count before traversal. After a successful scan, later scans use the previous traversal size as a better progress baseline.
+- If an FTP server closes the connection mid-scan, the failed job message notes the delayed retry and the server is requeued for a later rescan.
 - Proxy streaming is the default and recommended mode. Direct FTP mode sends FTP URLs to Stremio clients; it may not work in every client, can expose FTP credentials in stream URLs, and explicit FTPS support varies by client. When supported, playback bypasses addon-server bandwidth and speed limits.
 - The manifest install token is shown when a profile is created. The server stores only a hash of it, so unlocking an existing profile can load FTP settings but cannot reconstruct an old install URL.
 - The generated manifest URL can stream indexed files for that profile. Keep it private.
@@ -84,6 +86,7 @@ SCAN_COOLDOWN_MS=900000
 SCAN_JOB_TIMEOUT_MS=1800000
 SCAN_SCHEDULER_INTERVAL_MS=60000
 SCAN_PROGRESS_AVERAGE_ITEMS=2000
+SCAN_TRANSIENT_RETRY_DELAY_MS=300000
 ```
 
 Notes:
@@ -93,7 +96,7 @@ Notes:
 - `SETUP_TOKEN` protects `/configure` and profile-management APIs. It is required unless `ALLOW_PUBLIC_PROFILE_API=true`.
 - `STREMIO_FTP_SETUP_TOKEN` is accepted as an alternate name for `SETUP_TOKEN`.
 - `ALLOW_PUBLIC_PROFILE_API=true` preserves the older no-token behavior for trusted or otherwise restricted deployments. If enabled, anyone who can reach the hosted addon can create profiles and submit FTP settings.
-- `TMDB_API_KEY` is optional. Set it as the server default if users will enable the FTP catalog option and you want posters, backdrops, descriptions, and release years from TMDB. Users can override it per profile in the portal.
+- `TMDB_API_KEY` is optional. Set it if users will enable the FTP catalog option and you want posters, backdrops, descriptions, and release years from TMDB. Users can override it per profile in the portal.
 - SQLite is stored at `$CONFIG_DIR/stremio-ftp.sqlite`.
 - `FTP_MAX_CONNECTIONS` limits simultaneous FTP sessions shared by portal tests, scans, and proxied playback. Lower it for hosts with strict connection caps.
 - `PROFILE_RATE_LIMIT_MAX` limits profile create/unlock attempts per client IP per rate-limit window.
@@ -104,6 +107,7 @@ Notes:
 - `SCAN_JOB_TIMEOUT_MS` is reserved for scan timeout policy and defaults to `1800000` or 30 minutes.
 - `SCAN_SCHEDULER_INTERVAL_MS` controls how often the server checks for due scheduled scans. Default `60000` or 1 minute.
 - `SCAN_PROGRESS_AVERAGE_ITEMS` is the denominator used for the first-pass progress estimate until the crawler has seen more entries. Default `2000`.
+- `SCAN_TRANSIENT_RETRY_DELAY_MS` controls delayed retries after transient FTP disconnects such as FIN/reset/timeout errors. Default `300000` or 5 minutes. Set `0` to disable these retries.
 
 ## Docker Compose
 
@@ -131,6 +135,7 @@ SCAN_COOLDOWN_MS=900000
 SCAN_JOB_TIMEOUT_MS=1800000
 SCAN_SCHEDULER_INTERVAL_MS=60000
 SCAN_PROGRESS_AVERAGE_ITEMS=2000
+SCAN_TRANSIENT_RETRY_DELAY_MS=300000
 ```
 
 Generate strong secrets:
@@ -168,7 +173,7 @@ If `SETUP_TOKEN` is set, enter it in the portal unlock form. Older `?setup=...` 
 4. Click `Test connection`.
 5. Click `Rescan`. The scan runs in the background; you can leave and come back to see the latest persisted status. If needed, click `Halt scan` while it is active.
 6. Optionally enable `Show indexed FTP catalog in Stremio`.
-7. If catalogs are enabled, choose the content types on that server: Movies, Series, Anime, and set a TMDB key if you do not want to use the server default.
+7. If catalogs are enabled, choose the content types on that server: Movies, Series, Anime, and set a global TMDB key if you want TMDB posters and richer catalog metadata.
 8. Choose the library layout hint: auto detect, organized by folders, or a single folder of files.
 9. Keep `Proxy through addon` stream delivery unless you specifically want Stremio clients to receive direct FTP URLs.
 10. Click `Save FTP settings` after changing FTP or library options. A delayed auto-scan is scheduled about 5 minutes later so you can keep editing without immediately locking the form behind a scan.

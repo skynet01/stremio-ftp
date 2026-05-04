@@ -161,6 +161,20 @@ describe("media parser", () => {
     });
   });
 
+  it("treats folder-derived movie years as confident matches", () => {
+    expect(
+      parseMediaPath("/Blockbuster Movies/Wicked (2024)/WICKED_3D_FSBS.mkv", {
+        contentTypes: { movies: true, series: true, anime: false },
+        libraryLayout: "folders",
+      }),
+    ).toMatchObject({
+      mediaKind: "movie",
+      parsedTitle: "wicked",
+      parsedYear: 2024,
+      confidence: 70,
+    });
+  });
+
   it("strips VR dimensions and 3D tokens from movie titles", () => {
     expect(parseMediaPath("/3D Movies/VR-SBS_3840x1080_The_Amazing_Spider-Man__2012_.mkv")).toMatchObject({
       mediaKind: "movie",

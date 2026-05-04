@@ -265,7 +265,7 @@ function parseMoviePath(
     episode: null,
     imdbId,
     quality,
-    confidence: imdbId ? 90 : year ? 70 : 45,
+    confidence: imdbId ? 90 : movieTitle.year ? 70 : 45,
   };
 }
 

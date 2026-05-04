@@ -226,6 +226,7 @@ export class ScanQueue {
     const ftpConfig = this.profileService.getFtpServerConfig(profileId, ftpServerId);
     if (!ftpConfig) throw new Error("FTP settings are not configured");
     const customization = this.profileService.getFtpServerCustomization(profileId, ftpServerId);
+    const progressBaselineItems = this.lastSuccessfulProgressItems(profileId, ftpServerId);
 
     let filesSeen = 0;
     const startedAt = Date.now();
@@ -242,7 +243,7 @@ export class ScanQueue {
           contentTypes: customization.catalogContentTypes,
           libraryLayout: customization.libraryLayout,
         },
-        onProgress: (progress) => this.saveProgress(jobId, startedAt, progress),
+        onProgress: (progress) => this.saveProgress(jobId, startedAt, progress, progressBaselineItems),
         signal,
       });
       filesSeen += result.filesSeen;
@@ -268,15 +269,16 @@ export class ScanQueue {
       .run(filesSeen, `Indexed ${filesSeen} media file${filesSeen === 1 ? "" : "s"}.`, lastScanAt, jobId);
   }
 
-  private saveProgress(jobId: number, startedAt: number, progress: CrawlProgress) {
+  private saveProgress(jobId: number, startedAt: number, progress: CrawlProgress, baselineItems: number | null) {
     const elapsedSeconds = Math.max(1, (Date.now() - startedAt) / 1000);
-    const estimatedTotal = Math.max(this.config.scanProgressAverageItems, progress.entriesSeen || 1);
-    const progressRatio = 1 - Math.exp(-(progress.entriesSeen + progress.directoriesSeen) / estimatedTotal);
+    const progressItems = progress.entriesSeen + progress.directoriesSeen;
+    const estimatedTotal = baselineItems ? Math.max(baselineItems, progressItems || 1) : Math.max(this.config.scanProgressAverageItems, progress.entriesSeen || 1);
+    const progressRatio = baselineItems ? progressItems / estimatedTotal : 1 - Math.exp(-progressItems / estimatedTotal);
     const progressPercent = Math.min(95, Math.max(1, Math.round(progressRatio * 95)));
-    const entriesRemaining = Math.max(0, estimatedTotal - progress.entriesSeen);
-    const entriesPerSecond = Math.max(0.01, progress.entriesSeen / elapsedSeconds);
+    const entriesRemaining = Math.max(0, estimatedTotal - progressItems);
+    const entriesPerSecond = Math.max(0.01, progressItems / elapsedSeconds);
     const estimatedSecondsRemaining =
-      entriesRemaining > 0 ? Math.min(MAX_ESTIMATED_SECONDS_REMAINING, Math.round(entriesRemaining / entriesPerSecond)) : null;
+      entriesRemaining > 0 ? Math.max(1, Math.min(MAX_ESTIMATED_SECONDS_REMAINING, Math.round(entriesRemaining / entriesPerSecond))) : null;
 
     this.db
       .prepare(
@@ -306,7 +308,7 @@ export class ScanQueue {
 
   private failJob(jobId: number, profileId: number, ftpServerId: number, error: string) {
     const retryDelayMs = isTransientFtpDisconnect(error) ? this.config.scanTransientRetryDelayMs : 0;
-    const retryMessage = retryDelayMs > 0 ? ` Retry queued in ${formatDuration(retryDelayMs)}.` : "";
+    const retryMessage = retryDelayMs > 0 ? ` Requeued to rescan in ${formatDuration(retryDelayMs)}.` : "";
     if (retryDelayMs > 0) {
       this.profileService.schedulePendingScan(profileId, ftpServerId, new Date(Date.now() + retryDelayMs).toISOString());
     }
@@ -322,6 +324,24 @@ export class ScanQueue {
       `,
       )
       .run(error, `Scan failed: ${error}${retryMessage}`, new Date().toISOString(), jobId);
+  }
+
+  private lastSuccessfulProgressItems(profileId: number, ftpServerId: number) {
+    const row = this.db
+      .prepare(
+        `
+        select entries_seen + directories_seen as items
+        from scan_jobs
+        where profile_id = ?
+          and ftp_server_id = ?
+          and status = 'succeeded'
+          and entries_seen + directories_seen > 0
+        order by finished_at desc, id desc
+        limit 1
+      `,
+      )
+      .get(profileId, ftpServerId) as { items: number } | undefined;
+    return row?.items && row.items > 0 ? row.items : null;
   }
 
   private cancelJob(jobId: number) {

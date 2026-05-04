@@ -728,6 +728,27 @@ select option {
 textarea {
   min-height: 118px;
   resize: vertical;
+  scrollbar-color: rgba(168, 224, 99, 0.55) rgba(255, 255, 255, 0.045);
+  scrollbar-width: thin;
+}
+
+textarea::-webkit-scrollbar {
+  width: 10px;
+}
+
+textarea::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+textarea::-webkit-scrollbar-thumb {
+  border: 2px solid var(--panel);
+  border-radius: 999px;
+  background: rgba(168, 224, 99, 0.55);
+}
+
+textarea::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 224, 99, 0.78);
 }
 
 input::placeholder,
@@ -876,6 +897,40 @@ input:-webkit-autofill:active {
   margin: 0;
   color: var(--accent);
   font-weight: 600;
+}
+
+.stat-value {
+  display: inline-block;
+  min-width: 1ch;
+  border-radius: 6px;
+  transition:
+    color 160ms ease,
+    text-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.stat-value-pulse {
+  animation: stat-value-pulse 850ms ease-out;
+}
+
+@keyframes stat-value-pulse {
+  0% {
+    color: var(--cream);
+    text-shadow: 0 0 0 rgba(168, 224, 99, 0);
+    transform: scale(1);
+  }
+  38% {
+    color: var(--accent-2);
+    text-shadow:
+      0 0 10px rgba(168, 224, 99, 0.95),
+      0 0 26px rgba(168, 224, 99, 0.42);
+    transform: scale(1.1);
+  }
+  100% {
+    color: var(--accent);
+    text-shadow: 0 0 0 rgba(168, 224, 99, 0);
+    transform: scale(1);
+  }
 }
 
 .scan-controls {

@@ -211,8 +211,45 @@ describe("ScanQueue", () => {
     const failed = await waitForStatus(queue, profileId, "failed");
     const server = profileService.getFtpServer(profileId, profileService.defaultFtpServerId(profileId));
 
-    expect(failed.message).toBe("Scan failed: Server sent FIN packet unexpectedly, closing connection. Retry queued in 1m.");
+    expect(failed.message).toBe("Scan failed: Server sent FIN packet unexpectedly, closing connection. Requeued to rescan in 1m.");
     expect(server.pendingScanAfter).toEqual(expect.any(String));
+  });
+
+  it("uses the previous successful scan size as the repeated scan progress baseline", async () => {
+    const releaseNestedList = deferred<Array<{ name: string; path: string; type: "file"; size: number }>>();
+    const { db, profileService, queue } = createHarness(
+      async () => ({
+        list: async (path) => {
+          if (path === "/") return [{ name: "Movies", path: "/Movies", type: "directory" }];
+          return releaseNestedList.promise;
+        },
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, scanProgressAverageItems: 1000 },
+    );
+    const profileId = await createProfileWithFtp(profileService);
+    const ftpServerId = profileService.defaultFtpServerId(profileId);
+    db.prepare(
+      `
+      insert into scan_jobs (
+        profile_id, ftp_server_id, status, trigger, progress_percent,
+        entries_seen, files_seen, directories_seen, queued_at, started_at, finished_at
+      )
+      values (?, ?, 'succeeded', 'manual', 100, 2, 2, 2, ?, ?, ?)
+    `,
+    ).run(profileId, ftpServerId, "2026-05-04T00:00:00.000Z", "2026-05-04T00:00:00.000Z", "2026-05-04T00:01:00.000Z");
+
+    queue.enqueueProfileScan(profileId, "manual");
+
+    try {
+      const running = await waitForProgressPath(queue, profileId, "/Movies");
+      expect(running.progressPercent).toBeGreaterThanOrEqual(70);
+      expect(running.estimatedSecondsRemaining).not.toBe(0);
+    } finally {
+      releaseNestedList.resolve([{ name: "Avatar.2009.mkv", path: "/Movies/Avatar.2009.mkv", type: "file", size: 2000 }]);
+      await waitForStatus(queue, profileId, "succeeded").catch(() => undefined);
+    }
   });
 
   it("persists scan progress and media count", async () => {

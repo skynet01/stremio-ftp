@@ -65,6 +65,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
       canTrustDirectoryFingerprint(entries) &&
       input.repo.directorySnapshotMatchesFingerprint(input.profileId, input.ftpServerId ?? null, normalizedPath, entries.length, fingerprint)
     ) {
+      entriesSeen += entries.length;
       filesSeen += input.repo.markSeenUnderRoot(input.profileId, normalizedPath, crawlStartedAt, input.ftpServerId ?? null);
       input.repo.saveDirectorySnapshot(input.profileId, {
         ftpServerId: input.ftpServerId ?? null,
