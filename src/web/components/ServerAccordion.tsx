@@ -292,16 +292,16 @@ export function ServerAccordion({
                               </label>
                             ))}
                           </div>
+                          <label className="toggle-row catalog-toggle" htmlFor={`catalogEnabled-${server.id}`}>
+                            <input
+                              id={`catalogEnabled-${server.id}`}
+                              type="checkbox"
+                              checked={server.catalogEnabled}
+                              onChange={(event) => onServerChange(server.id, { catalogEnabled: event.currentTarget.checked })}
+                            />
+                            Show indexed FTP catalog in Stremio
+                          </label>
                         </div>
-                        <label className="toggle-row catalog-toggle" htmlFor={`catalogEnabled-${server.id}`}>
-                          <input
-                            id={`catalogEnabled-${server.id}`}
-                            type="checkbox"
-                            checked={server.catalogEnabled}
-                            onChange={(event) => onServerChange(server.id, { catalogEnabled: event.currentTarget.checked })}
-                          />
-                          Show indexed FTP catalog in Stremio
-                        </label>
                       </div>
                     </div>
                   </div>
@@ -345,6 +345,7 @@ export function ServerAccordion({
                           <option value="360">Every 6 hours</option>
                           <option value="720">Every 12 hours</option>
                           <option value="1440">Daily</option>
+                          <option value="4320">Every 3 days</option>
                           <option value="10080">Weekly</option>
                         </select>,
                       )}

@@ -84,6 +84,16 @@ async function waitForEstimatedStatus(queue: ScanQueue, profileId: number) {
   throw new Error("Timed out waiting for scan estimate");
 }
 
+async function waitForProgressPath(queue: ScanQueue, profileId: number, currentPath: string) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    const current = queue.getProfileScanStatus(profileId);
+    if (current.status === "running" && current.currentPath === currentPath) return current;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for scan progress at ${currentPath}`);
+}
+
 describe("ScanQueue", () => {
   it("locks duplicate scans for the same profile while a scan is running", async () => {
     let listCalls = 0;
@@ -202,6 +212,31 @@ describe("ScanQueue", () => {
       expect(running.estimatedSecondsRemaining).toBe(86_400);
     } finally {
       releaseList.resolve([]);
+      await waitForStatus(queue, profileId, "succeeded").catch(() => undefined);
+    }
+  });
+
+  it("keeps ETA indeterminate instead of reporting zero seconds while traversal is still running", async () => {
+    const releaseNestedList = deferred<Array<{ name: string; path: string; type: "file"; size: number }>>();
+    const { profileService, queue } = createHarness(
+      async () => ({
+        list: async (path) =>
+          path === "/" ? [{ name: "More", path: "/More", type: "directory" }] : releaseNestedList.promise,
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, scanProgressAverageItems: 1 },
+    );
+    const profileId = await createProfileWithFtp(profileService);
+
+    queue.enqueueProfileScan(profileId, "manual");
+
+    try {
+      const running = await waitForProgressPath(queue, profileId, "/More");
+      expect(running.entriesSeen).toBe(1);
+      expect(running.estimatedSecondsRemaining).toBeNull();
+    } finally {
+      releaseNestedList.resolve([]);
       await waitForStatus(queue, profileId, "succeeded").catch(() => undefined);
     }
   });

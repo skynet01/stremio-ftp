@@ -78,6 +78,7 @@ export function IndexStatusPanel({
             <option value="360">Every 6 hours</option>
             <option value="720">Every 12 hours</option>
             <option value="1440">Daily</option>
+            <option value="4320">Every 3 days</option>
             <option value="10080">Weekly</option>
           </select>,
         )}

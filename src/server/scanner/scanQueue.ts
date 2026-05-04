@@ -273,10 +273,8 @@ export class ScanQueue {
     const progressPercent = Math.min(95, Math.max(1, Math.round(progressRatio * 95)));
     const entriesRemaining = Math.max(0, estimatedTotal - progress.entriesSeen);
     const entriesPerSecond = Math.max(0.01, progress.entriesSeen / elapsedSeconds);
-    const estimatedSecondsRemaining = Math.min(
-      MAX_ESTIMATED_SECONDS_REMAINING,
-      Math.round(entriesRemaining / entriesPerSecond),
-    );
+    const estimatedSecondsRemaining =
+      entriesRemaining > 0 ? Math.min(MAX_ESTIMATED_SECONDS_REMAINING, Math.round(entriesRemaining / entriesPerSecond)) : null;
 
     this.db
       .prepare(

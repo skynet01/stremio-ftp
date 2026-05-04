@@ -302,16 +302,16 @@ function LibrarySettings({
                 Anime
               </label>
             </div>
+            <label className="toggle-row catalog-toggle" htmlFor="catalogEnabled">
+              <input
+                id="catalogEnabled"
+                type="checkbox"
+                checked={catalogEnabled}
+                onChange={(event) => onCatalogEnabledChange(event.currentTarget.checked)}
+              />
+              Show indexed FTP catalog in Stremio
+            </label>
           </div>
-          <label className="toggle-row catalog-toggle" htmlFor="catalogEnabled">
-            <input
-              id="catalogEnabled"
-              type="checkbox"
-              checked={catalogEnabled}
-              onChange={(event) => onCatalogEnabledChange(event.currentTarget.checked)}
-            />
-            Show indexed FTP catalog in Stremio
-          </label>
         </div>
       </div>
       {streamDeliveryMode === "direct" ? (

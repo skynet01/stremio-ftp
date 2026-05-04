@@ -54,7 +54,7 @@ export function formatNextScan(nextScheduledScanAt: string | null) {
 }
 
 export function formatEta(seconds: number | null) {
-  if (seconds === null) return "Estimating";
+  if (seconds === null) return "Scanning";
   if (seconds < 60) return `${seconds}s left`;
   return `${Math.ceil(seconds / 60)}m left`;
 }

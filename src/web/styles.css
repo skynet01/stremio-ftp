@@ -322,8 +322,6 @@ textarea:focus-visible,
 
 .stream-formatter {
   margin-top: 24px;
-  padding-top: 22px;
-  border-top: 1px solid var(--line-soft);
 }
 
 .stream-formatter-trigger {
@@ -954,8 +952,10 @@ input:-webkit-autofill:active {
 }
 
 .catalog-toggle {
-  margin-top: 8px;
+  justify-self: end;
+  margin-top: 0;
   color: var(--accent);
+  white-space: nowrap;
 }
 
 .library-settings-grid {
@@ -973,7 +973,7 @@ input:-webkit-autofill:active {
 
 .server-content-row {
   display: grid;
-  grid-template-columns: 170px minmax(0, 1fr);
+  grid-template-columns: 170px minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
 }
@@ -1273,6 +1273,11 @@ input:-webkit-autofill:active {
   .server-content-row {
     grid-template-columns: 1fr;
     gap: 8px;
+  }
+
+  .catalog-toggle {
+    justify-self: start;
+    white-space: normal;
   }
 
   .install-action-row {

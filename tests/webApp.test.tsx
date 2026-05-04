@@ -123,7 +123,7 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Show indexed FTP catalog in Stremio")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.5`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.6`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
@@ -797,6 +797,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
     await screen.findByRole("link", { name: "Install in Stremio" });
 
+    expect(screen.getByRole("option", { name: "Every 3 days" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Rescan frequency"), { target: { value: "720" } });
 
     await waitFor(() =>
