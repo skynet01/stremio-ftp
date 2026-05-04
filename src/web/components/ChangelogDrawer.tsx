@@ -3,7 +3,12 @@ import { Notice } from "./ui.js";
 
 function changelogParts(subject: string) {
   const match = subject.match(/^([a-z]+)(?:\([^)]+\))?!?:\s+(.+)$/i);
-  return match ? { tag: match[1].toLowerCase(), subject: match[2] } : { tag: "change", subject };
+  return match ? { tag: match[1].toLowerCase(), subject: sentenceCase(match[2]) } : { tag: "change", subject: sentenceCase(subject) };
+}
+
+function sentenceCase(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? `${trimmed[0].toUpperCase()}${trimmed.slice(1)}` : trimmed;
 }
 
 export function ChangelogDrawer({

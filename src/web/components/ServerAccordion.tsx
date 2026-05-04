@@ -42,7 +42,8 @@ export type ServerForm = {
 };
 
 function serverSummary(server: ServerForm) {
-  if (scanIsActive(server.scanStatus)) {
+  if (server.scanStatus.status === "queued") return "Queued for indexing";
+  if (server.scanStatus.status === "running") {
     const path = server.scanStatus.currentPath ? ` - ${server.scanStatus.currentPath}` : "";
     return `${server.scanStatus.progressPercent}% scanning${path}`;
   }
@@ -62,7 +63,8 @@ function formatCompactScanTime(lastScanAt: string | null) {
 }
 
 function serverBadge(server: ServerForm): { tone: StatusTone; label: string } {
-  if (scanIsActive(server.scanStatus)) return { tone: "amber", label: "Scanning" };
+  if (server.scanStatus.status === "queued") return { tone: "amber", label: "Queued" };
+  if (server.scanStatus.status === "running") return { tone: "amber", label: "Scanning" };
   if (server.pendingScanAfter) return { tone: "amber", label: "Pending" };
   if (server.scanStatus.status === "failed") return { tone: "red", label: "Needs attention" };
   if (server.indexStatus.lastScanAt) return { tone: "green", label: "Ready" };
@@ -198,80 +200,93 @@ export function ServerAccordion({
                     <div className="server-section">
                       <h3>Server Settings</h3>
                       <div className="field-grid ftp-field-grid">
-                      {field(
-                        "Server name",
-                        `serverName-${server.id}`,
-                        <input
-                          id={`serverName-${server.id}`}
-                          className={filledClass(server.name)}
-                          value={server.name}
-                          onChange={(event) => onServerChange(server.id, { name: event.currentTarget.value })}
-                        />,
-                        "field-stack server-name-field",
-                      )}
-                      {field(
-                        "Host",
-                        `host-${server.id}`,
-                        <input
-                          id={`host-${server.id}`}
-                          className={filledClass(server.host)}
-                          value={server.host}
-                          placeholder="ftp.example.com"
-                          onChange={(event) => onServerChange(server.id, { host: event.currentTarget.value })}
-                        />,
-                        "field-stack host-field",
-                      )}
-                      {field(
-                        "Port",
-                        `port-${server.id}`,
-                        <input
-                          id={`port-${server.id}`}
-                          inputMode="numeric"
-                          className={filledClass(server.port)}
-                          value={server.port}
-                          onChange={(event) => onServerChange(server.id, { port: event.currentTarget.value })}
-                        />,
-                        "field-stack port-field",
-                      )}
-                      {field(
-                        "Username",
-                        `username-${server.id}`,
-                        <input
-                          id={`username-${server.id}`}
-                          className={filledClass(server.username)}
-                          value={server.username}
-                          autoComplete="username"
-                          onChange={(event) => onServerChange(server.id, { username: event.currentTarget.value })}
-                        />,
-                        "field-stack username-field",
-                      )}
-                      {field(
-                        "Password",
-                        `password-${server.id}`,
-                        <input
-                          id={`password-${server.id}`}
-                          type="password"
-                          className={filledClass(server.password)}
-                          value={server.password}
-                          autoComplete="new-password"
-                          placeholder={server.passwordConfigured ? "Leave blank to keep saved password" : "FTP account password"}
-                          onChange={(event) => onServerChange(server.id, { password: event.currentTarget.value })}
-                        />,
-                        "field-stack password-field",
-                      )}
-                      <div className="field-stack tls-field">
-                        <label htmlFor={`tlsMode-${server.id}`}>TLS mode</label>
-                        <select
-                          id={`tlsMode-${server.id}`}
-                          className={filledClass(server.tlsMode)}
-                          value={server.tlsMode}
-                          onChange={(event) => onServerChange(server.id, { tlsMode: event.currentTarget.value as TlsMode })}
-                        >
-                          <option value="none">Disabled</option>
-                          <option value="explicit">Explicit TLS</option>
-                          <option value="implicit">Implicit TLS</option>
-                        </select>
-                        <label className="toggle-row compact-toggle-row" htmlFor={`allowInvalidCertificate-${server.id}`}>
+                        {field(
+                          "Server name",
+                          `serverName-${server.id}`,
+                          <input
+                            id={`serverName-${server.id}`}
+                            className={filledClass(server.name)}
+                            value={server.name}
+                            onChange={(event) => onServerChange(server.id, { name: event.currentTarget.value })}
+                          />,
+                          "field-stack server-name-field",
+                        )}
+                        {field(
+                          "Host",
+                          `host-${server.id}`,
+                          <input
+                            id={`host-${server.id}`}
+                            className={filledClass(server.host)}
+                            value={server.host}
+                            placeholder="ftp.example.com"
+                            onChange={(event) => onServerChange(server.id, { host: event.currentTarget.value })}
+                          />,
+                          "field-stack host-field",
+                        )}
+                        {field(
+                          "Port",
+                          `port-${server.id}`,
+                          <input
+                            id={`port-${server.id}`}
+                            inputMode="numeric"
+                            className={filledClass(server.port)}
+                            value={server.port}
+                            onChange={(event) => onServerChange(server.id, { port: event.currentTarget.value })}
+                          />,
+                          "field-stack port-field",
+                        )}
+                        {field(
+                          "Username",
+                          `username-${server.id}`,
+                          <input
+                            id={`username-${server.id}`}
+                            className={filledClass(server.username)}
+                            value={server.username}
+                            autoComplete="username"
+                            onChange={(event) => onServerChange(server.id, { username: event.currentTarget.value })}
+                          />,
+                          "field-stack username-field",
+                        )}
+                        {field(
+                          "Password",
+                          `password-${server.id}`,
+                          <input
+                            id={`password-${server.id}`}
+                            type="password"
+                            className={filledClass(server.password)}
+                            value={server.password}
+                            autoComplete="new-password"
+                            placeholder={server.passwordConfigured ? "Leave blank to keep saved password" : "FTP account password"}
+                            onChange={(event) => onServerChange(server.id, { password: event.currentTarget.value })}
+                          />,
+                          "field-stack password-field",
+                        )}
+                        <div className="field-stack tls-field">
+                          <label htmlFor={`tlsMode-${server.id}`}>TLS mode</label>
+                          <select
+                            id={`tlsMode-${server.id}`}
+                            className={filledClass(server.tlsMode)}
+                            value={server.tlsMode}
+                            onChange={(event) => onServerChange(server.id, { tlsMode: event.currentTarget.value as TlsMode })}
+                          >
+                            <option value="none">Disabled</option>
+                            <option value="explicit">Explicit TLS</option>
+                            <option value="implicit">Implicit TLS</option>
+                          </select>
+                        </div>
+                        {field(
+                          "Root paths",
+                          `rootPaths-${server.id}`,
+                          <textarea
+                            id={`rootPaths-${server.id}`}
+                            className={filledClass(server.rootPaths)}
+                            value={server.rootPaths}
+                            rows={4}
+                            onChange={(event) => onServerChange(server.id, { rootPaths: event.currentTarget.value })}
+                          />,
+                          "field-stack root-paths-field",
+                        )}
+                        <label className="toggle-row invalid-certificate-field" htmlFor={`allowInvalidCertificate-${server.id}`}>
                           <input
                             id={`allowInvalidCertificate-${server.id}`}
                             type="checkbox"
@@ -281,74 +296,61 @@ export function ServerAccordion({
                           Allow invalid certificate
                         </label>
                       </div>
-                      {field(
-                        "Root paths",
-                        `rootPaths-${server.id}`,
-                        <textarea
-                          id={`rootPaths-${server.id}`}
-                          className={filledClass(server.rootPaths)}
-                          value={server.rootPaths}
-                          rows={4}
-                          onChange={(event) => onServerChange(server.id, { rootPaths: event.currentTarget.value })}
-                        />,
-                        "field-stack root-paths-field",
-                      )}
-                      </div>
                     </div>
 
                     <div className="server-section">
                       <h3>Index status</h3>
                       <dl className="status-list">
-                      <div>
-                        <dt>Last scan</dt>
-                        <dd>{formatScanTime(server.indexStatus.lastScanAt)}</dd>
-                      </div>
-                      <div>
-                        <dt>Next scan</dt>
-                        <dd>{formatNextScan(server.scanSchedule.nextScheduledScanAt)}</dd>
-                      </div>
-                      <div>
-                        <dt>Media items</dt>
-                        <dd>{server.indexStatus.mediaItems}</dd>
-                      </div>
-                      <div>
-                        <dt>Connection</dt>
-                        <dd>
-                          <StatusBadge tone={server.connectionStatus.ok === true ? "green" : server.connectionStatus.ok === false ? "red" : server.host ? "gray" : "red"}>
-                            {server.connectionStatus.lastTestedAt ? formatConnectionStatus(server.connectionStatus) : server.host ? "Untested" : "Missing host"}
-                          </StatusBadge>
-                        </dd>
-                      </div>
+                        <div>
+                          <dt>Last scan</dt>
+                          <dd>{formatScanTime(server.indexStatus.lastScanAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Next scan</dt>
+                          <dd>{formatNextScan(server.scanSchedule.nextScheduledScanAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Media items</dt>
+                          <dd>{server.indexStatus.mediaItems}</dd>
+                        </div>
+                        <div>
+                          <dt>Connection</dt>
+                          <dd>
+                            <StatusBadge tone={server.connectionStatus.ok === true ? "green" : server.connectionStatus.ok === false ? "red" : server.host ? "gray" : "red"}>
+                              {server.connectionStatus.lastTestedAt ? formatConnectionStatus(server.connectionStatus) : server.host ? "Untested" : "Missing host"}
+                            </StatusBadge>
+                          </dd>
+                        </div>
                       </dl>
                       <div className="scan-controls">
-                      {field(
-                        "Rescan frequency",
-                        `scanInterval-${server.id}`,
-                        <select
-                          id={`scanInterval-${server.id}`}
-                          className={filledClass(server.scanSchedule.intervalMinutes)}
-                          value={String(server.scanSchedule.intervalMinutes)}
-                          disabled={!profileReady}
-                          onChange={(event) => onUpdateScanSchedule(server.id, Number(event.currentTarget.value))}
-                        >
-                          <option value="0">Manual only</option>
-                          <option value="360">Every 6 hours</option>
-                          <option value="720">Every 12 hours</option>
-                          <option value="1440">Daily</option>
-                          <option value="4320">Every 3 days</option>
-                          <option value="10080">Weekly</option>
-                        </select>,
-                      )}
-                      <div className="scan-progress-block">
-                        <div className="scan-progress-meta">
-                          <span>{server.scanStatus.status === "idle" ? "No active scan" : server.scanStatus.status}</span>
-                          <span>{active ? formatEta(server.scanStatus.estimatedSecondsRemaining) : `${server.scanStatus.progressPercent}%`}</span>
+                        {field(
+                          "Rescan frequency",
+                          `scanInterval-${server.id}`,
+                          <select
+                            id={`scanInterval-${server.id}`}
+                            className={filledClass(server.scanSchedule.intervalMinutes)}
+                            value={String(server.scanSchedule.intervalMinutes)}
+                            disabled={!profileReady}
+                            onChange={(event) => onUpdateScanSchedule(server.id, Number(event.currentTarget.value))}
+                          >
+                            <option value="0">Manual only</option>
+                            <option value="360">Every 6 hours</option>
+                            <option value="720">Every 12 hours</option>
+                            <option value="1440">Daily</option>
+                            <option value="4320">Every 3 days</option>
+                            <option value="10080">Weekly</option>
+                          </select>,
+                        )}
+                        <div className="scan-progress-block">
+                          <div className="scan-progress-meta">
+                            <span>{server.scanStatus.status === "idle" ? "No active scan" : server.scanStatus.status}</span>
+                            <span>{active ? formatEta(server.scanStatus.estimatedSecondsRemaining) : `${server.scanStatus.progressPercent}%`}</span>
+                          </div>
+                          <div className="scan-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={server.scanStatus.progressPercent}>
+                            <span style={{ width: `${server.scanStatus.progressPercent}%` }} />
+                          </div>
+                          {server.scanStatus.currentPath ? <p className="scan-current-path">{server.scanStatus.currentPath}</p> : null}
                         </div>
-                        <div className="scan-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={server.scanStatus.progressPercent}>
-                          <span style={{ width: `${server.scanStatus.progressPercent}%` }} />
-                        </div>
-                        {server.scanStatus.currentPath ? <p className="scan-current-path">{server.scanStatus.currentPath}</p> : null}
-                      </div>
                       </div>
                       <Notice>{server.message}</Notice>
                     </div>
@@ -369,12 +371,12 @@ export function ServerAccordion({
                       Test connection
                     </button>
                     {active ? (
-                      <button type="button" className="secondary-button danger-button" disabled={!profileReady} onClick={() => onCancelServer(server.id)}>
+                      <button type="button" className="secondary-button danger-button server-scan-action" disabled={!profileReady} onClick={() => onCancelServer(server.id)}>
                         <CircleStop size={17} aria-hidden={true} />
                         Halt scan
                       </button>
                     ) : (
-                      <button type="button" className="secondary-button" disabled={!profileReady} onClick={() => onRefreshServer(server.id)}>
+                      <button type="button" className="secondary-button server-scan-action" disabled={!profileReady} onClick={() => onRefreshServer(server.id)}>
                         <RefreshCw size={17} aria-hidden={true} />
                         Rescan
                       </button>

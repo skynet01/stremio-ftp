@@ -319,6 +319,81 @@ describe("profile routes", () => {
     expect(loaded.body.scanSchedule).toEqual({ intervalMinutes: 0, nextScheduledScanAt: null });
   });
 
+  it("queues all configured servers for a global rescan and reports queued scans as pending", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), scanGlobalConcurrency: 0 }, db, {
+      ftpClientFactory: async () => ({
+        list: async () => [],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+    });
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    await request(app)
+      .post("/api/profile/ftp")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp-one.example.test",
+          port: 21,
+          username: "user",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: false,
+          roots: ["/"],
+        },
+      })
+      .expect(200);
+    const createdServer = await request(app)
+      .post("/api/profile/servers")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        serverId: createdServer.body.server.id,
+        name: "Mirror",
+        ftpConfig: {
+          host: "ftp-two.example.test",
+          port: 21,
+          username: "user",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: false,
+          roots: ["/"],
+        },
+        customization: {
+          catalogEnabled: false,
+          catalogContentTypes: { movies: true, series: true, anime: false },
+          libraryLayout: "auto",
+          streamDeliveryMode: "proxy",
+        },
+      })
+      .expect(200);
+
+    const response = await request(app)
+      .post("/api/profile/index/rescan")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", all: true })
+      .expect(200);
+
+    expect(response.body.scanStatuses).toHaveLength(2);
+    expect(response.body.servers.map((server: { scanStatus: { status: string } }) => server.scanStatus.status)).toEqual(["queued", "queued"]);
+    expect(response.body.globalStats).toMatchObject({ activeScans: 0, pendingScans: 2, status: "working" });
+  });
+
   it("halts a running FTP index scan", async () => {
     const releaseClose = deferred<void>();
     const db = new Database(":memory:");

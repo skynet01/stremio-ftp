@@ -11,10 +11,16 @@ export type GlobalScanProgress = {
 export function GlobalStatusPanel({
   stats,
   scanProgress,
+  profileReady,
+  scanActive,
+  onRescanAll,
   children,
 }: {
   stats: GlobalStats;
   scanProgress: GlobalScanProgress | null;
+  profileReady: boolean;
+  scanActive: boolean;
+  onRescanAll: () => void;
   children?: ReactNode;
 }) {
   const tone = stats.status === "working" ? "amber" : stats.status === "ready" ? "green" : stats.status === "error" ? "red" : "gray";
@@ -29,6 +35,9 @@ export function GlobalStatusPanel({
         <div className="global-status-state">
           <StatusBadge tone={tone}>{stats.status === "working" ? "Scanning" : stats.status === "ready" ? "Ready" : "Idle"}</StatusBadge>
           <span>Last scan {formatScanTime(stats.lastCompletedScanAt)}</span>
+          <button type="button" className="secondary-button global-rescan-button" disabled={!profileReady || scanActive} onClick={onRescanAll}>
+            Rescan All
+          </button>
         </div>
       </div>
       <dl className="status-list global-status-list">

@@ -131,6 +131,7 @@ describe("MediaRepository", () => {
       { ftpPath: "/TV/Show.Name.S01E02.mkv", mediaKind: "series", catalogKind: "series", title: "show name", year: null, imdbId: "tt7654321" },
       { ftpPath: "/Anime/Afro.Samurai.01.mkv", mediaKind: "series", catalogKind: "anime", title: "afro samurai", year: null, imdbId: null },
       { ftpPath: "/Other/Mystery.File.2020.mkv", mediaKind: "movie", catalogKind: "movie", title: "mystery file", year: 2020, imdbId: null },
+      { ftpPath: "/Other/Unknown.Clip.mkv", mediaKind: "movie", catalogKind: "movie", title: "unknown clip", year: null, imdbId: null, confidence: 45 },
     ] as const) {
       repo.upsertParsedFile(profileId, {
         ftpPath: file.ftpPath,
@@ -145,16 +146,16 @@ describe("MediaRepository", () => {
         episode: file.mediaKind === "series" ? (file.ftpPath.includes("E02") ? 2 : 1) : null,
         imdbId: file.imdbId,
         quality: null,
-        confidence: 90,
+        confidence: file.confidence ?? 90,
       });
     }
 
     expect(repo.aggregateCountsForProfile(profileId)).toEqual({
-      total: 4,
+      total: 5,
       movies: 2,
       series: 1,
       anime: 1,
-      uncategorized: 2,
+      uncategorized: 1,
     });
   });
 

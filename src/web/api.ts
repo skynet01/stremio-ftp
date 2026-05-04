@@ -164,6 +164,9 @@ export type AuthenticatedCustomizationRequest = CreateProfileRequest & {
 
 export type RescanResponse = {
   scanStatus: ScanStatus;
+  scanStatuses?: ScanStatus[];
+  servers?: FtpServerSettings[];
+  globalStats?: GlobalStats;
 };
 
 export type CancelScanResponse = {
@@ -351,7 +354,7 @@ export async function saveCustomization(request: AuthenticatedCustomizationReque
   return readJson<{ ok: true }>(response);
 }
 
-export async function rescanIndex(request: CreateProfileRequest & { serverId?: number }): Promise<RescanResponse> {
+export async function rescanIndex(request: CreateProfileRequest & { serverId?: number; all?: boolean }): Promise<RescanResponse> {
   const response = await fetch("/api/profile/index/rescan", {
     method: "POST",
     headers: authHeaders(),

@@ -325,11 +325,22 @@ export function profileRoutes(
   });
 
   router.post("/profile/index/rescan", async (req, res) => {
-    const parsed = authenticatedSchema.extend({ serverId: z.number().int().positive().optional() }).safeParse(req.body);
+    const parsed = authenticatedSchema.extend({ serverId: z.number().int().positive().optional(), all: z.boolean().optional() }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid rescan request" });
 
     try {
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      if (parsed.data.all) {
+        const servers = service.listFtpServers(unlocked.profileId).filter((server) => server.ftpConfig);
+        if (!servers.length) return res.status(400).json({ error: "FTP settings are not configured" });
+        const scanStatuses = servers.map((server) => scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id));
+        return res.json({
+          scanStatus: scanStatuses[0],
+          scanStatuses,
+          servers: serverPayloads(service, scanQueue, unlocked.profileId),
+          globalStats: globalStats(service, scanQueue, unlocked.profileId),
+        });
+      }
       const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
       const ftpConfig = service.getFtpServerConfig(unlocked.profileId, serverId);
       if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
@@ -432,8 +443,9 @@ function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: n
   const servers = service.listFtpServers(profileId);
   const counts = new MediaRepository(service.database).aggregateCountsForProfile(profileId);
   const statuses = servers.map((server) => scanQueue.getServerScanStatus(profileId, server.id));
-  const activeScans = statuses.filter((status) => status.status === "queued" || status.status === "running").length;
-  const pendingScans = servers.filter((server) => server.pendingScanAfter).length;
+  const activeScans = statuses.filter((status) => status.status === "running").length;
+  const queuedScans = statuses.filter((status) => status.status === "queued").length;
+  const pendingScans = queuedScans + servers.filter((server) => server.pendingScanAfter).length;
   const lastCompletedScanAt =
     servers
       .map((server) => server.indexStatus.lastScanAt)
@@ -450,7 +462,7 @@ function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: n
     activeScans,
     pendingScans,
     lastCompletedScanAt,
-    status: activeScans > 0 ? "working" : counts.total > 0 ? "ready" : "idle",
+    status: activeScans > 0 || pendingScans > 0 ? "working" : counts.total > 0 ? "ready" : "idle",
   };
 }
 

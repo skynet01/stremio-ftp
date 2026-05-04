@@ -180,6 +180,16 @@ describe("media parser", () => {
       parsedTitle: "scary movie",
       parsedYear: 2000,
     });
+    expect(parseMediaPath("/3D Movies/0-Space_Dogs_3D__2010__-_DE-EN.mkv")).toMatchObject({
+      mediaKind: "movie",
+      parsedTitle: "space dogs",
+      parsedYear: 2010,
+    });
+    expect(parseMediaPath("/3D Movies/100 Meters.H264.FSBS.3DFF.mkv")).toMatchObject({
+      mediaKind: "movie",
+      parsedTitle: "100 meters",
+      parsedYear: null,
+    });
   });
 
   it("handles mixed-case SxxEyy episode filenames", () => {

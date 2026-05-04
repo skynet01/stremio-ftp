@@ -298,56 +298,39 @@ export class MediaRepository {
   }
 
   aggregateCountsForProfile(profileId: number) {
-    const categorized = this.db
+    const counts = this.db
       .prepare(
         `
         select
           count(*) as total,
-          sum(case when category = 'movie' then 1 else 0 end) as movies,
-          sum(case when category = 'series' then 1 else 0 end) as series,
-          sum(case when category = 'anime' then 1 else 0 end) as anime
+          sum(case when category = 'movie' and needs_review = 0 then 1 else 0 end) as movies,
+          sum(case when category = 'series' and needs_review = 0 then 1 else 0 end) as series,
+          sum(case when category = 'anime' and needs_review = 0 then 1 else 0 end) as anime,
+          sum(case when needs_review = 1 then 1 else 0 end) as uncategorized
         from (
           select
             catalog_kind as category,
+            case when max(confidence) < 70 and max(case when imdb_id is not null then 1 else 0 end) = 0 then 1 else 0 end as needs_review
+          from media_files
+          where profile_id = ?
+            and parsed_title is not null
+          group by
+            catalog_kind,
             case
               when imdb_id is not null then imdb_id
               when catalog_kind = 'movie' then parsed_title || '|' || coalesce(parsed_year, '')
               else parsed_title
-            end as item_key
-          from media_files
-          where profile_id = ?
-            and parsed_title is not null
-          group by category, item_key
+            end
         )
       `,
       )
-      .get(profileId) as { total: number; movies: number | null; series: number | null; anime: number | null };
-    const uncategorized = this.db
-      .prepare(
-        `
-        select count(*) as count
-        from (
-          select
-            catalog_kind,
-            case
-              when catalog_kind = 'movie' then parsed_title || '|' || coalesce(parsed_year, '')
-              else parsed_title
-            end as item_key
-          from media_files
-          where profile_id = ?
-            and imdb_id is null
-            and parsed_title is not null
-          group by catalog_kind, item_key
-        )
-      `,
-      )
-      .get(profileId) as { count: number };
+      .get(profileId) as { total: number; movies: number | null; series: number | null; anime: number | null; uncategorized: number | null };
     return {
-      total: categorized.total,
-      movies: categorized.movies ?? 0,
-      series: categorized.series ?? 0,
-      anime: categorized.anime ?? 0,
-      uncategorized: uncategorized.count,
+      total: counts.total,
+      movies: counts.movies ?? 0,
+      series: counts.series ?? 0,
+      anime: counts.anime ?? 0,
+      uncategorized: counts.uncategorized ?? 0,
     };
   }
 

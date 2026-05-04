@@ -80,6 +80,8 @@ export class ScanQueue {
         return this.insertSkippedJob(profileId, ftpServerId, trigger, "Scan queue is full.");
       }
 
+      if (trigger === "manual") this.profileService.clearPendingScan(profileId, ftpServerId);
+
       const now = new Date().toISOString();
       const insert = this.db
         .prepare(
@@ -354,7 +356,7 @@ export class ScanQueue {
     const finishedAt = new Date(row.finished_at).getTime();
     const nextAllowedAt = finishedAt + this.config.scanCooldownMs;
     if (Date.now() >= nextAllowedAt) return null;
-    return this.insertSkippedJob(profileId, ftpServerId, "manual", `Manual scan cooldown active. Try again after ${new Date(nextAllowedAt).toISOString()}.`);
+    return this.insertSkippedJob(profileId, ftpServerId, "manual", `Manual scan cooldown active. Try again in ${formatDuration(nextAllowedAt - Date.now())}.`);
   }
 
   private insertSkippedJob(profileId: number, ftpServerId: number, trigger: ScanTrigger, message: string) {
@@ -436,6 +438,15 @@ function scanProgressMessage(progress: CrawlProgress) {
   const fileLabel = `${progress.filesSeen} media file${progress.filesSeen === 1 ? "" : "s"}`;
   const entryLabel = `${progress.entriesSeen} entr${progress.entriesSeen === 1 ? "y" : "ies"}`;
   return `Scanning FTP library: ${fileLabel}, ${entryLabel} seen.`;
+}
+
+function formatDuration(durationMs: number) {
+  const totalMinutes = Math.max(1, Math.ceil(durationMs / 60_000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!hours) return `${minutes}m`;
+  if (!minutes) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
 }
 
 function throwIfScanCancelled(signal: AbortSignal) {

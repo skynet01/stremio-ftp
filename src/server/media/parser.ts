@@ -43,9 +43,11 @@ function stripKnownTokens(value: string): string {
     .replace(/\bhalf[\s._-]?ou\b/gi, " ")
     .replace(/\bai[\s._-]?upscaled\b/gi, " ")
     .replace(/\bdts[\s._-]?hd\b/gi, " ")
+    .replace(/\b(?:de\s+en|en\s+de)\b/gi, " ")
     .replace(/\b(?:dc|wd)\s+s\b/gi, " ")
+    .replace(/^\s*0\s+(?=[a-z])/i, " ")
     .replace(
-      /\b(2160p|1080p|720p|480p|4k|bluray|webrip|hdtv|x264|x265|hevc|aac|dts|truehd|atmos|ma|rife|remastered|multiaudio\d*|dirtyhippie|fgt|3dff|fsbs|hsbs|sbs|hou|ou|3d|3840x|isorip|ldf|decker)\b/gi,
+      /\b(2160p|1080p|720p|480p|3840p|4k|8k|bluray|webrip|hdtv|x264|x265|h264|h265|hevc|av1|aac|dts|truehd|atmos|ma|rife|remastered|multiaudio\d*|dirtyhippie|fgt|3dff|fsbs|hsbs|sbs|hou|ou|3d|3840x|isorip|ldf|decker|bit)\b/gi,
       " ",
     )
     .replace(/\b\d+(?:fps|v\d+)\b/gi, " ")

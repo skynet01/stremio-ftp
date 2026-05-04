@@ -5,6 +5,7 @@ import type { FtpClientFactory, FtpEntry } from "./ftpTypes.js";
 
 const MAX_CRAWL_DEPTH = 64;
 const MAX_CRAWL_ENTRIES = 100000;
+const CRAWL_SNAPSHOT_VERSION = "parser-2026-05-04-2";
 
 export type CrawlProfileRootInput = {
   profileId: number;
@@ -50,15 +51,6 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     visitedDirectories.add(normalizedPath);
     directoriesSeen += 1;
     report(normalizedPath);
-
-    if (
-      directoryModifiedAt &&
-      input.repo.directorySnapshotMatchesModifiedAt(input.profileId, input.ftpServerId ?? null, normalizedPath, directoryModifiedAt)
-    ) {
-      filesSeen += input.repo.markSeenUnderRoot(input.profileId, normalizedPath, crawlStartedAt, input.ftpServerId ?? null);
-      input.repo.touchDirectorySnapshot(input.profileId, input.ftpServerId ?? null, normalizedPath, crawlStartedAt);
-      return;
-    }
 
     let entries;
     try {
@@ -155,8 +147,9 @@ function canTrustDirectoryFingerprint(entries: FtpEntry[]) {
 }
 
 function fingerprintEntries(entries: FtpEntry[]) {
-  return entries
+  const entryFingerprint = entries
     .map((entry) => [entry.type, entry.name, normalizeFtpPath(entry.path), entry.size ?? "", entry.modifiedAt ?? ""].join("\t"))
     .sort()
     .join("\n");
+  return `${CRAWL_SNAPSHOT_VERSION}\n${entryFingerprint}`;
 }

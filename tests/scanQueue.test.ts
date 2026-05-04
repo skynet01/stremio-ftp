@@ -166,7 +166,34 @@ describe("ScanQueue", () => {
 
     expect(cooldown.status).toBe("skipped");
     expect(cooldown.message).toContain("cooldown");
+    expect(cooldown.message).toMatch(/Try again in \d+m\./);
     expect(listCalls).toBe(1);
+  });
+
+  it("uses incremental snapshots for repeated manual scans", async () => {
+    const listings = new Map<string, number>();
+    const { profileService, queue } = createHarness(
+      async () => ({
+        list: async (path) => {
+          listings.set(path, (listings.get(path) ?? 0) + 1);
+          if (path === "/") return [{ name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" }];
+          if (path === "/Movies") return [{ name: "Movie.2020.mkv", path: "/Movies/Movie.2020.mkv", type: "file", size: 1000 }];
+          return [];
+        },
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, scanCooldownMs: 0 },
+    );
+    const profileId = await createProfileWithFtp(profileService);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    await waitForStatus(queue, profileId, "succeeded");
+    queue.enqueueProfileScan(profileId, "manual");
+    await waitForStatus(queue, profileId, "succeeded");
+
+    expect(listings.get("/")).toBe(2);
+    expect(listings.get("/Movies")).toBe(1);
   });
 
   it("persists scan progress and media count", async () => {

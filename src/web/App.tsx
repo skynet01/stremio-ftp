@@ -246,13 +246,14 @@ export function App() {
   const globalScanProgress = useMemo<GlobalScanProgress | null>(() => {
     const activeServers = servers.filter((server) => scanIsActive(server.scanStatus));
     if (!activeServers.length) return null;
+    const queuedOnly = activeServers.every((server) => server.scanStatus.status === "queued");
     const progressPercent = Math.round(
       activeServers.reduce((sum, server) => sum + Math.max(0, Math.min(100, server.scanStatus.progressPercent)), 0) / activeServers.length,
     );
     const currentPath = activeServers.find((server) => server.scanStatus.currentPath)?.scanStatus.currentPath ?? null;
     return {
       progressPercent,
-      label: `${activeServers.length} ${activeServers.length === 1 ? "server" : "servers"} indexing`,
+      label: `${activeServers.length} ${activeServers.length === 1 ? "server" : "servers"} ${queuedOnly ? "queued" : "indexing"}`,
       currentPath,
     };
   }, [servers]);
@@ -579,6 +580,17 @@ export function App() {
     }
   }
 
+  async function refreshAllServers() {
+    try {
+      const result = await rescanIndex({ browserUid: recoveryUid, passphrase, all: true });
+      if (result.servers) setServers(result.servers.map(serverFormFromPayload));
+      if (result.globalStats) setGlobalStats(result.globalStats);
+      if (!result.servers) await refreshScanStatus();
+    } catch (error) {
+      setCustomizationMessage(error instanceof Error ? error.message : "Unable to refresh all indexes.");
+    }
+  }
+
   async function haltServer(serverId: number) {
     updateServer(serverId, { message: "Halting scan..." });
     try {
@@ -688,7 +700,13 @@ export function App() {
       {showSetupTokenMessage ? <SetupTokenPanel onSubmit={unlockConfiguration} /> : null}
       {showSetupTokenMessage ? null : (
         <div className="portal-stack">
-          <GlobalStatusPanel stats={globalStats} scanProgress={globalScanProgress}>
+          <GlobalStatusPanel
+            stats={globalStats}
+            scanProgress={globalScanProgress}
+            profileReady={profileReady}
+            scanActive={anyScanActive}
+            onRescanAll={() => void refreshAllServers()}
+          >
             <div className="global-settings-row">
               <div className="field-stack global-tmdb-field">
                 <label htmlFor="globalCatalogTmdbApiKey">TMDB API key</label>
@@ -749,10 +767,25 @@ export function App() {
 }
 
 function scanStatusMessage(scanStatus: ScanStatus) {
-  return scanStatus.status === "failed" && scanStatus.error ? scanStatus.message || `Scan failed: ${scanStatus.error}` : scanStatus.message;
+  const message = scanStatus.status === "failed" && scanStatus.error ? scanStatus.message || `Scan failed: ${scanStatus.error}` : scanStatus.message;
+  return humanizeCooldownMessage(message);
 }
 
 function serverMessage(pendingScanAfter: string | null, scanStatus: ScanStatus, fallback: string) {
   if (pendingScanAfter) return "Settings saved. Auto-scan is pending.";
   return scanStatusMessage(scanStatus) ?? fallback;
+}
+
+function humanizeCooldownMessage(message: string | null) {
+  if (!message) return message;
+  const match = message.match(/^Manual scan cooldown active\. Try again after ([^.]+)\.$/);
+  if (!match) return message;
+  const timestamp = Date.parse(match[1]);
+  if (Number.isNaN(timestamp)) return message;
+  const totalMinutes = Math.max(0, Math.ceil((timestamp - Date.now()) / 60_000));
+  if (totalMinutes <= 0) return "Manual scan cooldown active. Try again now.";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const duration = hours && minutes ? `${hours}h ${minutes}m` : hours ? `${hours}h` : `${minutes}m`;
+  return `Manual scan cooldown active. Try again in ${duration}.`;
 }
