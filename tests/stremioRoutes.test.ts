@@ -43,7 +43,7 @@ describe("stremio routes", () => {
     const response = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
     expect(response.body).toMatchObject({
       id: "community.stremio-ftp",
-      version: "0.4.10",
+      version: "0.4.11",
       resources: ["stream"],
       types: ["movie", "series"],
       idPrefixes: ["tt"],
@@ -262,6 +262,7 @@ describe("stremio routes", () => {
     expect(stream.body.streams).toEqual([
       {
         name: "FTP Source",
+        title: "Home.Video.2024.mp4\n1 MB",
         description: "Home.Video.2024.mp4\n1 MB",
         url: `https://addon.example.test/proxy/${created.installUrlToken}/${otherCatalog.body.metas[0].id.replace("ftp:", "")}`,
         behaviorHints: {
@@ -715,6 +716,7 @@ describe("stremio routes", () => {
 
     expect(response.body.streams[0]).toMatchObject({
       name: "Archive 3D | Main FTP | 2160p",
+      title: "The.Matrix.1999.2160p.mkv\n5.0 GB\nPROXY",
       description: "The.Matrix.1999.2160p.mkv\n5.0 GB\nPROXY",
     });
   });
