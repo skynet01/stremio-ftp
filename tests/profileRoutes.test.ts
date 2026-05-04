@@ -815,6 +815,52 @@ describe("profile routes", () => {
     });
   });
 
+  it("accepts long AIOStreams formatter templates", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    const longFormatter = Array.from({ length: 70 }, (_, index) =>
+      `{stream.title::exists::and::stream.library::isfalse["${index} {stream.title::title::truncate(35)}"||""]}{stream.visualTags::exists["{stream.visualTags::sort::join(' · ')}"||""]}`,
+    ).join("\n");
+    expect(longFormatter.length).toBeGreaterThan(2000);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    await request(app)
+      .post("/api/profile/customization")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Archive 3D",
+          addonLogoUrl: "",
+          addonDescription: "Stream the archive from my FTP server.",
+          catalogEnabled: false,
+          catalogTmdbApiKey: "",
+          catalogContentTypes: { movies: true, series: true, anime: false },
+          libraryLayout: "auto",
+          streamDeliveryMode: "proxy",
+          streamNameTemplate: longFormatter,
+          streamDescriptionTemplate: longFormatter,
+        },
+      })
+      .expect(200);
+
+    const response = await request(app)
+      .post("/api/profile/customization/load")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(response.body.customization.streamNameTemplate).toBe(longFormatter);
+    expect(response.body.customization.streamDescriptionTemplate).toBe(longFormatter);
+  });
+
   it("returns the FTP list error when testing an invalid root path", async () => {
     const db = new Database(":memory:");
     migrate(db);

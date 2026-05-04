@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { hash: "local", subject: "fix: allow long formatter templates" },
   { hash: "local", subject: "fix: refine scanner controls and progress feedback" },
   { hash: "local", subject: "feat: support AIOStreams formatter syntax" },
   { hash: "local", subject: "feat: improve formatter tags and scan progress" },

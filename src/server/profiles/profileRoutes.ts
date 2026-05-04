@@ -23,6 +23,7 @@ const ftpConfigSchema = z.object({
 const authenticatedSchema = createSchema;
 const saveFtpSchema = createSchema.extend({ ftpConfig: ftpConfigSchema });
 const serverIdSchema = createSchema.extend({ serverId: z.number().int().positive() });
+const MAX_STREAM_FORMATTER_TEMPLATE_LENGTH = 50000;
 const saveScanScheduleSchema = createSchema.extend({
   intervalMinutes: z.number().int().min(0).max(10080),
 });
@@ -45,8 +46,8 @@ const customizationSchema = z.object({
     .default(DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!),
   libraryLayout: z.enum(["auto", "folders", "flat"]).default("auto"),
   streamDeliveryMode: z.enum(["proxy", "direct"]).default("proxy"),
-  streamNameTemplate: z.string().trim().max(1000).optional(),
-  streamDescriptionTemplate: z.string().trim().max(2000).optional(),
+  streamNameTemplate: z.string().trim().max(MAX_STREAM_FORMATTER_TEMPLATE_LENGTH).optional(),
+  streamDescriptionTemplate: z.string().trim().max(MAX_STREAM_FORMATTER_TEMPLATE_LENGTH).optional(),
 });
 const saveCustomizationSchema = createSchema.extend({ customization: customizationSchema });
 const saveServerSchema = serverIdSchema.extend({
