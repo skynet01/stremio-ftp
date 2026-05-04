@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { hash: "local", subject: "fix: clean folder-layout series titles" },
   { hash: "local", subject: "fix: map stream formatter title fields correctly" },
   { hash: "local", subject: "fix: mirror stream formatter descriptions to title" },
   { hash: "local", subject: "fix: retry transient ftp scan disconnects" },

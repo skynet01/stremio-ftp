@@ -239,6 +239,52 @@ describe("media parser", () => {
     });
   });
 
+  it("strips release years and source tokens from folder-layout series titles", () => {
+    const options = {
+      contentTypes: { movies: true, series: true, anime: false },
+      libraryLayout: "folders" as const,
+    };
+
+    expect(parseMediaPath("/TV Shows/Vikings (2013)/Vikings.S01E01.1080p.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "vikings",
+      season: 1,
+      episode: 1,
+    });
+    expect(parseMediaPath("/TV Shows/Breaking Bad (2008) -3dom/Breaking.Bad.S01E01.1080p.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "breaking bad",
+      season: 1,
+      episode: 1,
+    });
+    expect(parseMediaPath("/TV Shows/All of Us Are Dead (2022) -3DFF/All.of.Us.Are.Dead.S01E01.1080p.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "all of us are dead",
+      season: 1,
+      episode: 1,
+    });
+    expect(parseMediaPath("/TV Shows/Arcane s01-02 (2021)/Arcane.S02E01.1080p.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "arcane",
+      season: 2,
+      episode: 1,
+    });
+  });
+
+  it("strips release years and source tokens from bare folder-layout episode titles", () => {
+    expect(
+      parseMediaPath("/TV Shows/Avatar - The Last Airbender (2005)/Season 01/S01E01 - The Boy in the Iceberg.mkv", {
+        contentTypes: { movies: true, series: true, anime: false },
+        libraryLayout: "folders",
+      }),
+    ).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "avatar last airbender",
+      season: 1,
+      episode: 1,
+    });
+  });
+
   it("ignores unsupported files", () => {
     expect(parseMediaPath("/TV/Show/notes.txt")).toBeNull();
   });

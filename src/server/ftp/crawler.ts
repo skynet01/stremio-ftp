@@ -5,7 +5,7 @@ import type { FtpClientFactory, FtpEntry } from "./ftpTypes.js";
 
 const MAX_CRAWL_DEPTH = 64;
 const MAX_CRAWL_ENTRIES = 100000;
-const CRAWL_SNAPSHOT_VERSION = "parser-2026-05-04-2";
+const CRAWL_SNAPSHOT_VERSION = "parser-2026-05-04-3";
 
 export type CrawlProfileRootInput = {
   profileId: number;

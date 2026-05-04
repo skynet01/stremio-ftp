@@ -47,23 +47,37 @@ function stripKnownTokens(value: string): string {
     .replace(/\b(?:dc|wd)\s+s\b/gi, " ")
     .replace(/^\s*0\s+(?=[a-z])/i, " ")
     .replace(
-      /\b(2160p|1080p|720p|480p|3840p|4k|8k|bluray|webrip|hdtv|x264|x265|h264|h265|hevc|av1|aac|dts|truehd|atmos|ma|rife|remastered|multiaudio\d*|dirtyhippie|fgt|3dff|fsbs|hsbs|sbs|hou|ou|3d|3840x|isorip|ldf|decker|bit)\b/gi,
+      /\b(2160p|1080p|720p|480p|3840p|4k|8k|bluray|webrip|hdtv|x264|x265|h264|h265|hevc|av1|aac|dts|truehd|atmos|ma|rife|remastered|multiaudio\d*|dirtyhippie|fgt|3dff|3dom|fsbs|hsbs|sbs|hou|ou|3d|3840x|isorip|ldf|decker|bit)\b/gi,
       " ",
     )
     .replace(/\b\d+(?:fps|v\d+)\b/gi, " ")
     .replace(/\btt\d{7,8}\b/gi, " ");
 }
 
-function folderTitleOf(ftpPath: string): string | null {
+function folderNameOf(ftpPath: string): string | null {
   const parts = ftpPath.split(/[\\/]/).filter(Boolean);
   const folders = parts.slice(0, -1);
-  const title = folders.reverse().find((part) => !/^season\s*\d+$/i.test(part));
+  return folders.reverse().find((part) => !/^season\s*\d+$/i.test(part)) || null;
+}
+
+function folderTitleOf(ftpPath: string): string | null {
+  const title = folderNameOf(ftpPath);
   return title ? normalizeTitle(title) : null;
+}
+
+function stripSeriesFolderTokens(value: string): string {
+  return value.replace(/\bs\d{1,2}(?:\s*[-–]\s*\d{1,2})?\b/gi, " ");
+}
+
+function seriesFolderTitleOf(ftpPath: string): string | null {
+  const title = folderNameOf(ftpPath);
+  if (!title) return null;
+  return titleAndYearFrom(stripSeriesFolderTokens(title), null, null).title;
 }
 
 function seriesTitleOf(ftpPath: string, filenameTitle: string, options: ParseMediaOptions): string {
   if (options.libraryLayout === "folders") {
-    const folderTitle = folderTitleOf(ftpPath);
+    const folderTitle = seriesFolderTitleOf(ftpPath);
     if (folderTitle) return folderTitle;
   }
   return normalizeTitle(stripKnownTokens(filenameTitle));
@@ -123,7 +137,7 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
       filename,
       normalizedFilename,
       extension,
-      parsedTitle: folderTitleOf(ftpPath) || normalizedFilename,
+      parsedTitle: seriesFolderTitleOf(ftpPath) || normalizedFilename,
       parsedYear: null,
       season,
       episode,
@@ -167,7 +181,7 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
       filename,
       normalizedFilename,
       extension,
-      parsedTitle: folderTitleOf(ftpPath) || normalizedFilename,
+      parsedTitle: seriesFolderTitleOf(ftpPath) || normalizedFilename,
       parsedYear: null,
       season,
       episode,
