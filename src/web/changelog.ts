@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { hash: "local", subject: "feat: support AIOStreams formatter syntax" },
   { hash: "local", subject: "feat: improve formatter tags and scan progress" },
   { hash: "0a01f88", subject: "feat: support multiple ftp servers per manifest" },
   { hash: "ff48496", subject: "fix: bundle changelog metadata" },

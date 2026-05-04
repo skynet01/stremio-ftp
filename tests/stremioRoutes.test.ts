@@ -43,7 +43,7 @@ describe("stremio routes", () => {
     const response = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
     expect(response.body).toMatchObject({
       id: "community.stremio-ftp",
-      version: "0.4.1",
+      version: "0.4.2",
       resources: ["stream"],
       types: ["movie", "series"],
       idPrefixes: ["tt"],
