@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { hash: "local", subject: "fix: isolate configured Stremio installs" },
   { hash: "local", subject: "fix: release abandoned proxy connections" },
   { hash: "local", subject: "fix: clean folder-layout series titles" },
   { hash: "local", subject: "fix: map stream formatter title fields correctly" },

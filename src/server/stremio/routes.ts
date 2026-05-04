@@ -18,11 +18,14 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
   });
 
   router.get("/u/:installToken/manifest.json", (req, res) => {
-    const profileId = profiles.profileIdForInstallToken(req.params.installToken);
-    res.json(profileId ? tokenManifest(manifestCustomization(profiles, profileId)) : publicManifest());
+    const installToken = stringParam(req.params.installToken);
+    const profileId = profiles.profileIdForInstallToken(installToken);
+    res.setHeader("Cache-Control", "no-store");
+    res.json(profileId ? tokenManifest(manifestCustomization(profiles, profileId), installToken) : publicManifest());
   });
 
   router.get("/u/:installToken/stream/:type/:id.json", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     const type = stremioType(stringParam(req.params.type));
     const installToken = stringParam(req.params.installToken);
     const id = stringParam(req.params.id);

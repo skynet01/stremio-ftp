@@ -41,15 +41,20 @@ describe("stremio routes", () => {
     const app = createApp(config, db);
 
     const response = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
+    const otherProfile = await service.createProfile("uid-87654321", "passphrase");
+    const otherResponse = await request(app).get(`/u/${otherProfile.installUrlToken}/manifest.json`).expect(200);
+
     expect(response.body).toMatchObject({
-      id: "community.stremio-ftp",
-      version: "0.4.14",
+      version: "0.4.15",
       resources: ["stream"],
       types: ["movie", "series"],
       idPrefixes: ["tt"],
       catalogs: [],
       behaviorHints: { configurable: true, configurationRequired: false },
     });
+    expect(response.body.id).toMatch(/^community\.stremio-ftp\.[a-f0-9]{12}$/);
+    expect(otherResponse.body.id).toMatch(/^community\.stremio-ftp\.[a-f0-9]{12}$/);
+    expect(otherResponse.body.id).not.toBe(response.body.id);
     expect(response.header["access-control-allow-origin"]).toBe("*");
     expect(response.header["cross-origin-resource-policy"]).toBe("cross-origin");
   });
@@ -714,6 +719,7 @@ describe("stremio routes", () => {
 
     const response = await request(app).get(`/u/${created.installUrlToken}/stream/movie/tt0133093.json`).expect(200);
 
+    expect(response.header["cache-control"]).toContain("no-store");
     expect(response.body.streams[0]).toMatchObject({
       name: "Archive 3D | Main FTP | 2160p",
       title: "Archive 3D | Main FTP | 2160p",

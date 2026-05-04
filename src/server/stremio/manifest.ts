@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization } from "../profiles/profileService.js";
 
-const ADDON_VERSION = "0.4.14";
+const ADDON_VERSION = "0.4.15";
+const ADDON_ID = "community.stremio-ftp";
 
 export function publicManifest(customization: Partial<AddonCustomization> = {}) {
   const addonName = customization.addonName?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonName;
@@ -15,7 +17,7 @@ export function publicManifest(customization: Partial<AddonCustomization> = {}) 
     { type: "movie", id: "ftp-other", name: `${addonName} Other`, extra: [{ name: "skip" }] },
   ];
   return {
-    id: "community.stremio-ftp",
+    id: ADDON_ID,
     version: ADDON_VERSION,
     name: addonName,
     description: addonDescription,
@@ -28,9 +30,15 @@ export function publicManifest(customization: Partial<AddonCustomization> = {}) 
   };
 }
 
-export function tokenManifest(customization: Partial<AddonCustomization> = {}) {
+export function tokenManifest(customization: Partial<AddonCustomization> = {}, installToken = "") {
   return {
     ...publicManifest(customization),
+    id: tokenAddonId(installToken),
     behaviorHints: { configurable: true, configurationRequired: false },
   };
+}
+
+function tokenAddonId(installToken: string) {
+  const suffix = installToken ? createHash("sha256").update(installToken).digest("hex").slice(0, 12) : "";
+  return suffix ? `${ADDON_ID}.${suffix}` : ADDON_ID;
 }
