@@ -73,6 +73,7 @@ export type GlobalStats = {
   movies: number;
   series: number;
   anime: number;
+  uncategorized: number;
   servers: number;
   activeScans: number;
   pendingScans: number;

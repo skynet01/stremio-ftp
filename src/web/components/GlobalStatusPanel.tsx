@@ -26,7 +26,10 @@ export function GlobalStatusPanel({
           <h2 id="global-status-heading">Global index status</h2>
           <p>Combined library state across every FTP server in this manifest.</p>
         </div>
-        <StatusBadge tone={tone}>{stats.status === "working" ? "Scanning" : stats.status === "ready" ? "Ready" : "Idle"}</StatusBadge>
+        <div className="global-status-state">
+          <StatusBadge tone={tone}>{stats.status === "working" ? "Scanning" : stats.status === "ready" ? "Ready" : "Idle"}</StatusBadge>
+          <span>Last scan {formatScanTime(stats.lastCompletedScanAt)}</span>
+        </div>
       </div>
       <dl className="status-list global-status-list">
         <div>
@@ -58,8 +61,8 @@ export function GlobalStatusPanel({
           <dd>{stats.pendingScans}</dd>
         </div>
         <div>
-          <dt>Last scan</dt>
-          <dd>{formatScanTime(stats.lastCompletedScanAt)}</dd>
+          <dt>Uncategorized</dt>
+          <dd>{stats.uncategorized}</dd>
         </div>
       </dl>
       {scanProgress ? (

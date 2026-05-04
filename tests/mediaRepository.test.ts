@@ -118,6 +118,46 @@ describe("MediaRepository", () => {
     ]);
   });
 
+  it("aggregates unique catalog counts and uncategorized catalog entries", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+
+    for (const file of [
+      { ftpPath: "/Movies/The.Matrix.1999.1080p.mkv", mediaKind: "movie", catalogKind: "movie", title: "matrix", year: 1999, imdbId: "tt0133093" },
+      { ftpPath: "/Movies/The.Matrix.1999.2160p.mkv", mediaKind: "movie", catalogKind: "movie", title: "matrix", year: 1999, imdbId: "tt0133093" },
+      { ftpPath: "/TV/Show.Name.S01E01.mkv", mediaKind: "series", catalogKind: "series", title: "show name", year: null, imdbId: "tt7654321" },
+      { ftpPath: "/TV/Show.Name.S01E02.mkv", mediaKind: "series", catalogKind: "series", title: "show name", year: null, imdbId: "tt7654321" },
+      { ftpPath: "/Anime/Afro.Samurai.01.mkv", mediaKind: "series", catalogKind: "anime", title: "afro samurai", year: null, imdbId: null },
+      { ftpPath: "/Other/Mystery.File.2020.mkv", mediaKind: "movie", catalogKind: "movie", title: "mystery file", year: 2020, imdbId: null },
+    ] as const) {
+      repo.upsertParsedFile(profileId, {
+        ftpPath: file.ftpPath,
+        filename: file.ftpPath.split("/").at(-1) ?? "",
+        normalizedFilename: file.title,
+        extension: "mkv",
+        mediaKind: file.mediaKind,
+        catalogKind: file.catalogKind,
+        parsedTitle: file.title,
+        parsedYear: file.year,
+        season: file.mediaKind === "series" ? 1 : null,
+        episode: file.mediaKind === "series" ? (file.ftpPath.includes("E02") ? 2 : 1) : null,
+        imdbId: file.imdbId,
+        quality: null,
+        confidence: 90,
+      });
+    }
+
+    expect(repo.aggregateCountsForProfile(profileId)).toEqual({
+      total: 4,
+      movies: 2,
+      series: 1,
+      anime: 1,
+      uncategorized: 2,
+    });
+  });
+
   it("deletes stale files under a root and treats slash root as the whole profile", () => {
     const db = new Database(":memory:");
     migrate(db);

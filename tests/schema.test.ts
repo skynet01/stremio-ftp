@@ -81,6 +81,7 @@ describe("schema", () => {
       "profile_ftp_servers",
       "profile_install_tokens",
       "profiles",
+      "scan_directory_snapshots",
       "scan_jobs",
     ]);
   });

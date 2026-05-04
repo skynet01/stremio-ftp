@@ -54,6 +54,37 @@ describe("crawler", () => {
     expect(repo.findEpisode(profileId, "show name", 2, 5)).toHaveLength(1);
   });
 
+  it("skips unchanged directory subtrees using saved scan snapshots", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+    const listings = new Map<string, number>();
+    const factory: FtpClientFactory = async () => ({
+      list: async (path) => {
+        listings.set(path, (listings.get(path) ?? 0) + 1);
+        if (path === "/") {
+          return [{ name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" }];
+        }
+        if (path === "/Movies") {
+          return [{ name: "The.Matrix.1999.mkv", path: "/Movies/The.Matrix.1999.mkv", type: "file", size: 1000 }];
+        }
+        throw new Error(`unexpected list ${path}`);
+      },
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
+      close: async () => undefined,
+    });
+
+    await crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo });
+    await crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo });
+
+    expect(listings.get("/")).toBe(2);
+    expect(listings.get("/Movies")).toBe(1);
+    expect(repo.findMovie(profileId, "tt0000000", "matrix", 1999)).toHaveLength(1);
+  });
+
   it("skips invalid zero-numbered episodes without failing the crawl", async () => {
     const db = new Database(":memory:");
     migrate(db);

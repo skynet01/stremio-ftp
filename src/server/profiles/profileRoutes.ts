@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
+import { MediaRepository } from "../media/mediaRepository.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
 import { DEFAULT_ADDON_CUSTOMIZATION, DuplicateProfileError, ProfileService, type FtpServer } from "./profileService.js";
 
@@ -428,19 +429,7 @@ function serverPayload(_service: ProfileService, scanQueue: ScanQueue, server: F
 
 function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: number) {
   const servers = service.listFtpServers(profileId);
-  const rows = service.database
-    .prepare(
-      `
-      select
-        count(*) as total,
-        sum(case when media_kind = 'movie' and catalog_kind = 'movie' then 1 else 0 end) as movies,
-        sum(case when media_kind = 'series' and catalog_kind = 'series' then 1 else 0 end) as series,
-        sum(case when catalog_kind = 'anime' then 1 else 0 end) as anime
-      from media_files
-      where profile_id = ?
-    `,
-    )
-    .get(profileId) as { total: number; movies: number | null; series: number | null; anime: number | null };
+  const counts = new MediaRepository(service.database).aggregateCountsForProfile(profileId);
   const statuses = servers.map((server) => scanQueue.getServerScanStatus(profileId, server.id));
   const activeScans = statuses.filter((status) => status.status === "queued" || status.status === "running").length;
   const pendingScans = servers.filter((server) => server.pendingScanAfter).length;
@@ -451,15 +440,16 @@ function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: n
       .sort()
       .at(-1) ?? null;
   return {
-    totalItems: rows.total,
-    movies: rows.movies ?? 0,
-    series: rows.series ?? 0,
-    anime: rows.anime ?? 0,
+    totalItems: counts.total,
+    movies: counts.movies,
+    series: counts.series,
+    anime: counts.anime,
+    uncategorized: counts.uncategorized,
     servers: servers.length,
     activeScans,
     pendingScans,
     lastCompletedScanAt,
-    status: activeScans > 0 ? "working" : rows.total > 0 ? "ready" : "idle",
+    status: activeScans > 0 ? "working" : counts.total > 0 ? "ready" : "idle",
   };
 }
 

@@ -114,6 +114,19 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Test connection" })).toBeTruthy();
     expect(screen.getByText("Index status")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Library settings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Server Settings" })).toBeTruthy();
+    expect(
+      Boolean(
+        screen.getByRole("heading", { name: "Library settings" }).compareDocumentPosition(screen.getByRole("heading", { name: "Server Settings" })) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+    expect(
+      Boolean(
+        screen.getByRole("heading", { name: "Server Settings" }).compareDocumentPosition(screen.getByText("Index status")) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
     expect(screen.getByLabelText("TMDB API key")).toBeTruthy();
     expect(screen.getByLabelText("Library layout")).toBeTruthy();
     expect(screen.getByLabelText("Stream delivery")).toBeTruthy();
@@ -123,7 +136,7 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Show indexed FTP catalog in Stremio")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.6`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.7`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
@@ -646,6 +659,18 @@ describe("App", () => {
         finishedAt: "2026-05-02T22:45:00.000Z",
       },
       scanSchedule: manualScanSchedule,
+      globalStats: {
+        totalItems: 3,
+        movies: 2,
+        series: 0,
+        anime: 0,
+        uncategorized: 1,
+        servers: 1,
+        activeScans: 0,
+        pendingScans: 0,
+        lastCompletedScanAt: "2026-05-02T22:45:00.000Z",
+        status: "ready",
+      },
     });
 
     render(<App />);
@@ -702,8 +727,9 @@ describe("App", () => {
       timeout: 2000,
     });
     expect(await screen.findByText("Indexed 3 media files.")).toBeTruthy();
-    expect(screen.getByText("3")).toBeTruthy();
-    expect(screen.getByText(/May 02, 2026, 3:45 PM/)).toBeTruthy();
+    expect(screen.getAllByText("3").length).toBeGreaterThan(0);
+    expect(screen.getByText("Uncategorized")).toBeTruthy();
+    expect(screen.getByText("Last scan May 02, 2026, 3:45 PM")).toBeTruthy();
   });
 
   it("shows a halt button while a scan is active", async () => {

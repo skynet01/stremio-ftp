@@ -38,6 +38,15 @@ export type OtherCatalogItem = {
   sizeBytes: number | null;
 };
 
+export type DirectorySnapshotInput = {
+  dirPath: string;
+  entryCount: number;
+  fingerprint: string;
+  modifiedAt?: string | null;
+  lastSeenAt: string;
+  ftpServerId?: number | null;
+};
+
 type MediaFileRow = {
   id: number;
   ftp_server_id: number | null;
@@ -289,25 +298,167 @@ export class MediaRepository {
   }
 
   aggregateCountsForProfile(profileId: number) {
-    const row = this.db
+    const categorized = this.db
       .prepare(
         `
         select
           count(*) as total,
-          sum(case when media_kind = 'movie' and catalog_kind = 'movie' then 1 else 0 end) as movies,
-          sum(case when media_kind = 'series' and catalog_kind = 'series' then 1 else 0 end) as series,
-          sum(case when catalog_kind = 'anime' then 1 else 0 end) as anime
-        from media_files
-        where profile_id = ?
+          sum(case when category = 'movie' then 1 else 0 end) as movies,
+          sum(case when category = 'series' then 1 else 0 end) as series,
+          sum(case when category = 'anime' then 1 else 0 end) as anime
+        from (
+          select
+            catalog_kind as category,
+            case
+              when imdb_id is not null then imdb_id
+              when catalog_kind = 'movie' then parsed_title || '|' || coalesce(parsed_year, '')
+              else parsed_title
+            end as item_key
+          from media_files
+          where profile_id = ?
+            and parsed_title is not null
+          group by category, item_key
+        )
       `,
       )
       .get(profileId) as { total: number; movies: number | null; series: number | null; anime: number | null };
+    const uncategorized = this.db
+      .prepare(
+        `
+        select count(*) as count
+        from (
+          select
+            catalog_kind,
+            case
+              when catalog_kind = 'movie' then parsed_title || '|' || coalesce(parsed_year, '')
+              else parsed_title
+            end as item_key
+          from media_files
+          where profile_id = ?
+            and imdb_id is null
+            and parsed_title is not null
+          group by catalog_kind, item_key
+        )
+      `,
+      )
+      .get(profileId) as { count: number };
     return {
-      total: row.total,
-      movies: row.movies ?? 0,
-      series: row.series ?? 0,
-      anime: row.anime ?? 0,
+      total: categorized.total,
+      movies: categorized.movies ?? 0,
+      series: categorized.series ?? 0,
+      anime: categorized.anime ?? 0,
+      uncategorized: uncategorized.count,
     };
+  }
+
+  directorySnapshotMatchesModifiedAt(profileId: number, ftpServerId: number | null | undefined, dirPath: string, modifiedAt: string) {
+    const row = this.db
+      .prepare(
+        `
+        select id
+        from scan_directory_snapshots
+        where profile_id = ?
+          and (? is null or ftp_server_id = ?)
+          and dir_path = ?
+          and modified_at = ?
+        limit 1
+      `,
+      )
+      .get(profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath), modifiedAt) as { id: number } | undefined;
+    return Boolean(row);
+  }
+
+  directorySnapshotMatchesFingerprint(
+    profileId: number,
+    ftpServerId: number | null | undefined,
+    dirPath: string,
+    entryCount: number,
+    fingerprint: string,
+  ) {
+    const row = this.db
+      .prepare(
+        `
+        select id
+        from scan_directory_snapshots
+        where profile_id = ?
+          and (? is null or ftp_server_id = ?)
+          and dir_path = ?
+          and entry_count = ?
+          and fingerprint = ?
+        limit 1
+      `,
+      )
+      .get(profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath), entryCount, fingerprint) as
+      | { id: number }
+      | undefined;
+    return Boolean(row);
+  }
+
+  saveDirectorySnapshot(profileId: number, snapshot: DirectorySnapshotInput) {
+    this.db
+      .prepare(
+        `
+        insert into scan_directory_snapshots (
+          profile_id,
+          ftp_server_id,
+          dir_path,
+          entry_count,
+          fingerprint,
+          modified_at,
+          last_seen_at
+        ) values (?, ?, ?, ?, ?, ?, ?)
+        on conflict(profile_id, ftp_server_id, dir_path) do update set
+          entry_count = excluded.entry_count,
+          fingerprint = excluded.fingerprint,
+          modified_at = excluded.modified_at,
+          last_seen_at = excluded.last_seen_at
+      `,
+      )
+      .run(
+        profileId,
+        snapshot.ftpServerId ?? null,
+        normalizeRootPath(snapshot.dirPath),
+        snapshot.entryCount,
+        snapshot.fingerprint,
+        snapshot.modifiedAt ?? null,
+        snapshot.lastSeenAt,
+      );
+  }
+
+  touchDirectorySnapshot(profileId: number, ftpServerId: number | null | undefined, dirPath: string, lastSeenAt: string) {
+    this.db
+      .prepare(
+        `
+        update scan_directory_snapshots
+        set last_seen_at = ?
+        where profile_id = ?
+          and (? is null or ftp_server_id = ?)
+          and dir_path = ?
+      `,
+      )
+      .run(lastSeenAt, profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath));
+  }
+
+  markSeenUnderRoot(profileId: number, rootPath: string, seenAt: string, ftpServerId?: number | null) {
+    const root = normalizeRootPath(rootPath);
+    if (root === "/") {
+      return this.db
+        .prepare("update media_files set last_seen_at = ? where profile_id = ? and (? is null or ftp_server_id = ?)")
+        .run(seenAt, profileId, ftpServerId ?? null, ftpServerId ?? null).changes;
+    }
+
+    const rootWithSlash = `${root}/`;
+    return this.db
+      .prepare(
+        `
+        update media_files
+        set last_seen_at = ?
+        where profile_id = ?
+          and (? is null or ftp_server_id = ?)
+          and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
+      `,
+      )
+      .run(seenAt, profileId, ftpServerId ?? null, ftpServerId ?? null, root, rootWithSlash.length, rootWithSlash).changes;
   }
 
   catalogItems(profileId: number, catalogKind: "movie" | "series" | "anime", limit: number, skip: number): CatalogItem[] {

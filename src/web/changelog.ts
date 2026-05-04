@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { hash: "local", subject: "feat: add incremental scan snapshots" },
   { hash: "local", subject: "fix: refine scan schedule and progress UI" },
   { hash: "local", subject: "fix: skip zero-numbered episode files" },
   { hash: "local", subject: "fix: allow long formatter templates" },

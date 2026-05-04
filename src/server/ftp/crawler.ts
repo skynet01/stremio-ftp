@@ -1,7 +1,7 @@
 import type { MediaRepository } from "../media/mediaRepository.js";
 import { parseMediaPath, type ParseMediaOptions } from "../media/parser.js";
 import type { FtpConfig } from "../profiles/profileService.js";
-import type { FtpClientFactory } from "./ftpTypes.js";
+import type { FtpClientFactory, FtpEntry } from "./ftpTypes.js";
 
 const MAX_CRAWL_DEPTH = 64;
 const MAX_CRAWL_ENTRIES = 100000;
@@ -41,7 +41,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     input.onProgress?.({ entriesSeen, filesSeen, directoriesSeen, currentPath });
   }
 
-  async function walk(path: string, depth: number) {
+  async function walk(path: string, depth: number, directoryModifiedAt: string | null = null) {
     throwIfScanCancelled(input.signal);
     if (depth > MAX_CRAWL_DEPTH) throw new Error(`Maximum FTP crawl depth exceeded at ${path}`);
 
@@ -51,6 +51,15 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     directoriesSeen += 1;
     report(normalizedPath);
 
+    if (
+      directoryModifiedAt &&
+      input.repo.directorySnapshotMatchesModifiedAt(input.profileId, input.ftpServerId ?? null, normalizedPath, directoryModifiedAt)
+    ) {
+      filesSeen += input.repo.markSeenUnderRoot(input.profileId, normalizedPath, crawlStartedAt, input.ftpServerId ?? null);
+      input.repo.touchDirectorySnapshot(input.profileId, input.ftpServerId ?? null, normalizedPath, crawlStartedAt);
+      return;
+    }
+
     let entries;
     try {
       entries = await client.list(normalizedPath);
@@ -58,6 +67,25 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
       if (input.signal?.aborted) throw new ScanCancelledError();
       throw error;
     }
+
+    const fingerprint = fingerprintEntries(entries);
+    if (
+      canTrustDirectoryFingerprint(entries) &&
+      input.repo.directorySnapshotMatchesFingerprint(input.profileId, input.ftpServerId ?? null, normalizedPath, entries.length, fingerprint)
+    ) {
+      filesSeen += input.repo.markSeenUnderRoot(input.profileId, normalizedPath, crawlStartedAt, input.ftpServerId ?? null);
+      input.repo.saveDirectorySnapshot(input.profileId, {
+        ftpServerId: input.ftpServerId ?? null,
+        dirPath: normalizedPath,
+        entryCount: entries.length,
+        fingerprint,
+        modifiedAt: directoryModifiedAt,
+        lastSeenAt: crawlStartedAt,
+      });
+      report(normalizedPath);
+      return;
+    }
+
     for (const entry of entries) {
       throwIfScanCancelled(input.signal);
       entriesSeen += 1;
@@ -65,7 +93,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
       if (entry.name === "." || entry.name === "..") continue;
 
       if (entry.type === "directory") {
-        await walk(entry.path, depth + 1);
+        await walk(entry.path, depth + 1, entry.modifiedAt ?? null);
       } else {
         const parsed = parseMediaPath(entry.path, input.parserOptions);
         if (parsed) {
@@ -81,6 +109,15 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
         report(entry.path);
       }
     }
+
+    input.repo.saveDirectorySnapshot(input.profileId, {
+      ftpServerId: input.ftpServerId ?? null,
+      dirPath: normalizedPath,
+      entryCount: entries.length,
+      fingerprint,
+      modifiedAt: directoryModifiedAt,
+      lastSeenAt: crawlStartedAt,
+    });
   }
 
   try {
@@ -111,4 +148,15 @@ function normalizeFtpPath(path: string) {
   const normalized = path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/+$/, "");
   if (!normalized) return "/";
   return normalized.startsWith("/") ? normalized : `/${normalized}`;
+}
+
+function canTrustDirectoryFingerprint(entries: FtpEntry[]) {
+  return entries.every((entry) => entry.type === "file" || Boolean(entry.modifiedAt));
+}
+
+function fingerprintEntries(entries: FtpEntry[]) {
+  return entries
+    .map((entry) => [entry.type, entry.name, normalizeFtpPath(entry.path), entry.size ?? "", entry.modifiedAt ?? ""].join("\t"))
+    .sort()
+    .join("\n");
 }

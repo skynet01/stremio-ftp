@@ -42,6 +42,18 @@ const MEDIA_FILES_COLUMNS = `
       unique(profile_id, ftp_server_id, ftp_path)
 `;
 
+const SCAN_DIRECTORY_SNAPSHOTS_COLUMNS = `
+      id integer primary key autoincrement,
+      profile_id integer not null references profiles(id) on delete cascade,
+      ftp_server_id integer references profile_ftp_servers(id) on delete cascade,
+      dir_path text not null,
+      entry_count integer not null check (entry_count >= 0),
+      fingerprint text not null,
+      modified_at text,
+      last_seen_at text not null,
+      unique(profile_id, ftp_server_id, dir_path)
+`;
+
 export function migrate(db: Database.Database) {
   db.exec(`
     create table if not exists profiles (
@@ -118,8 +130,13 @@ ${MEDIA_FILES_COLUMNS}
 ${SCAN_JOBS_COLUMNS}
     );
 
+    create table if not exists scan_directory_snapshots (
+${SCAN_DIRECTORY_SNAPSHOTS_COLUMNS}
+    );
+
     create index if not exists idx_scan_jobs_profile_status on scan_jobs(profile_id, status);
     create index if not exists idx_scan_jobs_status_queued on scan_jobs(status, queued_at);
+    create index if not exists idx_scan_directory_snapshots_profile_server on scan_directory_snapshots(profile_id, ftp_server_id);
 
   `);
   ensureProfileColumn(db, "addon_name", "text");

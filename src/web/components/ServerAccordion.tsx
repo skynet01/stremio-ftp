@@ -126,7 +126,88 @@ export function ServerAccordion({
               </button>
               {expanded ? (
                 <div className="server-accordion-body">
+                  <div className="library-settings server-section">
+                    <div className="library-settings-header">
+                      <h3>Library settings</h3>
+                    </div>
+                    <div className="library-settings-grid">
+                      {field(
+                        "TMDB API key",
+                        `catalogTmdbApiKey-${server.id}`,
+                        <input
+                          id={`catalogTmdbApiKey-${server.id}`}
+                          className={filledClass(server.catalogTmdbApiKey)}
+                          value={server.catalogTmdbApiKey}
+                          placeholder="Use server default"
+                          onChange={(event) => onServerChange(server.id, { catalogTmdbApiKey: event.currentTarget.value })}
+                        />,
+                      )}
+                      {field(
+                        "Library layout",
+                        `libraryLayout-${server.id}`,
+                        <select
+                          id={`libraryLayout-${server.id}`}
+                          className={filledClass(server.libraryLayout)}
+                          value={server.libraryLayout}
+                          onChange={(event) => onServerChange(server.id, { libraryLayout: event.currentTarget.value as LibraryLayout })}
+                        >
+                          <option value="auto">Auto detect</option>
+                          <option value="folders">Organized by folders</option>
+                          <option value="flat">Single folder of files</option>
+                        </select>,
+                      )}
+                      {field(
+                        "Stream delivery",
+                        `streamDeliveryMode-${server.id}`,
+                        <select
+                          id={`streamDeliveryMode-${server.id}`}
+                          className={filledClass(server.streamDeliveryMode)}
+                          value={server.streamDeliveryMode}
+                          onChange={(event) => onServerChange(server.id, { streamDeliveryMode: event.currentTarget.value as StreamDeliveryMode })}
+                        >
+                          <option value="proxy">Proxy through addon</option>
+                          <option value="direct">Direct FTP URL</option>
+                        </select>,
+                      )}
+                      {server.streamDeliveryMode === "direct" ? (
+                        <p className="field-hint">Direct FTP sends FTP URLs to Stremio clients that can open them.</p>
+                      ) : null}
+                      <div className="content-type-options" role="group" aria-label="Server content types">
+                        <div className="server-content-row">
+                          <span className="field-label">Server content</span>
+                          <div className="server-content-toggles">
+                            {(["movies", "series", "anime"] as const).map((key) => (
+                              <label className="toggle-row" htmlFor={`${key}-${server.id}`} key={key}>
+                                <input
+                                  id={`${key}-${server.id}`}
+                                  type="checkbox"
+                                  checked={server.catalogContentTypes[key]}
+                                  onChange={(event) =>
+                                    onServerChange(server.id, {
+                                      catalogContentTypes: { ...server.catalogContentTypes, [key]: event.currentTarget.checked },
+                                    })
+                                  }
+                                />
+                                {key.charAt(0).toUpperCase() + key.slice(1)}
+                              </label>
+                            ))}
+                          </div>
+                          <label className="toggle-row catalog-toggle" htmlFor={`catalogEnabled-${server.id}`}>
+                            <input
+                              id={`catalogEnabled-${server.id}`}
+                              type="checkbox"
+                              checked={server.catalogEnabled}
+                              onChange={(event) => onServerChange(server.id, { catalogEnabled: event.currentTarget.checked })}
+                            />
+                            Show indexed FTP catalog in Stremio
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="server-section">
+                    <h3>Server Settings</h3>
                     <div className="field-grid ftp-field-grid">
                       {field(
                         "Server name",
@@ -223,86 +304,6 @@ export function ServerAccordion({
                         />,
                         "field-stack root-paths-field",
                       )}
-                    </div>
-                  </div>
-
-                  <div className="library-settings server-section">
-                    <div className="library-settings-header">
-                      <h3>Library settings</h3>
-                    </div>
-                    <div className="library-settings-grid">
-                      {field(
-                        "TMDB API key",
-                        `catalogTmdbApiKey-${server.id}`,
-                        <input
-                          id={`catalogTmdbApiKey-${server.id}`}
-                          className={filledClass(server.catalogTmdbApiKey)}
-                          value={server.catalogTmdbApiKey}
-                          placeholder="Use server default"
-                          onChange={(event) => onServerChange(server.id, { catalogTmdbApiKey: event.currentTarget.value })}
-                        />,
-                      )}
-                      {field(
-                        "Library layout",
-                        `libraryLayout-${server.id}`,
-                        <select
-                          id={`libraryLayout-${server.id}`}
-                          className={filledClass(server.libraryLayout)}
-                          value={server.libraryLayout}
-                          onChange={(event) => onServerChange(server.id, { libraryLayout: event.currentTarget.value as LibraryLayout })}
-                        >
-                          <option value="auto">Auto detect</option>
-                          <option value="folders">Organized by folders</option>
-                          <option value="flat">Single folder of files</option>
-                        </select>,
-                      )}
-                      {field(
-                        "Stream delivery",
-                        `streamDeliveryMode-${server.id}`,
-                        <select
-                          id={`streamDeliveryMode-${server.id}`}
-                          className={filledClass(server.streamDeliveryMode)}
-                          value={server.streamDeliveryMode}
-                          onChange={(event) => onServerChange(server.id, { streamDeliveryMode: event.currentTarget.value as StreamDeliveryMode })}
-                        >
-                          <option value="proxy">Proxy through addon</option>
-                          <option value="direct">Direct FTP URL</option>
-                        </select>,
-                      )}
-                      {server.streamDeliveryMode === "direct" ? (
-                        <p className="field-hint">Direct FTP sends FTP URLs to Stremio clients that can open them.</p>
-                      ) : null}
-                      <div className="content-type-options" role="group" aria-label="Server content types">
-                        <div className="server-content-row">
-                          <span className="field-label">Server content</span>
-                          <div className="server-content-toggles">
-                            {(["movies", "series", "anime"] as const).map((key) => (
-                              <label className="toggle-row" htmlFor={`${key}-${server.id}`} key={key}>
-                                <input
-                                  id={`${key}-${server.id}`}
-                                  type="checkbox"
-                                  checked={server.catalogContentTypes[key]}
-                                  onChange={(event) =>
-                                    onServerChange(server.id, {
-                                      catalogContentTypes: { ...server.catalogContentTypes, [key]: event.currentTarget.checked },
-                                    })
-                                  }
-                                />
-                                {key.charAt(0).toUpperCase() + key.slice(1)}
-                              </label>
-                            ))}
-                          </div>
-                          <label className="toggle-row catalog-toggle" htmlFor={`catalogEnabled-${server.id}`}>
-                            <input
-                              id={`catalogEnabled-${server.id}`}
-                              type="checkbox"
-                              checked={server.catalogEnabled}
-                              onChange={(event) => onServerChange(server.id, { catalogEnabled: event.currentTarget.checked })}
-                            />
-                            Show indexed FTP catalog in Stremio
-                          </label>
-                        </div>
-                      </div>
                     </div>
                   </div>
 

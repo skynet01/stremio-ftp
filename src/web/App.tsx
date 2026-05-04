@@ -63,6 +63,7 @@ const EMPTY_GLOBAL_STATS: GlobalStats = {
   movies: 0,
   series: 0,
   anime: 0,
+  uncategorized: 0,
   servers: 1,
   activeScans: 0,
   pendingScans: 0,

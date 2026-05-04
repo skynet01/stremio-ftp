@@ -320,6 +320,18 @@ textarea:focus-visible,
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.global-status-state {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .stream-formatter {
   margin-top: 24px;
 }
