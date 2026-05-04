@@ -51,6 +51,12 @@ function folderTitleOf(ftpPath: string): string | null {
   return title ? normalizeTitle(title) : null;
 }
 
+function positiveInteger(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function parseMediaPath(ftpPath: string, options: ParseMediaOptions = {}): ParsedMedia | null {
   return parseMediaPathWithOptions(ftpPath, options);
 }
@@ -67,6 +73,9 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
 
   const sxe = withoutExtension.match(/^(?<title>.+?)[\s._-]+s(?<season>\d{1,2})e(?<episode>\d{1,3})\b/i);
   if (sxe?.groups) {
+    const season = positiveInteger(sxe.groups.season);
+    const episode = positiveInteger(sxe.groups.episode);
+    if (!season || !episode) return null;
     return {
       mediaKind: "series",
       catalogKind: seriesCatalogKind(ftpPath, options),
@@ -76,8 +85,8 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
       extension,
       parsedTitle: normalizeTitle(sxe.groups.title),
       parsedYear: null,
-      season: Number(sxe.groups.season),
-      episode: Number(sxe.groups.episode),
+      season,
+      episode,
       imdbId,
       quality,
       confidence: 95,
@@ -86,6 +95,9 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
 
   const bareSxe = withoutExtension.match(/^s(?<season>\d{1,2})e(?<episode>\d{1,3})\b/i);
   if (bareSxe?.groups) {
+    const season = positiveInteger(bareSxe.groups.season);
+    const episode = positiveInteger(bareSxe.groups.episode);
+    if (!season || !episode) return null;
     return {
       mediaKind: "series",
       catalogKind: seriesCatalogKind(ftpPath, options),
@@ -95,8 +107,8 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
       extension,
       parsedTitle: folderTitleOf(ftpPath) || normalizedFilename,
       parsedYear: null,
-      season: Number(bareSxe.groups.season),
-      episode: Number(bareSxe.groups.episode),
+      season,
+      episode,
       imdbId,
       quality,
       confidence: 85,
@@ -105,6 +117,9 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
 
   const xPattern = withoutExtension.match(/^(?<title>.+?)[\s._-]+(?<season>\d{1,2})x(?<episode>\d{1,3})\b/i);
   if (xPattern?.groups) {
+    const season = positiveInteger(xPattern.groups.season);
+    const episode = positiveInteger(xPattern.groups.episode);
+    if (!season || !episode) return null;
     return {
       mediaKind: "series",
       catalogKind: seriesCatalogKind(ftpPath, options),
@@ -114,8 +129,8 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
       extension,
       parsedTitle: normalizeTitle(xPattern.groups.title),
       parsedYear: null,
-      season: Number(xPattern.groups.season),
-      episode: Number(xPattern.groups.episode),
+      season,
+      episode,
       imdbId,
       quality,
       confidence: 90,
@@ -124,6 +139,9 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
 
   const bareXPattern = withoutExtension.match(/^(?<season>\d{1,2})x(?<episode>\d{1,3})\b/i);
   if (bareXPattern?.groups) {
+    const season = positiveInteger(bareXPattern.groups.season);
+    const episode = positiveInteger(bareXPattern.groups.episode);
+    if (!season || !episode) return null;
     return {
       mediaKind: "series",
       catalogKind: seriesCatalogKind(ftpPath, options),
@@ -133,8 +151,8 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
       extension,
       parsedTitle: folderTitleOf(ftpPath) || normalizedFilename,
       parsedYear: null,
-      season: Number(bareXPattern.groups.season),
-      episode: Number(bareXPattern.groups.episode),
+      season,
+      episode,
       imdbId,
       quality,
       confidence: 80,
@@ -149,6 +167,8 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
     if (!shouldUseAnimeAbsolute(ftpPath, options, parsedTitle)) {
       return parseMoviePath(ftpPath, filename, normalizedFilename, extension, imdbId, quality, withoutExtension, options);
     }
+    const episode = positiveInteger(animeEpisode.groups.episode);
+    if (!episode) return null;
     return {
       mediaKind: "series",
       catalogKind: "anime",
@@ -159,7 +179,7 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
       parsedTitle,
       parsedYear: null,
       season: 1,
-      episode: Number(animeEpisode.groups.episode),
+      episode,
       imdbId,
       quality,
       confidence: 82,

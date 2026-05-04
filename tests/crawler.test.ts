@@ -54,6 +54,34 @@ describe("crawler", () => {
     expect(repo.findEpisode(profileId, "show name", 2, 5)).toHaveLength(1);
   });
 
+  it("skips invalid zero-numbered episodes without failing the crawl", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+    const factory: FtpClientFactory = async () => ({
+      list: async () => [
+        { name: "Show.Name.S01E00.1080p.mkv", path: "/TV/Show.Name.S01E00.1080p.mkv", type: "file", size: 1000 },
+        { name: "Show.Name.S01E01.1080p.mkv", path: "/TV/Show.Name.S01E01.1080p.mkv", type: "file", size: 1000 },
+      ],
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
+      close: async () => undefined,
+    });
+
+    const result = await crawlProfileRoot({
+      profileId,
+      rootPath: "/",
+      ftpConfig,
+      factory,
+      repo,
+    });
+
+    expect(result.filesSeen).toBe(1);
+    expect(repo.findEpisode(profileId, "show name", 1, 1)).toHaveLength(1);
+  });
+
   it("reports crawl progress while walking directories and files", async () => {
     const db = new Database(":memory:");
     migrate(db);

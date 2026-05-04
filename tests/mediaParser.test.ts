@@ -19,6 +19,11 @@ describe("media parser", () => {
     });
   });
 
+  it("skips invalid zero-numbered SxxEyy episodes", () => {
+    expect(parseMediaPath("/TV/Show.Name/Season 01/Show.Name.S01E00.1080p.mkv")).toBeNull();
+    expect(parseMediaPath("/TV/Show.Name/Season 00/Show.Name.S00E01.1080p.mkv")).toBeNull();
+  });
+
   it("parses 2x05 episode filenames", () => {
     expect(parseMediaPath("/TV/Show Name/Show Name - 2x05 - Episode Title.mp4")).toMatchObject({
       mediaKind: "series",
@@ -27,6 +32,11 @@ describe("media parser", () => {
       episode: 5,
       extension: "mp4",
     });
+  });
+
+  it("skips invalid zero-numbered 2x05 episodes", () => {
+    expect(parseMediaPath("/TV/Show Name/Show Name - 2x00 - Episode Title.mp4")).toBeNull();
+    expect(parseMediaPath("/TV/Show Name/Show Name - 0x05 - Episode Title.mp4")).toBeNull();
   });
 
   it("parses movie title year and imdb id", () => {
@@ -98,6 +108,14 @@ describe("media parser", () => {
       episode: 1,
       quality: "1080p",
     });
+  });
+
+  it("skips invalid zero-numbered anime absolute episodes", () => {
+    expect(
+      parseMediaPath("/Anime/Afro Samurai/Afro.Samurai.00.1080p.mkv", {
+        contentTypes: { movies: false, series: true, anime: true },
+      }),
+    ).toBeNull();
   });
 
   it("parses folder-mode anime absolute episodes when file title matches the folder", () => {
