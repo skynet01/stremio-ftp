@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import helmet from "helmet";
 import type { AppConfig } from "./config.js";
 import { openDatabase } from "./db/database.js";
-import { createBasicFtpClient } from "./ftp/basicFtpClient.js";
+import { createBasicFtpClientFactory } from "./ftp/basicFtpClient.js";
 import { limitFtpClientFactory } from "./ftp/ftpConnectionLimiter.js";
 import type { FtpClientFactory } from "./ftp/ftpTypes.js";
 import { MediaRepository } from "./media/mediaRepository.js";
@@ -48,7 +48,7 @@ export function createApp(
 
   const profileService = new ProfileService(db, config.encryptionKey);
   const mediaRepository = new MediaRepository(db);
-  const ftpClientFactory = limitFtpClientFactory(options.ftpClientFactory ?? createBasicFtpClient, config.ftpMaxConnections);
+  const ftpClientFactory = limitFtpClientFactory(options.ftpClientFactory ?? createBasicFtpClientFactory(config.ftpTimeoutMs), config.ftpMaxConnections);
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
   const scanScheduler = setInterval(() => scanQueue.enqueueDueScheduledScans(), config.scanSchedulerIntervalMs);
   scanScheduler.unref();

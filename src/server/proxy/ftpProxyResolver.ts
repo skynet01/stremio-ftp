@@ -21,10 +21,37 @@ export function createFtpProxyResolver(
     return {
       filename: file.filename,
       sizeBytes: file.sizeBytes,
-      openReadStream: async ({ start, end }: { start: number; end: number }) => {
+      openReadStream: async ({ start, end, signal }: { start: number; end: number; signal?: AbortSignal }) => {
         const client = await ftpClientFactory(ftpConfig);
-        return client.openReadStream(file.ftpPath, { start, end });
+        let closeRequested = false;
+        const closeClient = () => {
+          closeRequested = true;
+          void client.close();
+        };
+        signal?.addEventListener("abort", closeClient, { once: true });
+        try {
+          if (signal?.aborted) throw new Error("Proxy request aborted");
+          const stream = await client.openReadStream(file.ftpPath, { start, end });
+          signal?.removeEventListener("abort", closeClient);
+          if (signal?.aborted) {
+            destroyStream(stream);
+            if (!closeRequested) await client.close();
+            throw new Error("Proxy request aborted");
+          }
+          return stream;
+        } catch (error) {
+          signal?.removeEventListener("abort", closeClient);
+          if (!closeRequested) await client.close();
+          if (signal?.aborted) throw new Error("Proxy request aborted");
+          throw error;
+        }
       },
     };
   };
+}
+
+function destroyStream(stream: NodeJS.ReadableStream) {
+  if ("destroy" in stream && typeof stream.destroy === "function") {
+    stream.destroy();
+  }
 }

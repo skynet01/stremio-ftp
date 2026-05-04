@@ -6,7 +6,7 @@ import { parseRangeHeader } from "./range.js";
 type ProxyFile = {
   filename: string;
   sizeBytes: number | null;
-  openReadStream(input: { start: number; end: number }): Promise<NodeJS.ReadableStream>;
+  openReadStream(input: { start: number; end: number; signal?: AbortSignal }): Promise<NodeJS.ReadableStream>;
 };
 
 type ProxyDeps = {
@@ -85,7 +85,30 @@ async function handleProxyRequest(deps: ProxyDeps, req: Request, res: Response, 
     return;
   }
 
-  const stream = await file.openReadStream({ start, end });
+  res.flushHeaders();
+
+  const openController = new AbortController();
+  let streamOpened = false;
+  const abortPendingOpen = () => {
+    if (!streamOpened) openController.abort();
+  };
+  res.once("close", abortPendingOpen);
+
+  let stream: NodeJS.ReadableStream;
+  try {
+    stream = await file.openReadStream({ start, end, signal: openController.signal });
+  } catch (error) {
+    res.off("close", abortPendingOpen);
+    if (openController.signal.aborted) return;
+    throw error;
+  }
+  streamOpened = true;
+  res.off("close", abortPendingOpen);
+  if (openController.signal.aborted || res.destroyed) {
+    destroyStream(stream);
+    return;
+  }
+
   let streamFinished = false;
   let streamDestroyed = false;
   const cleanup = () => {

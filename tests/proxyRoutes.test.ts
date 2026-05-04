@@ -174,6 +174,80 @@ describe("proxy routes", () => {
       });
     }
   });
+
+  it("aborts a pending stream open when the HTTP client disconnects", async () => {
+    const openCalled = deferred<void>();
+    const streamReady = deferred<Readable>();
+    let signal: AbortSignal | undefined;
+
+    const router = createProxyRouter({
+      resolve: async () => ({
+        filename: "video.mkv",
+        sizeBytes: 10,
+        openReadStream: async (input) => {
+          signal = (input as { signal?: AbortSignal }).signal;
+          openCalled.resolve();
+          return streamReady.promise;
+        },
+      }),
+    });
+
+    const express = (await import("express")).default;
+    const app = express().use(router);
+    const server = app.listen(0);
+
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const req = httpRequest({ host: "127.0.0.1", port, path: "/proxy/token/1" });
+      req.once("error", () => undefined);
+      req.end();
+      await openCalled.promise;
+
+      req.destroy();
+      await waitFor(() => signal?.aborted === true);
+      expect(signal?.aborted).toBe(true);
+
+      streamReady.resolve(Readable.from(""));
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("sends range headers before a slow stream open completes", async () => {
+    const streamReady = deferred<Readable>();
+    const router = createProxyRouter({
+      resolve: async () => ({
+        filename: "video.mkv",
+        sizeBytes: 10,
+        openReadStream: async () => streamReady.promise,
+      }),
+    });
+
+    const express = (await import("express")).default;
+    const app = express().use(router);
+    const server = app.listen(0);
+
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const response = await new Promise<{ statusCode: number | undefined; contentRange: string | undefined }>((resolve, reject) => {
+        const req = httpRequest({ host: "127.0.0.1", port, path: "/proxy/token/1", headers: { Range: "bytes=2-5" } }, (res) => {
+          resolve({ statusCode: res.statusCode, contentRange: res.headers["content-range"] });
+          res.resume();
+        });
+        req.once("error", reject);
+        req.end();
+      });
+
+      expect(response).toEqual({ statusCode: 206, contentRange: "bytes 2-5/10" });
+      streamReady.resolve(Readable.from("2345"));
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
 });
 
 async function waitFor(predicate: () => boolean) {
@@ -181,6 +255,14 @@ async function waitFor(predicate: () => boolean) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
 }
 
 function responseBodyText(response: request.Response) {
