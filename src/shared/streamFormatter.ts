@@ -16,6 +16,8 @@ export type StreamFormatterContext = {
     quality: string;
     size: number | null;
     deliveryMode: string;
+    videoTags: string;
+    audioTags: string;
   };
 };
 
@@ -37,11 +39,48 @@ export function streamExtension(filename: string) {
   return match ? match[1] : "";
 }
 
+export function streamVideoTags(filename: string) {
+  return tagList([
+    [/\b(?:dv|dovi|dolby[ ._-]?vision)\b/i, "Dolby Vision"],
+    [/\bhdr10\+\b/i, "HDR10+"],
+    [/\bhdr10\b/i, "HDR10"],
+    [/\bhdr\b/i, "HDR"],
+    [/\b(?:h[ ._-]?265|x265|hevc)\b/i, "HEVC"],
+    [/\b(?:h[ ._-]?264|x264|avc)\b/i, "AVC"],
+    [/\bav1\b/i, "AV1"],
+    [/\bremux\b/i, "Remux"],
+  ], filename);
+}
+
+export function streamAudioTags(filename: string) {
+  return tagList([
+    [/\batmos\b/i, "Atmos"],
+    [/\btruehd\b/i, "TrueHD"],
+    [/\bdts[ ._-]?x\b/i, "DTS-X"],
+    [/\bdts[ ._-]?hd(?:[ ._-]?ma)?\b/i, "DTS-HD MA"],
+    [/\bdts\b/i, "DTS"],
+    [/\b(?:e[ ._-]?ac[ ._-]?3|ddp)\b/i, "EAC3"],
+    [/\bac[ ._-]?3\b/i, "AC3"],
+    [/\baac\b/i, "AAC"],
+    [/\bflac\b/i, "FLAC"],
+    [/\b7\.1\b/i, "7.1"],
+    [/\b5\.1\b/i, "5.1"],
+  ], filename);
+}
+
 export function formatStreamBytes(bytes: number | null | undefined): string {
   if (!bytes || bytes < 0) return "";
   const gib = bytes / 1024 / 1024 / 1024;
   if (gib >= 1) return `${gib.toFixed(1)} GB`;
   return `${(bytes / 1024 / 1024).toFixed(0)} MB`;
+}
+
+function tagList(patterns: Array<[RegExp, string]>, value: string) {
+  const seen = new Set<string>();
+  for (const [pattern, label] of patterns) {
+    if (pattern.test(value)) seen.add(label);
+  }
+  return Array.from(seen).join(" ");
 }
 
 function renderTemplate(template: string, context: StreamFormatterContext): string {

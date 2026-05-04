@@ -2,7 +2,9 @@ import { normalizeTitle } from "../media/normalizer.js";
 import type { FtpConfig, StreamDeliveryMode } from "../profiles/profileService.js";
 import {
   renderStreamTemplate,
+  streamAudioTags,
   streamExtension,
+  streamVideoTags,
   type StreamFormatterContext,
 } from "../../shared/streamFormatter.js";
 
@@ -127,6 +129,8 @@ function streamFormatterContext({
       quality,
       size: match.sizeBytes,
       deliveryMode,
+      videoTags: streamVideoTags(match.filename),
+      audioTags: streamAudioTags(match.filename),
     },
   };
 }

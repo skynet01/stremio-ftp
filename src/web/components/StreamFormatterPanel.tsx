@@ -2,6 +2,19 @@ import { useMemo, useState } from "react";
 import { DEFAULT_STREAM_DESCRIPTION_TEMPLATE, DEFAULT_STREAM_NAME_TEMPLATE, renderStreamTemplate } from "../../shared/streamFormatter.js";
 import { field, filledClass, Notice } from "./ui.js";
 
+type FormatterTarget = "name" | "description";
+
+const FORMATTER_TOKENS = [
+  { label: "Addon", token: "{addon.name}" },
+  { label: "Server", token: "{stream.serverName}" },
+  { label: "Quality", token: "{stream.quality}" },
+  { label: "Filename", token: "{stream.filename}" },
+  { label: "Size", token: "{stream.size::bytes}" },
+  { label: "Video tags", token: "{stream.videoTags}" },
+  { label: "Audio tags", token: "{stream.audioTags}" },
+  { label: "Line break", token: "{tools.newLine}" },
+];
+
 const PREVIEW_CONTEXT = {
   addon: {
     name: "Stremio FTP Addon",
@@ -11,12 +24,14 @@ const PREVIEW_CONTEXT = {
     serverId: 1,
     serverName: "Server 1",
     serverPrefix: "Server 1 - ",
-    filename: "The.Matrix.1999.2160p.mkv",
-    path: "/Movies/The.Matrix.1999.2160p.mkv",
+    filename: "The.Matrix.1999.2160p.DV.HDR10.HEVC.TrueHD.Atmos.7.1.mkv",
+    path: "/Movies/The.Matrix.1999.2160p.DV.HDR10.HEVC.TrueHD.Atmos.7.1.mkv",
     extension: ".mkv",
     quality: "2160p",
     size: 5_368_709_120,
     deliveryMode: "proxy",
+    videoTags: "Dolby Vision HDR10 HEVC",
+    audioTags: "TrueHD Atmos 7.1",
   },
 };
 
@@ -40,6 +55,7 @@ export function StreamFormatterPanel({
   onSave: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [formatterTarget, setFormatterTarget] = useState<FormatterTarget>("description");
   const previewContext = useMemo(
     () => ({
       ...PREVIEW_CONTEXT,
@@ -49,6 +65,13 @@ export function StreamFormatterPanel({
   );
   const previewName = renderStreamTemplate(streamNameTemplate, previewContext, "name");
   const previewDescription = renderStreamTemplate(streamDescriptionTemplate, previewContext, "description");
+  function insertToken(token: string) {
+    if (formatterTarget === "name") {
+      onStreamNameTemplateChange(`${streamNameTemplate}${token}`);
+      return;
+    }
+    onStreamDescriptionTemplateChange(`${streamDescriptionTemplate}${token}`);
+  }
 
   return (
     <div className="stream-formatter">
@@ -68,6 +91,7 @@ export function StreamFormatterPanel({
                   value={streamNameTemplate}
                   rows={3}
                   placeholder={DEFAULT_STREAM_NAME_TEMPLATE}
+                  onFocus={() => setFormatterTarget("name")}
                   onChange={(event) => onStreamNameTemplateChange(event.currentTarget.value)}
                 />,
               )}
@@ -80,9 +104,17 @@ export function StreamFormatterPanel({
                   value={streamDescriptionTemplate}
                   rows={5}
                   placeholder={DEFAULT_STREAM_DESCRIPTION_TEMPLATE}
+                  onFocus={() => setFormatterTarget("description")}
                   onChange={(event) => onStreamDescriptionTemplateChange(event.currentTarget.value)}
                 />,
               )}
+              <div className="formatter-token-group" aria-label="Formatter tags">
+                {FORMATTER_TOKENS.map((item) => (
+                  <button type="button" className="formatter-token" key={item.token} onClick={() => insertToken(item.token)}>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
               <div className="button-row stream-formatter-actions">
                 <button type="button" className="primary-button" disabled={!profileReady} onClick={onSave}>
                   Save stream formatter

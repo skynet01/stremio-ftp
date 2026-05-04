@@ -23,7 +23,7 @@ import {
 import { APP_CHANGELOG } from "./changelog.js";
 import { ChangelogDrawer } from "./components/ChangelogDrawer.js";
 import { Footer } from "./components/Footer.js";
-import { GlobalStatusPanel } from "./components/GlobalStatusPanel.js";
+import { GlobalStatusPanel, type GlobalScanProgress } from "./components/GlobalStatusPanel.js";
 import { HeroPanel } from "./components/HeroPanel.js";
 import { InstallPanel } from "./components/InstallPanel.js";
 import { ServerAccordion, type ServerForm } from "./components/ServerAccordion.js";
@@ -245,6 +245,19 @@ export function App() {
   const profileReady = profileState === "created" || profileState === "unlocked";
   const currentYear = new Date().getFullYear();
   const anyScanActive = useMemo(() => servers.some((server) => scanIsActive(server.scanStatus)), [servers]);
+  const globalScanProgress = useMemo<GlobalScanProgress | null>(() => {
+    const activeServers = servers.filter((server) => scanIsActive(server.scanStatus));
+    if (!activeServers.length) return null;
+    const progressPercent = Math.round(
+      activeServers.reduce((sum, server) => sum + Math.max(0, Math.min(100, server.scanStatus.progressPercent)), 0) / activeServers.length,
+    );
+    const currentPath = activeServers.find((server) => server.scanStatus.currentPath)?.scanStatus.currentPath ?? null;
+    return {
+      progressPercent,
+      label: `${activeServers.length} ${activeServers.length === 1 ? "server" : "servers"} indexing`,
+      currentPath,
+    };
+  }, [servers]);
 
   useEffect(() => {
     if (!needsSetupProbe) return;
@@ -661,7 +674,7 @@ export function App() {
       {showSetupTokenMessage ? <SetupTokenPanel onSubmit={unlockConfiguration} /> : null}
       {showSetupTokenMessage ? null : (
         <div className="portal-stack">
-          <GlobalStatusPanel stats={globalStats}>
+          <GlobalStatusPanel stats={globalStats} scanProgress={globalScanProgress}>
             <StreamFormatterPanel
               addonName={addonName}
               streamNameTemplate={streamNameTemplate}

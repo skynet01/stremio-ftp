@@ -2,7 +2,21 @@ import type { ReactNode } from "react";
 import type { GlobalStats } from "../api.js";
 import { formatScanTime, StatusBadge } from "./ui.js";
 
-export function GlobalStatusPanel({ stats, children }: { stats: GlobalStats; children?: ReactNode }) {
+export type GlobalScanProgress = {
+  progressPercent: number;
+  label: string;
+  currentPath: string | null;
+};
+
+export function GlobalStatusPanel({
+  stats,
+  scanProgress,
+  children,
+}: {
+  stats: GlobalStats;
+  scanProgress: GlobalScanProgress | null;
+  children?: ReactNode;
+}) {
   const tone = stats.status === "working" ? "amber" : stats.status === "ready" ? "green" : stats.status === "error" ? "red" : "gray";
   return (
     <section className="panel global-status-panel" aria-labelledby="global-status-heading">
@@ -48,6 +62,25 @@ export function GlobalStatusPanel({ stats, children }: { stats: GlobalStats; chi
           <dd>{formatScanTime(stats.lastCompletedScanAt)}</dd>
         </div>
       </dl>
+      {scanProgress ? (
+        <div className="global-scan-progress">
+          <div className="scan-progress-meta">
+            <span>{scanProgress.label}</span>
+            <span>{scanProgress.progressPercent}%</span>
+          </div>
+          <div
+            className="scan-progress"
+            role="progressbar"
+            aria-label="Global indexing progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={scanProgress.progressPercent}
+          >
+            <span style={{ width: `${scanProgress.progressPercent}%` }} />
+          </div>
+          {scanProgress.currentPath ? <p className="scan-current-path">{scanProgress.currentPath}</p> : null}
+        </div>
+      ) : null}
       {children}
     </section>
   );

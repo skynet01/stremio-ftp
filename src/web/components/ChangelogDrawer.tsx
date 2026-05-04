@@ -1,6 +1,11 @@
 import type { ChangelogEntry } from "../types.js";
 import { Notice } from "./ui.js";
 
+function changelogParts(subject: string) {
+  const match = subject.match(/^([a-z]+)(?:\([^)]+\))?!?:\s+(.+)$/i);
+  return match ? { tag: match[1].toLowerCase(), subject: match[2] } : { tag: "change", subject };
+}
+
 export function ChangelogDrawer({
   appVersion,
   entries,
@@ -24,12 +29,16 @@ export function ChangelogDrawer({
         </div>
         {entries.length ? (
           <ol className="changelog-list">
-            {entries.map((commit) => (
-              <li key={commit.hash}>
-                <code>{commit.hash}</code>
-                <span>{commit.subject}</span>
-              </li>
-            ))}
+            {entries.map((commit) => {
+              const entry = changelogParts(commit.subject);
+              return (
+                <li key={`${commit.hash}-${commit.subject}`}>
+                  <code>{commit.hash}</code>
+                  <span className="changelog-tag">{entry.tag}</span>
+                  <span>{entry.subject}</span>
+                </li>
+              );
+            })}
           </ol>
         ) : (
           <Notice>No commit metadata was available for this build.</Notice>

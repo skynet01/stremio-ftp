@@ -10,6 +10,7 @@ import {
   Notice,
   scanIsActive,
   StatusBadge,
+  type StatusTone,
 } from "./ui.js";
 
 type TlsMode = "none" | "explicit" | "implicit";
@@ -61,6 +62,14 @@ function formatCompactScanTime(lastScanAt: string | null) {
   }).format(date);
 }
 
+function serverBadge(server: ServerForm): { tone: StatusTone; label: string } {
+  if (scanIsActive(server.scanStatus)) return { tone: "amber", label: "Scanning" };
+  if (server.pendingScanAfter) return { tone: "amber", label: "Pending" };
+  if (server.scanStatus.status === "failed") return { tone: "red", label: "Needs attention" };
+  if (server.indexStatus.lastScanAt) return { tone: "green", label: "Ready" };
+  return { tone: "gray", label: "Idle" };
+}
+
 export function ServerAccordion({
   servers,
   expandedServerId,
@@ -105,6 +114,7 @@ export function ServerAccordion({
         {servers.map((server, index) => {
           const expanded = expandedServerId === server.id;
           const active = scanIsActive(server.scanStatus);
+          const badge = serverBadge(server);
           return (
             <div className="server-accordion-item" key={server.id}>
               <button type="button" className="server-accordion-trigger" onClick={() => onToggle(server.id)}>
@@ -112,9 +122,7 @@ export function ServerAccordion({
                 <span className="server-title">{server.name || `Server ${index + 1}`}</span>
                 <span className="server-subtitle">{server.host || "No host configured"}</span>
                 <span className="server-metrics">{serverSummary(server)}</span>
-                <StatusBadge tone={active ? "amber" : server.scanStatus.status === "failed" ? "red" : server.indexStatus.lastScanAt ? "green" : "gray"}>
-                  {active ? "Scanning" : server.scanStatus.status === "failed" ? "Needs attention" : server.indexStatus.lastScanAt ? "Ready" : "Idle"}
-                </StatusBadge>
+                <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
               </button>
               {expanded ? (
                 <div className="server-accordion-body">

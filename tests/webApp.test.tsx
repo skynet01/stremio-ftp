@@ -123,7 +123,7 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Show indexed FTP catalog in Stremio")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.0`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.1`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
@@ -154,9 +154,16 @@ describe("App", () => {
     fireEvent.change(screen.getByLabelText("Stream description formatter"), {
       target: { value: "{stream.filename}{tools.newLine}{stream.size::bytes}" },
     });
+    const descriptionFormatter = screen.getByLabelText("Stream description formatter") as HTMLTextAreaElement;
+    fireEvent.focus(descriptionFormatter);
+    fireEvent.click(screen.getByRole("button", { name: "Video tags" }));
+    expect(descriptionFormatter.value).toContain("{stream.videoTags}");
+    fireEvent.change(descriptionFormatter, {
+      target: { value: "{stream.filename}{tools.newLine}{stream.size::bytes}" },
+    });
 
     expect(screen.getByText("Stremio FTP Addon | Server 1 | 2160p")).toBeTruthy();
-    expect(screen.getByText("The.Matrix.1999.2160p.mkv")).toBeTruthy();
+    expect(screen.getByText("The.Matrix.1999.2160p.DV.HDR10.HEVC.TrueHD.Atmos.7.1.mkv")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save stream formatter" }));
 
     await waitFor(() =>
@@ -186,7 +193,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Changelog" }));
 
     expect(screen.getByRole("dialog", { name: "Latest changes" })).toBeTruthy();
-    expect(screen.getByText("fix: save library settings with ftp settings")).toBeTruthy();
+    expect(screen.getAllByText("fix").length).toBeGreaterThan(0);
+    expect(screen.getByText("save library settings with ftp settings")).toBeTruthy();
+    expect(screen.queryByText("fix: save library settings with ftp settings")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Latest changes" })).toBeNull();
   });
@@ -668,7 +677,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
     await waitFor(() => expect(rescanIndexMock).toHaveBeenCalledWith({ browserUid: recoveryUidValue, passphrase: "passphrase" }));
     expect(await screen.findByText("Scanning FTP library.")).toBeTruthy();
-    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
+    expect(screen.getByText("1 server indexing")).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "Global indexing progress" })).toHaveAttribute("aria-valuenow", "25");
     await waitFor(() => expect(loadScanStatusMock).toHaveBeenCalledWith({ browserUid: recoveryUidValue, passphrase: "passphrase" }), {
       timeout: 2000,
     });
@@ -739,6 +749,8 @@ describe("App", () => {
     render(<App />);
 
     const haltButton = await screen.findByRole("button", { name: "Halt scan" });
+    expect(screen.getAllByText("Scanning").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Needs attention")).toBeNull();
     fireEvent.click(haltButton);
 
     await waitFor(() => expect(cancelScanMock).toHaveBeenCalledWith({ browserUid: "browser-uid", passphrase: "passphrase" }));

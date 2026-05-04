@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_STREAM_DESCRIPTION_TEMPLATE, DEFAULT_STREAM_NAME_TEMPLATE, renderStreamTemplate } from "../src/shared/streamFormatter";
+import {
+  DEFAULT_STREAM_DESCRIPTION_TEMPLATE,
+  DEFAULT_STREAM_NAME_TEMPLATE,
+  renderStreamTemplate,
+  streamAudioTags,
+  streamVideoTags,
+} from "../src/shared/streamFormatter";
 
 const context = {
   addon: {
@@ -16,6 +22,8 @@ const context = {
     quality: "2160p",
     size: 5368709120,
     deliveryMode: "proxy",
+    videoTags: "HDR HEVC",
+    audioTags: "TrueHD Atmos 7.1",
   },
 };
 
@@ -43,5 +51,15 @@ describe("stream formatter", () => {
     expect(
       renderStreamTemplate("{stream.missing}{tools.newLine}{stream.filename}{tools.newLine}{stream.size::bytes}", context, "description"),
     ).toBe("The.Matrix.1999.2160p.HDR.mkv\n5.0 GB");
+  });
+
+  it("detects video and audio tags from filenames", () => {
+    const filename = "The.Matrix.1999.2160p.DV.HDR10.HEVC.TrueHD.Atmos.7.1.Remux.mkv";
+
+    expect(streamVideoTags(filename)).toBe("Dolby Vision HDR10 HEVC Remux");
+    expect(streamAudioTags(filename)).toBe("Atmos TrueHD 7.1");
+    expect(renderStreamTemplate("{stream.videoTags}{tools.newLine}{stream.audioTags}", context, "description")).toBe(
+      "HDR HEVC\nTrueHD Atmos 7.1",
+    );
   });
 });
