@@ -123,7 +123,7 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Show indexed FTP catalog in Stremio")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.2`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.3`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
@@ -148,6 +148,7 @@ describe("App", () => {
 
     expect(screen.queryByLabelText("Stream name formatter")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Stream formatter settings" }));
+    expect(screen.getByText(/AIOStreams custom formatter syntax is supported/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Stream name formatter"), {
       target: { value: "{addon.name} | {stream.serverName} | {stream.quality}" },
     });
@@ -572,10 +573,28 @@ describe("App", () => {
       const control = screen.getByRole("button", { name });
       expect(control).toBeDisabled();
     }
+    const deleteButton = screen.getByRole("button", { name: "Delete server" });
+    const testButton = screen.getByRole("button", { name: "Test connection" });
+    const rescanButton = screen.getByRole("button", { name: "Rescan" });
+    const saveButton = screen.getByRole("button", { name: "Save FTP settings" });
+    expect(deleteButton).toHaveClass("icon-button");
+    expect(Boolean(deleteButton.compareDocumentPosition(testButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(testButton.compareDocumentPosition(rescanButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(rescanButton.compareDocumentPosition(saveButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
 
     expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Rotate" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("shows error notices in yellow", async () => {
+    createProfileMock.mockRejectedValue(new Error("Unable to save profile."));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    expect(await screen.findByText("Unable to save profile.")).toHaveClass("notification-warning");
   });
 
   it("saves FTP settings and refreshes the index after profile creation", async () => {

@@ -508,6 +508,10 @@ textarea:focus-visible,
   justify-content: flex-start;
 }
 
+.server-button-row .save-server-button {
+  margin-left: auto;
+}
+
 .panel {
   position: relative;
   background:
@@ -906,6 +910,22 @@ input:-webkit-autofill:active {
   box-shadow:
     0 0 0 1px rgba(168, 224, 99, 0.035) inset,
     0 18px 46px -32px rgba(168, 224, 99, 0.85);
+}
+
+.notification-warning {
+  border-color: rgba(242, 184, 75, 0.34);
+  color: var(--amber);
+  background:
+    linear-gradient(180deg, rgba(242, 184, 75, 0.1), rgba(242, 184, 75, 0.022)),
+    rgba(255, 255, 255, 0.018);
+  box-shadow:
+    0 0 0 1px rgba(242, 184, 75, 0.045) inset,
+    0 18px 46px -32px rgba(242, 184, 75, 0.75);
+}
+
+.stream-formatter-hint {
+  margin: 0;
+  grid-column: 1 / -1;
 }
 
 .library-settings {

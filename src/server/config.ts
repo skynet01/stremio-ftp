@@ -17,6 +17,7 @@ export type AppConfig = {
   scanGlobalConcurrency: number;
   scanQueueMax: number;
   scanCooldownMs: number;
+  scanMinRescanIntervalMinutes: number;
   scanJobTimeoutMs: number;
   scanSchedulerIntervalMs: number;
   scanProgressAverageItems: number;
@@ -84,6 +85,7 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     scanGlobalConcurrency: numberValue(env, "SCAN_GLOBAL_CONCURRENCY", 2),
     scanQueueMax: numberValue(env, "SCAN_QUEUE_MAX", 50),
     scanCooldownMs: numberValue(env, "SCAN_COOLDOWN_MS", 900000),
+    scanMinRescanIntervalMinutes: numberValue(env, "SCAN_MIN_RESCAN_INTERVAL_MINUTES", 0),
     scanJobTimeoutMs: numberValue(env, "SCAN_JOB_TIMEOUT_MS", 1800000),
     scanSchedulerIntervalMs: numberValue(env, "SCAN_SCHEDULER_INTERVAL_MS", 60000),
     scanProgressAverageItems: numberValue(env, "SCAN_PROGRESS_AVERAGE_ITEMS", 2000),

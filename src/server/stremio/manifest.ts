@@ -1,6 +1,6 @@
 import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization } from "../profiles/profileService.js";
 
-const ADDON_VERSION = "0.4.2";
+const ADDON_VERSION = "0.4.3";
 
 export function publicManifest(customization: Partial<AddonCustomization> = {}) {
   const addonName = customization.addonName?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonName;

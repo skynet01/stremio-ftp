@@ -130,6 +130,7 @@ export function StreamFormatterPanel({
         <div className="stream-formatter-body">
           <div className="stream-formatter-grid">
             <div className="stream-formatter-inputs">
+              <p className="field-hint stream-formatter-hint">AIOStreams custom formatter syntax is supported. Unsupported torrent or service fields are ignored.</p>
               {field(
                 "Stream name formatter",
                 "streamNameTemplate",

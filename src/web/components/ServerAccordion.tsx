@@ -363,11 +363,18 @@ export function ServerAccordion({
                   </div>
 
                   <div className="button-row server-button-row">
+                    <button
+                      type="button"
+                      className="icon-button danger-button delete-server-button"
+                      aria-label="Delete server"
+                      title="Delete server"
+                      disabled={!profileReady || servers.length <= 1}
+                      onClick={() => onDeleteServer(server.id)}
+                    >
+                      <Trash2 size={17} aria-hidden={true} />
+                    </button>
                     <button type="button" className="secondary-button" disabled={!profileReady || active} onClick={() => onTestServer(server.id)}>
                       Test connection
-                    </button>
-                    <button type="button" className="primary-button" aria-label="Save FTP settings" disabled={!profileReady || active} onClick={() => onSaveServer(server.id)}>
-                      Save FTP settings
                     </button>
                     {active ? (
                       <button type="button" className="secondary-button danger-button" disabled={!profileReady} onClick={() => onCancelServer(server.id)}>
@@ -380,14 +387,8 @@ export function ServerAccordion({
                         Rescan
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="secondary-button danger-button"
-                      disabled={!profileReady || servers.length <= 1}
-                      onClick={() => onDeleteServer(server.id)}
-                    >
-                      <Trash2 size={17} aria-hidden={true} />
-                      Delete server
+                    <button type="button" className="primary-button save-server-button" aria-label="Save FTP settings" disabled={!profileReady || active} onClick={() => onSaveServer(server.id)}>
+                      Save FTP settings
                     </button>
                   </div>
                 </div>

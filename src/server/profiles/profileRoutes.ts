@@ -109,7 +109,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/ftp/test", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/ftp/test", async (req, res) => {
     const parsed = saveFtpSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid FTP settings request" });
 
@@ -142,7 +142,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/ftp", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/ftp", async (req, res) => {
     const parsed = saveFtpSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid FTP settings request" });
 
@@ -158,7 +158,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/ftp/load", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/ftp/load", async (req, res) => {
     const parsed = authenticatedSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid FTP settings request" });
 
@@ -187,7 +187,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/servers/load", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/servers/load", async (req, res) => {
     const parsed = authenticatedSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid server load request" });
 
@@ -203,7 +203,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/servers", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/servers", async (req, res) => {
     const parsed = authenticatedSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid server create request" });
 
@@ -219,7 +219,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/servers/save", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/servers/save", async (req, res) => {
     const parsed = saveServerSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid server save request" });
 
@@ -244,7 +244,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/servers/delete", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/servers/delete", async (req, res) => {
     const parsed = serverIdSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid server delete request" });
 
@@ -262,7 +262,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/servers/test", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/servers/test", async (req, res) => {
     const parsed = serverIdSchema.extend({ ftpConfig: ftpConfigSchema }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid server test request" });
 
@@ -296,7 +296,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/customization/load", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/customization/load", async (req, res) => {
     const parsed = authenticatedSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid customization request" });
 
@@ -308,7 +308,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/customization", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/customization", async (req, res) => {
     const parsed = saveCustomizationSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid customization request" });
 
@@ -321,7 +321,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/index/rescan", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/index/rescan", async (req, res) => {
     const parsed = authenticatedSchema.extend({ serverId: z.number().int().positive().optional() }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid rescan request" });
 
@@ -336,7 +336,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/index/cancel", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/index/cancel", async (req, res) => {
     const parsed = authenticatedSchema.extend({ serverId: z.number().int().positive().optional() }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid scan cancel request" });
 
@@ -349,7 +349,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/index/status", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/index/status", async (req, res) => {
     const parsed = authenticatedSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid scan status request" });
 
@@ -367,12 +367,17 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/index/schedule", rateLimitProfiles, async (req, res) => {
+  router.post("/profile/index/schedule", async (req, res) => {
     const parsed = saveScanScheduleSchema.extend({ serverId: z.number().int().positive().optional() }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid scan schedule request" });
 
     try {
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      if (parsed.data.intervalMinutes > 0 && parsed.data.intervalMinutes < config.scanMinRescanIntervalMinutes) {
+        return res.status(400).json({
+          error: `Rescan frequency must be at least ${config.scanMinRescanIntervalMinutes} minutes.`,
+        });
+      }
       const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
       const nextScheduledScanAt =
         parsed.data.intervalMinutes > 0 ? new Date(Date.now() + parsed.data.intervalMinutes * 60_000).toISOString() : null;

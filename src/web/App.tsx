@@ -32,7 +32,7 @@ import { StreamFormatterPanel } from "./components/StreamFormatterPanel.js";
 import { Topbar } from "./components/Topbar.js";
 import { DEFAULT_STREAM_DESCRIPTION_TEMPLATE, DEFAULT_STREAM_NAME_TEMPLATE } from "../shared/streamFormatter.js";
 import { scanIsActive } from "./components/ui.js";
-import type { AddonCustomization, FtpConfigRequest, FtpServerSettings, GlobalStats } from "./api.js";
+import type { AddonCustomization, FtpConfigRequest, FtpServerSettings, GlobalStats, ScanStatus } from "./api.js";
 import type { ChangelogEntry } from "./types.js";
 
 type ProfileState = "new" | "creating" | "created" | "unlocked" | "error";
@@ -159,7 +159,7 @@ function serverFormFromPayload(server: FtpServerSettings): ServerForm {
     scanSchedule: server.scanSchedule,
     connectionStatus: server.connectionStatus,
     pendingScanAfter: server.pendingScanAfter,
-    message: server.pendingScanAfter ? "Settings saved. Auto-scan is pending." : server.scanStatus.message ?? "Server ready.",
+    message: serverMessage(server.pendingScanAfter, server.scanStatus, "Server ready."),
   };
 }
 
@@ -187,7 +187,7 @@ function serverFormFromLegacyPayload(
     scanStatus: loaded.scanStatus,
     scanSchedule: loaded.scanSchedule,
     connectionStatus: loaded.connectionStatus,
-    message: loaded.scanStatus.message ?? "Server ready.",
+    message: serverMessage(null, loaded.scanStatus, "Server ready."),
   };
 }
 
@@ -599,7 +599,7 @@ export function App() {
                 indexStatus: result.indexStatus,
                 scanStatus: result.scanStatus,
                 scanSchedule: result.scanSchedule,
-                message: result.scanStatus.message ?? server.message,
+                message: scanStatusMessage(result.scanStatus) ?? server.message,
               }
             : server,
         ),
@@ -719,4 +719,13 @@ export function App() {
       {changelogOpen ? <ChangelogDrawer appVersion={APP_VERSION} entries={changelogEntries} onClose={() => setChangelogOpen(false)} /> : null}
     </main>
   );
+}
+
+function scanStatusMessage(scanStatus: ScanStatus) {
+  return scanStatus.status === "failed" && scanStatus.error ? scanStatus.message || `Scan failed: ${scanStatus.error}` : scanStatus.message;
+}
+
+function serverMessage(pendingScanAfter: string | null, scanStatus: ScanStatus, fallback: string) {
+  if (pendingScanAfter) return "Settings saved. Auto-scan is pending.";
+  return scanStatusMessage(scanStatus) ?? fallback;
 }

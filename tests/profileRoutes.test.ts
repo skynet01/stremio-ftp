@@ -26,6 +26,7 @@ function config(): AppConfig {
     scanGlobalConcurrency: 1,
     scanQueueMax: 10,
     scanCooldownMs: 60000,
+    scanMinRescanIntervalMinutes: 0,
     scanJobTimeoutMs: 1800000,
     scanSchedulerIntervalMs: 60000,
     scanProgressAverageItems: 2000,
@@ -179,6 +180,64 @@ describe("profile routes", () => {
       .expect(429);
 
     expect(response.body).toEqual({ error: "Too many profile attempts" });
+  });
+
+  it("does not rate limit authenticated settings updates after profile creation", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), profileRateLimitMax: 1 }, db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    for (const catalogEnabled of [true, false]) {
+      await request(app)
+        .post("/api/profile/customization")
+        .set("x-setup-token", "setup-secret-123")
+        .send({
+          browserUid: "browser-uid",
+          passphrase: "passphrase",
+          customization: {
+            addonName: "Stremio FTP Addon",
+            addonLogoUrl: "",
+            addonDescription: "Stream movies and series episodes from your own FTP server.",
+            catalogEnabled,
+            catalogTmdbApiKey: "",
+            catalogContentTypes: { movies: true, series: true, anime: false },
+            libraryLayout: "auto",
+            streamDeliveryMode: "proxy",
+          },
+        })
+        .expect(200);
+    }
+  });
+
+  it("enforces the admin minimum automatic rescan frequency", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), scanMinRescanIntervalMinutes: 720 }, db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    const rejected = await request(app)
+      .post("/api/profile/index/schedule")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", intervalMinutes: 360 })
+      .expect(400);
+    expect(rejected.body).toEqual({ error: "Rescan frequency must be at least 720 minutes." });
+
+    await request(app)
+      .post("/api/profile/index/schedule")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", intervalMinutes: 720 })
+      .expect(200);
   });
 
   it("saves FTP settings and enqueues a background media index refresh", async () => {

@@ -12,7 +12,14 @@ export function field(label: string, id: string, control: ReactNode, className =
 }
 
 export function Notice({ children, className = "" }: { children?: ReactNode; className?: string }) {
-  return h("p", { className: `notice notification ${className}`.trim(), role: "status" }, children);
+  const warning = noticeText(children).match(/\b(error|unable|failed|invalid|required|missing|too many|cooldown|not configured)\b/i);
+  return h("p", { className: `notice notification ${warning ? "notification-warning" : ""} ${className}`.trim(), role: "status" }, children);
+}
+
+function noticeText(children: ReactNode): string {
+  if (typeof children === "string" || typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map(noticeText).join(" ");
+  return "";
 }
 
 export function formatScanTime(lastScanAt: string | null) {

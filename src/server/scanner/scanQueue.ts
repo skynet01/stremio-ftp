@@ -269,7 +269,8 @@ export class ScanQueue {
   private saveProgress(jobId: number, startedAt: number, progress: CrawlProgress) {
     const elapsedSeconds = Math.max(1, (Date.now() - startedAt) / 1000);
     const estimatedTotal = Math.max(this.config.scanProgressAverageItems, progress.entriesSeen || 1);
-    const progressPercent = Math.min(95, Math.max(1, Math.round((progress.entriesSeen / estimatedTotal) * 100)));
+    const progressRatio = 1 - Math.exp(-(progress.entriesSeen + progress.directoriesSeen) / estimatedTotal);
+    const progressPercent = Math.min(95, Math.max(1, Math.round(progressRatio * 95)));
     const entriesRemaining = Math.max(0, estimatedTotal - progress.entriesSeen);
     const entriesPerSecond = Math.max(0.01, progress.entriesSeen / elapsedSeconds);
     const estimatedSecondsRemaining = Math.min(
@@ -287,7 +288,7 @@ export class ScanQueue {
             directories_seen = ?,
             current_path = ?,
             estimated_seconds_remaining = ?,
-            message = 'Scanning FTP library.'
+            message = ?
         where id = ?
       `,
       )
@@ -298,6 +299,7 @@ export class ScanQueue {
         progress.directoriesSeen,
         progress.currentPath,
         estimatedSecondsRemaining,
+        scanProgressMessage(progress),
         jobId,
       );
   }
@@ -309,12 +311,12 @@ export class ScanQueue {
         update scan_jobs
         set status = 'failed',
             error = ?,
-            message = 'Scan failed.',
+            message = ?,
             finished_at = ?
         where id = ?
       `,
       )
-      .run(error, new Date().toISOString(), jobId);
+      .run(error, `Scan failed: ${error}`, new Date().toISOString(), jobId);
   }
 
   private cancelJob(jobId: number) {
@@ -430,6 +432,12 @@ export class ScanQueue {
 function countFromRow(row: unknown): number {
   if (!isRecord(row) || typeof row.count !== "number") throw new Error("Invalid count row");
   return row.count;
+}
+
+function scanProgressMessage(progress: CrawlProgress) {
+  const fileLabel = `${progress.filesSeen} media file${progress.filesSeen === 1 ? "" : "s"}`;
+  const entryLabel = `${progress.entriesSeen} entr${progress.entriesSeen === 1 ? "y" : "ies"}`;
+  return `Scanning FTP library: ${fileLabel}, ${entryLabel} seen.`;
 }
 
 function throwIfScanCancelled(signal: AbortSignal) {

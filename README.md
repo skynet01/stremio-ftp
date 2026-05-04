@@ -79,6 +79,7 @@ PROFILE_RATE_LIMIT_WINDOW_MS=600000
 PROFILE_RATE_LIMIT_MAX=20
 SCAN_GLOBAL_CONCURRENCY=2
 SCAN_QUEUE_MAX=50
+SCAN_MIN_RESCAN_INTERVAL_MINUTES=0
 SCAN_COOLDOWN_MS=900000
 SCAN_JOB_TIMEOUT_MS=1800000
 SCAN_SCHEDULER_INTERVAL_MS=60000
@@ -95,9 +96,10 @@ Notes:
 - `TMDB_API_KEY` is optional. Set it as the server default if users will enable the FTP catalog option and you want posters, backdrops, descriptions, and release years from TMDB. Users can override it per profile in the portal.
 - SQLite is stored at `$CONFIG_DIR/stremio-ftp.sqlite`.
 - `FTP_MAX_CONNECTIONS` limits simultaneous FTP sessions shared by portal tests, scans, and proxied playback. Lower it for hosts with strict connection caps.
-- `PROFILE_RATE_LIMIT_MAX` limits profile actions per client IP per rate-limit window.
+- `PROFILE_RATE_LIMIT_MAX` limits profile create/unlock attempts per client IP per rate-limit window.
 - `SCAN_GLOBAL_CONCURRENCY` limits simultaneous FTP scans across the whole instance. Default `2` is sized for public instances where the average catalog is around 2,000 media files.
 - `SCAN_QUEUE_MAX` limits queued scans waiting for workers. Default `50`.
+- `SCAN_MIN_RESCAN_INTERVAL_MINUTES` sets the minimum automatic rescan frequency users may save. Default `0` allows every listed option.
 - `SCAN_COOLDOWN_MS` prevents repeated manual rescans for the same profile. Default `900000` or 15 minutes. Scheduled scans are still locked per profile and respect global concurrency.
 - `SCAN_JOB_TIMEOUT_MS` is reserved for scan timeout policy and defaults to `1800000` or 30 minutes.
 - `SCAN_SCHEDULER_INTERVAL_MS` controls how often the server checks for due scheduled scans. Default `60000` or 1 minute.
@@ -124,6 +126,7 @@ PROFILE_RATE_LIMIT_WINDOW_MS=600000
 PROFILE_RATE_LIMIT_MAX=20
 SCAN_GLOBAL_CONCURRENCY=2
 SCAN_QUEUE_MAX=50
+SCAN_MIN_RESCAN_INTERVAL_MINUTES=0
 SCAN_COOLDOWN_MS=900000
 SCAN_JOB_TIMEOUT_MS=1800000
 SCAN_SCHEDULER_INTERVAL_MS=60000

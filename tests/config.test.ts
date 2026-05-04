@@ -22,6 +22,7 @@ describe("loadConfig", () => {
     expect(config.scanGlobalConcurrency).toBe(2);
     expect(config.scanQueueMax).toBe(50);
     expect(config.scanCooldownMs).toBe(900000);
+    expect(config.scanMinRescanIntervalMinutes).toBe(0);
     expect(config.scanJobTimeoutMs).toBe(1800000);
     expect(config.scanSchedulerIntervalMs).toBe(60000);
     expect(config.scanProgressAverageItems).toBe(2000);
@@ -38,6 +39,7 @@ describe("loadConfig", () => {
       SCAN_GLOBAL_CONCURRENCY: "3",
       SCAN_QUEUE_MAX: "75",
       SCAN_COOLDOWN_MS: "120000",
+      SCAN_MIN_RESCAN_INTERVAL_MINUTES: "720",
       SCAN_JOB_TIMEOUT_MS: "900000",
       SCAN_SCHEDULER_INTERVAL_MS: "30000",
       SCAN_PROGRESS_AVERAGE_ITEMS: "5000",
@@ -48,6 +50,7 @@ describe("loadConfig", () => {
     expect(config.scanGlobalConcurrency).toBe(3);
     expect(config.scanQueueMax).toBe(75);
     expect(config.scanCooldownMs).toBe(120000);
+    expect(config.scanMinRescanIntervalMinutes).toBe(720);
     expect(config.scanJobTimeoutMs).toBe(900000);
     expect(config.scanSchedulerIntervalMs).toBe(30000);
     expect(config.scanProgressAverageItems).toBe(5000);

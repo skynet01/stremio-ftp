@@ -27,6 +27,7 @@ const baseConfig: AppConfig = {
   scanGlobalConcurrency: 1,
   scanQueueMax: 10,
   scanCooldownMs: 60000,
+  scanMinRescanIntervalMinutes: 0,
   scanJobTimeoutMs: 1800000,
   scanSchedulerIntervalMs: 60000,
   scanProgressAverageItems: 4,
