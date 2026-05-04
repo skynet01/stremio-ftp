@@ -20,6 +20,7 @@ const baseConfig: AppConfig = {
   logLevel: "error",
   crawlerConcurrency: 2,
   ftpTimeoutMs: 15000,
+  ftpMaxConnections: 4,
   maxOnDemandSearchMs: 4500,
   profileRateLimitWindowMs: 60000,
   profileRateLimitMax: 30,
@@ -107,6 +108,33 @@ describe("ScanQueue", () => {
     releaseList.resolve([{ name: "Movie.2020.mkv", path: "/Movie.2020.mkv", type: "file", size: 1000 }]);
     const finished = await waitForStatus(queue, profileId, "succeeded");
     expect(finished.filesSeen).toBe(1);
+  });
+
+  it("cancels a running profile scan and closes the FTP client", async () => {
+    let closeCalls = 0;
+    const closeStarted = deferred<void>();
+    const { profileService, queue } = createHarness(async () => ({
+      list: async () => {
+        await closeStarted.promise;
+        throw new Error("FTP list aborted");
+      },
+      openReadStream: async () => Readable.from("not used"),
+      close: async () => {
+        closeCalls += 1;
+        closeStarted.resolve();
+      },
+    }));
+    const profileId = await createProfileWithFtp(profileService);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    await waitForStatus(queue, profileId, "running");
+    const halting = queue.cancelProfileScan(profileId);
+
+    expect(halting.status).toBe("running");
+    expect(halting.message).toBe("Halting scan.");
+    const cancelled = await waitForStatus(queue, profileId, "cancelled");
+    expect(cancelled.message).toBe("Scan halted.");
+    expect(closeCalls).toBeGreaterThan(0);
   });
 
   it("applies manual scan cooldown after a successful scan", async () => {

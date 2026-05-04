@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { CircleStop, RefreshCw } from "lucide-react";
 import type { ConnectionStatus, ScanSchedule, ScanStatus } from "../api.js";
 import { field, filledClass, formatConnectionStatus, formatEta, formatNextScan, formatScanTime, Notice, scanIsActive, StatusBadge } from "./ui.js";
 
@@ -14,6 +14,7 @@ export function IndexStatusPanel({
   profileReady,
   onUpdateScanSchedule,
   onRefreshIndex,
+  onCancelScan,
 }: {
   indexState: "idle" | "working" | "ready" | "error";
   lastScanAt: string | null;
@@ -26,6 +27,7 @@ export function IndexStatusPanel({
   profileReady: boolean;
   onUpdateScanSchedule: (intervalMinutes: number) => void;
   onRefreshIndex: () => void;
+  onCancelScan: () => void;
 }) {
   return (
     <section className="panel status-panel" aria-labelledby="status-heading">
@@ -98,10 +100,17 @@ export function IndexStatusPanel({
       </div>
       <Notice>{ftpMessage}</Notice>
       <div className="button-grid">
-        <button type="button" className="secondary-button" disabled={!profileReady || scanIsActive(scanStatus)} onClick={onRefreshIndex}>
-          <RefreshCw size={17} aria-hidden={true} />
-          Rescan
-        </button>
+        {scanIsActive(scanStatus) ? (
+          <button type="button" className="secondary-button danger-button" disabled={!profileReady} onClick={onCancelScan}>
+            <CircleStop size={17} aria-hidden={true} />
+            Halt scan
+          </button>
+        ) : (
+          <button type="button" className="secondary-button" disabled={!profileReady} onClick={onRefreshIndex}>
+            <RefreshCw size={17} aria-hidden={true} />
+            Rescan
+          </button>
+        )}
       </div>
     </section>
   );

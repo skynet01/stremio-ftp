@@ -7,6 +7,9 @@ export type MediaMatch = {
   filename: string;
   quality: string | null;
   sizeBytes: number | null;
+  ftpServerId?: number | null;
+  serverName?: string | null;
+  streamDeliveryMode?: StreamDeliveryMode | null;
 };
 
 type RepoLike = {
@@ -29,6 +32,7 @@ export async function resolveStreams(input: {
   mediaRepository: RepoLike;
   streamDeliveryMode?: StreamDeliveryMode;
   ftpConfig?: FtpConfig | null;
+  ftpConfigForServer?: (serverId: number | null | undefined) => FtpConfig | null;
 }) {
   if (!input.metadata) return [];
 
@@ -48,6 +52,7 @@ export async function resolveStreams(input: {
     match,
     streamDeliveryMode: input.streamDeliveryMode,
     ftpConfig: input.ftpConfig,
+    ftpConfigForServer: input.ftpConfigForServer,
   }));
 }
 
@@ -57,14 +62,18 @@ export function streamForMatch(input: {
   match: MediaMatch;
   streamDeliveryMode?: StreamDeliveryMode;
   ftpConfig?: FtpConfig | null;
+  ftpConfigForServer?: (serverId: number | null | undefined) => FtpConfig | null;
 }) {
   const { match } = input;
+  const serverLabel = match.serverName ? `${match.serverName} - ` : "";
+  const ftpConfig = input.ftpConfigForServer?.(match.ftpServerId) ?? input.ftpConfig;
+  const deliveryMode = match.streamDeliveryMode ?? input.streamDeliveryMode;
   return {
-    name: `FTP ${match.quality ?? "Source"}`,
-    description: `${match.filename}${match.sizeBytes ? `\n${formatBytes(match.sizeBytes)}` : ""}`,
+    name: `FTP ${serverLabel}${match.quality ?? "Source"}`,
+    description: `${match.serverName ? `${match.serverName}\n` : ""}${match.filename}${match.sizeBytes ? `\n${formatBytes(match.sizeBytes)}` : ""}`,
     url:
-      input.streamDeliveryMode === "direct" && input.ftpConfig
-        ? ftpUrl(input.ftpConfig, match.ftpPath)
+      deliveryMode === "direct" && ftpConfig
+        ? ftpUrl(ftpConfig, match.ftpPath)
         : proxyUrl(input.baseUrl, input.installToken, match.id),
     behaviorHints: {
       notWebReady: true,

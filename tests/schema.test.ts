@@ -76,7 +76,13 @@ describe("schema", () => {
     const tables = db
       .prepare("select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name")
       .all() as { name: string }[];
-    expect(tables.map((row) => row.name)).toEqual(["media_files", "profile_install_tokens", "profiles", "scan_jobs"]);
+    expect(tables.map((row) => row.name)).toEqual([
+      "media_files",
+      "profile_ftp_servers",
+      "profile_install_tokens",
+      "profiles",
+      "scan_jobs",
+    ]);
   });
 
   it("creates scan schedule columns and scan job persistence", () => {
@@ -90,6 +96,7 @@ describe("schema", () => {
     expect(scanColumns.map((column) => column.name)).toEqual(
       expect.arrayContaining([
         "profile_id",
+        "ftp_server_id",
         "status",
         "trigger",
         "progress_percent",
@@ -100,6 +107,22 @@ describe("schema", () => {
         "estimated_seconds_remaining",
       ]),
     );
+  });
+
+  it("allows halted scan jobs to be stored as cancelled", () => {
+    const db = createDb();
+    const profileId = insertProfile(db);
+
+    expect(() =>
+      db
+        .prepare(
+          `
+            insert into scan_jobs (profile_id, status, trigger, progress_percent, message, queued_at, finished_at)
+            values (?, 'cancelled', 'manual', 0, 'Scan halted.', '2026-05-02T00:00:00.000Z', '2026-05-02T00:00:01.000Z')
+          `,
+        )
+        .run(profileId),
+    ).not.toThrow();
   });
 
   it("creates media lookup indexes", () => {

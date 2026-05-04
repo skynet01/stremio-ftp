@@ -18,6 +18,7 @@ describe("loadConfig", () => {
     expect(config.logLevel).toBe("debug");
     expect(config.sqlitePath).toBe("/tmp/stremio-ftp-test/stremio-ftp.sqlite");
     expect(config.maxOnDemandSearchMs).toBe(4500);
+    expect(config.ftpMaxConnections).toBe(4);
     expect(config.scanGlobalConcurrency).toBe(2);
     expect(config.scanQueueMax).toBe(50);
     expect(config.scanCooldownMs).toBe(900000);
@@ -40,8 +41,10 @@ describe("loadConfig", () => {
       SCAN_JOB_TIMEOUT_MS: "900000",
       SCAN_SCHEDULER_INTERVAL_MS: "30000",
       SCAN_PROGRESS_AVERAGE_ITEMS: "5000",
+      FTP_MAX_CONNECTIONS: "1",
     });
 
+    expect(config.ftpMaxConnections).toBe(1);
     expect(config.scanGlobalConcurrency).toBe(3);
     expect(config.scanQueueMax).toBe(75);
     expect(config.scanCooldownMs).toBe(120000);

@@ -3,6 +3,7 @@ import { fetchCinemetaMeta } from "../src/server/metadata/cinemetaClient";
 
 describe("fetchCinemetaMeta", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 

@@ -18,6 +18,7 @@ function config(): AppConfig {
     logLevel: "error",
     crawlerConcurrency: 2,
     ftpTimeoutMs: 15000,
+    ftpMaxConnections: 4,
     maxOnDemandSearchMs: 4500,
     profileRateLimitWindowMs: 60000,
     profileRateLimitMax: 30,
@@ -29,6 +30,14 @@ function config(): AppConfig {
     scanSchedulerIntervalMs: 60000,
     scanProgressAverageItems: 2000,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
 }
 
 describe("profile routes", () => {
@@ -251,6 +260,79 @@ describe("profile routes", () => {
     expect(loaded.body.scanSchedule).toEqual({ intervalMinutes: 0, nextScheduledScanAt: null });
   });
 
+  it("halts a running FTP index scan", async () => {
+    const releaseClose = deferred<void>();
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db, {
+      ftpClientFactory: async () => ({
+        list: async () => {
+          await releaseClose.promise;
+          throw new Error("FTP list aborted");
+        },
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => {
+          releaseClose.resolve();
+        },
+      }),
+    });
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    await request(app)
+      .post("/api/profile/ftp")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp.example.test",
+          port: 21,
+          username: "user",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: true,
+          roots: ["/Movies"],
+        },
+      })
+      .expect(200);
+
+    await request(app)
+      .post("/api/profile/index/rescan")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    const response = await request(app)
+      .post("/api/profile/index/cancel")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(response.body.scanStatus).toMatchObject({
+      status: "running",
+      message: "Halting scan.",
+    });
+
+    let status = response.body.scanStatus;
+    for (let attempt = 0; attempt < 20 && status.status !== "cancelled"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const statusResponse = await request(app)
+        .post("/api/profile/index/status")
+        .set("x-setup-token", "setup-secret-123")
+        .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+        .expect(200);
+      status = statusResponse.body.scanStatus;
+    }
+
+    expect(status.status).toBe("cancelled");
+    expect(status.message).toBe("Scan halted.");
+  });
+
   it("saves scan schedule settings", async () => {
     const db = new Database(":memory:");
     migrate(db);
@@ -348,6 +430,100 @@ describe("profile routes", () => {
         ok: null,
       },
     });
+  });
+
+  it("creates, saves, loads, and deletes additional FTP servers", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    const createdServer = await request(app)
+      .post("/api/profile/servers")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    expect(createdServer.body.server).toMatchObject({
+      id: expect.any(Number),
+      name: "Server 2",
+      ftpConfig: null,
+    });
+    expect(createdServer.body.globalStats.servers).toBe(2);
+
+    const serverId = createdServer.body.server.id;
+    const saved = await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        serverId,
+        name: "Archive Mirror",
+        ftpConfig: {
+          host: "mirror.example.test",
+          port: 2121,
+          username: "mirror",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: true,
+          roots: ["/Movies"],
+        },
+        customization: {
+          catalogEnabled: true,
+          catalogTmdbApiKey: "server-key",
+          catalogContentTypes: { movies: true, series: false, anime: false },
+          libraryLayout: "folders",
+          streamDeliveryMode: "direct",
+        },
+      })
+      .expect(200);
+
+    expect(saved.body.server).toMatchObject({
+      id: serverId,
+      name: "Archive Mirror",
+      ftpConfig: {
+        host: "mirror.example.test",
+        password: "",
+        passwordConfigured: true,
+      },
+      customization: {
+        catalogEnabled: true,
+        catalogTmdbApiKey: "server-key",
+        libraryLayout: "folders",
+        streamDeliveryMode: "direct",
+      },
+      pendingScanAfter: expect.any(String),
+    });
+    expect(saved.body.globalStats).toMatchObject({ servers: 2, pendingScans: 1 });
+
+    const loaded = await request(app)
+      .post("/api/profile/servers/load")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(loaded.body.servers).toHaveLength(2);
+    expect(loaded.body.servers[1].name).toBe("Archive Mirror");
+
+    const deleted = await request(app)
+      .post("/api/profile/servers/delete")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", serverId })
+      .expect(200);
+    expect(deleted.body.servers).toHaveLength(1);
+
+    const onlyServerId = deleted.body.servers[0].id;
+    const rejected = await request(app)
+      .post("/api/profile/servers/delete")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", serverId: onlyServerId })
+      .expect(400);
+    expect(rejected.body).toEqual({ error: "At least one FTP server is required" });
   });
 
   it("rejects profile APIs without a setup token by default", async () => {

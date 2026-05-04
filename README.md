@@ -1,6 +1,6 @@
 # Stremio FTP
 
-Stremio FTP is a self-hosted Stremio source addon that lets users stream movies and series episodes from their own FTP or FTPS server. It exposes a web configuration portal where a user saves FTP credentials, scans the FTP library, and receives a private Stremio manifest URL.
+Stremio FTP is a self-hosted Stremio source addon that lets users stream movies and series episodes from one or more FTP/FTPS servers through a single private Stremio manifest. It exposes a web configuration portal where a user saves FTP credentials, scans each FTP library, and receives a private Stremio manifest URL.
 
 By default this is a stream-source addon: open a movie or episode from another Stremio catalog, and this addon appears as a streaming option when the clicked title is found in the indexed FTP library. Profiles can also enable optional FTP catalogs so indexed movies, series, anime, and unresolved files appear in Stremio with TMDB posters and metadata where possible.
 
@@ -10,16 +10,18 @@ By default this is a stream-source addon: open a movie or episode from another S
 
 - Web configuration portal at `/configure`, with setup-token entry for private deployments
 - Per-user profiles using browser UID plus passphrase, with no signup system
+- Multiple FTP servers per manifest, each with its own FTP, library, catalog, scan, and stream settings
+- Sequential per-manifest scans so one user profile does not open scan connections to several FTP servers at once
 - Encrypted FTP credential storage
 - FTP, explicit FTPS, and implicit FTPS support through `basic-ftp`
 - Optional invalid-certificate allowance for self-signed or seedbox FTP certificates
 - Movies and series episode filename parsing
-- Manual and scheduled background index refreshes from the portal
+- Manual, scheduled, and delayed auto-start background index refreshes from the portal
+- Halt control for active scans
 - Persisted scan progress with reload-safe status, progress bar, and approximate ETA
 - Optional movie, series, anime, and other catalogs generated from the indexed FTP library
 - Optional TMDB metadata enrichment for catalog posters, descriptions, and artwork
-- Per-profile TMDB API key override, content type toggles, and folder-layout hint
-- Per-profile proxy or direct FTP stream delivery mode
+- Per-server TMDB API key override, content type toggles, folder-layout hint, and proxy/direct FTP stream delivery mode
 - Private per-profile manifest URLs for Stremio
 - HTTP range proxy streaming from FTP to Stremio
 - Docker and Docker Compose deployment
@@ -31,7 +33,7 @@ By default this is a stream-source addon: open a movie or episode from another S
 - Catalogs are off by default per profile. Enable `Show indexed FTP catalog in Stremio` in the portal if you want this addon to expose browsable FTP catalogs.
 - The `Other` catalog is for indexed videos that cannot be resolved by TMDB under the enabled Movies, Series, or Anime options.
 - TMDB enrichment requires `TMDB_API_KEY`. Without it, catalog items that already have IMDb IDs can still appear with basic title/year metadata but no TMDB poster art.
-- After changing content type or layout options, run `Rescan` so files are re-parsed with the new profile settings.
+- After changing FTP or library settings, click `Save FTP settings`. The server schedules a delayed scan for that FTP server about 5 minutes later, unless you manually click `Rescan` first.
 - Scans run in a background queue. New files do not appear as Stremio source options until the next manual or scheduled scan finishes.
 - Scan progress and ETA are best-effort because FTP servers do not provide a full recursive item count before traversal.
 - Proxy streaming is the default and recommended mode. Direct FTP mode sends FTP URLs to Stremio clients; it may not work in every client, can expose FTP credentials in stream URLs, and explicit FTPS support varies by client. When supported, playback bypasses addon-server bandwidth and speed limits.
@@ -71,6 +73,7 @@ TMDB_API_KEY=optional-tmdb-api-key-for-catalog-metadata
 LOG_LEVEL=info
 CRAWLER_CONCURRENCY=2
 FTP_TIMEOUT_MS=15000
+FTP_MAX_CONNECTIONS=4
 MAX_ON_DEMAND_SEARCH_MS=4500
 PROFILE_RATE_LIMIT_WINDOW_MS=600000
 PROFILE_RATE_LIMIT_MAX=20
@@ -91,6 +94,7 @@ Notes:
 - `ALLOW_PUBLIC_PROFILE_API=true` preserves the older no-token behavior for trusted or otherwise restricted deployments. If enabled, anyone who can reach the hosted addon can create profiles and submit FTP settings.
 - `TMDB_API_KEY` is optional. Set it as the server default if users will enable the FTP catalog option and you want posters, backdrops, descriptions, and release years from TMDB. Users can override it per profile in the portal.
 - SQLite is stored at `$CONFIG_DIR/stremio-ftp.sqlite`.
+- `FTP_MAX_CONNECTIONS` limits simultaneous FTP sessions shared by portal tests, scans, and proxied playback. Lower it for hosts with strict connection caps.
 - `PROFILE_RATE_LIMIT_MAX` limits profile actions per client IP per rate-limit window.
 - `SCAN_GLOBAL_CONCURRENCY` limits simultaneous FTP scans across the whole instance. Default `2` is sized for public instances where the average catalog is around 2,000 media files.
 - `SCAN_QUEUE_MAX` limits queued scans waiting for workers. Default `50`.
@@ -114,6 +118,7 @@ CONFIG_DIR=/config
 LOG_LEVEL=info
 CRAWLER_CONCURRENCY=2
 FTP_TIMEOUT_MS=15000
+FTP_MAX_CONNECTIONS=4
 MAX_ON_DEMAND_SEARCH_MS=4500
 PROFILE_RATE_LIMIT_WINDOW_MS=600000
 PROFILE_RATE_LIMIT_MAX=20
@@ -154,18 +159,19 @@ If `SETUP_TOKEN` is set, enter it in the portal unlock form. Older `?setup=...` 
 
 ## Portal Workflow
 
-1. Fill in FTP settings first: host, port, username, password, TLS mode, certificate setting, and root paths.
+1. Fill in FTP settings for `Server 1`: host, port, username, password, TLS mode, certificate setting, and root paths.
 2. Enter a passphrase in Profile setup.
 3. Click `Create profile`. If the FTP form is complete, the portal creates the profile and saves FTP settings in one action.
 4. Click `Test connection`.
-5. Click `Rescan`. The scan runs in the background; you can leave and come back to see the latest persisted status.
+5. Click `Rescan`. The scan runs in the background; you can leave and come back to see the latest persisted status. If needed, click `Halt scan` while it is active.
 6. Optionally enable `Show indexed FTP catalog in Stremio`.
-7. If catalogs are enabled, choose the content types on the server: Movies, Series, Anime, and set a TMDB key if you do not want to use the server default.
+7. If catalogs are enabled, choose the content types on that server: Movies, Series, Anime, and set a TMDB key if you do not want to use the server default.
 8. Choose the library layout hint: auto detect, organized by folders, or a single folder of files.
 9. Keep `Proxy through addon` stream delivery unless you specifically want Stremio clients to receive direct FTP URLs.
-10. Click `Rescan` again after changing catalog parsing options.
+10. Click `Save FTP settings` after changing FTP or library options. A delayed auto-scan is scheduled about 5 minutes later so you can keep editing without immediately locking the form behind a scan.
 11. Choose an optional rescan frequency: manual only, every 6 hours, every 12 hours, daily, or weekly.
-12. Install the generated Stremio manifest URL.
+12. Add more FTP servers if needed. They are scanned sequentially, and duplicate movie/episode matches appear as multiple stream options in Stremio.
+13. Install the generated Stremio manifest URL.
 
 For an existing browser profile:
 

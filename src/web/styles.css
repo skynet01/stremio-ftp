@@ -310,6 +310,76 @@ textarea:focus-visible,
   align-items: stretch;
 }
 
+.portal-stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(18px, 2.4vw, 28px);
+}
+
+.global-status-list {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.server-accordion-panel .panel-header {
+  align-items: center;
+}
+
+.server-accordion-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.server-accordion-item {
+  border-top: 1px solid var(--line);
+}
+
+.server-accordion-item:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.server-accordion-trigger {
+  width: 100%;
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: 24px minmax(120px, 0.8fr) minmax(160px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 16px 0;
+  color: var(--cream);
+  background: transparent;
+  border: 0;
+  text-align: left;
+}
+
+.server-title {
+  font-weight: 700;
+}
+
+.server-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-accordion-body {
+  padding: 6px 0 24px;
+}
+
+.server-section {
+  padding: 22px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.server-section:first-of-type {
+  border-top: 0;
+}
+
+.server-button-row {
+  justify-content: flex-start;
+}
+
 .panel {
   position: relative;
   background:
@@ -556,6 +626,11 @@ input:-webkit-autofill:active {
   background: transparent;
   border-color: var(--line);
   color: var(--cream);
+}
+
+.danger-button {
+  border-color: rgba(234, 119, 119, 0.42);
+  color: #ffc9c9;
 }
 
 .badge {
@@ -1006,10 +1081,16 @@ input:-webkit-autofill:active {
   }
 
   .portal-grid,
+  .portal-stack,
   .field-grid,
   .profile-grid,
   .ftp-field-grid,
   .library-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .global-status-list,
+  .server-accordion-trigger {
     grid-template-columns: 1fr;
   }
 

@@ -40,7 +40,7 @@ export type IndexStatus = {
 
 export type ScanStatus = {
   id: number | null;
-  status: "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped";
+  status: "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
   trigger: "manual" | "scheduled" | null;
   progressPercent: number;
   entriesSeen: number;
@@ -64,6 +64,30 @@ export type ScanSchedule = {
 export type ConnectionStatus = {
   lastTestedAt: string | null;
   ok: boolean | null;
+};
+
+export type GlobalStats = {
+  totalItems: number;
+  movies: number;
+  series: number;
+  anime: number;
+  servers: number;
+  activeScans: number;
+  pendingScans: number;
+  lastCompletedScanAt: string | null;
+  status: "idle" | "working" | "ready" | "error";
+};
+
+export type FtpServerSettings = {
+  id: number;
+  name: string;
+  ftpConfig: LoadedFtpConfig | null;
+  customization: AddonCustomization;
+  indexStatus: IndexStatus;
+  scanStatus: ScanStatus;
+  scanSchedule: ScanSchedule;
+  connectionStatus: ConnectionStatus;
+  pendingScanAfter: string | null;
 };
 
 const SETUP_TOKEN_STORAGE_KEY = "stremio-ftp-setup-token";
@@ -121,6 +145,16 @@ export type AuthenticatedFtpRequest = CreateProfileRequest & {
   ftpConfig: FtpConfigRequest;
 };
 
+export type ServerRequest = CreateProfileRequest & {
+  serverId: number;
+};
+
+export type SaveServerRequest = ServerRequest & {
+  name: string;
+  ftpConfig: FtpConfigRequest;
+  customization: Omit<AddonCustomization, "addonName" | "addonLogoUrl" | "addonDescription">;
+};
+
 export type AuthenticatedCustomizationRequest = CreateProfileRequest & {
   customization: AddonCustomization;
 };
@@ -129,10 +163,16 @@ export type RescanResponse = {
   scanStatus: ScanStatus;
 };
 
+export type CancelScanResponse = {
+  scanStatus: ScanStatus;
+};
+
 export type ScanStatusResponse = {
   indexStatus: IndexStatus;
   scanStatus: ScanStatus;
   scanSchedule: ScanSchedule;
+  servers?: FtpServerSettings[];
+  globalStats?: GlobalStats;
 };
 
 export type SaveScanScheduleRequest = CreateProfileRequest & {
@@ -210,6 +250,8 @@ export async function loadFtpSettings(request: CreateProfileRequest): Promise<{
   scanStatus: ScanStatus;
   scanSchedule: ScanSchedule;
   connectionStatus: ConnectionStatus;
+  servers?: FtpServerSettings[];
+  globalStats?: GlobalStats;
 }> {
   const response = await fetch("/api/profile/ftp/load", {
     method: "POST",
@@ -222,7 +264,70 @@ export async function loadFtpSettings(request: CreateProfileRequest): Promise<{
     scanStatus: ScanStatus;
     scanSchedule: ScanSchedule;
     connectionStatus: ConnectionStatus;
+    servers?: FtpServerSettings[];
+    globalStats?: GlobalStats;
   }>(response);
+}
+
+export async function loadServers(request: CreateProfileRequest): Promise<{
+  customization: AddonCustomization;
+  servers: FtpServerSettings[];
+  globalStats: GlobalStats;
+}> {
+  const response = await fetch("/api/profile/servers/load", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<{ customization: AddonCustomization; servers: FtpServerSettings[]; globalStats: GlobalStats }>(response);
+}
+
+export async function createFtpServer(request: CreateProfileRequest): Promise<{
+  server: FtpServerSettings;
+  globalStats: GlobalStats;
+}> {
+  const response = await fetch("/api/profile/servers", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<{ server: FtpServerSettings; globalStats: GlobalStats }>(response);
+}
+
+export async function saveFtpServer(request: SaveServerRequest): Promise<{
+  server: FtpServerSettings;
+  globalStats: GlobalStats;
+}> {
+  const response = await fetch("/api/profile/servers/save", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<{ server: FtpServerSettings; globalStats: GlobalStats }>(response);
+}
+
+export async function deleteFtpServer(request: ServerRequest): Promise<{
+  servers: FtpServerSettings[];
+  globalStats: GlobalStats;
+}> {
+  const response = await fetch("/api/profile/servers/delete", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<{ servers: FtpServerSettings[]; globalStats: GlobalStats }>(response);
+}
+
+export async function testFtpServer(request: ServerRequest & { ftpConfig: FtpConfigRequest }): Promise<{
+  ok: true;
+  connectionStatus: ConnectionStatus;
+}> {
+  const response = await fetch("/api/profile/servers/test", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<{ ok: true; connectionStatus: ConnectionStatus }>(response);
 }
 
 export async function loadCustomization(request: CreateProfileRequest): Promise<{ customization: AddonCustomization }> {
@@ -243,13 +348,22 @@ export async function saveCustomization(request: AuthenticatedCustomizationReque
   return readJson<{ ok: true }>(response);
 }
 
-export async function rescanIndex(request: CreateProfileRequest): Promise<RescanResponse> {
+export async function rescanIndex(request: CreateProfileRequest & { serverId?: number }): Promise<RescanResponse> {
   const response = await fetch("/api/profile/index/rescan", {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(request),
   });
   return readJson<RescanResponse>(response);
+}
+
+export async function cancelScan(request: CreateProfileRequest & { serverId?: number }): Promise<CancelScanResponse> {
+  const response = await fetch("/api/profile/index/cancel", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<CancelScanResponse>(response);
 }
 
 export async function loadScanStatus(request: CreateProfileRequest): Promise<ScanStatusResponse> {
@@ -261,7 +375,7 @@ export async function loadScanStatus(request: CreateProfileRequest): Promise<Sca
   return readJson<ScanStatusResponse>(response);
 }
 
-export async function saveScanSchedule(request: SaveScanScheduleRequest): Promise<{ scanSchedule: ScanSchedule }> {
+export async function saveScanSchedule(request: SaveScanScheduleRequest & { serverId?: number }): Promise<{ scanSchedule: ScanSchedule }> {
   const response = await fetch("/api/profile/index/schedule", {
     method: "POST",
     headers: authHeaders(),

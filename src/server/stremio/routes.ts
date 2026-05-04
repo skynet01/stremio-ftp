@@ -19,7 +19,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
 
   router.get("/u/:installToken/manifest.json", (req, res) => {
     const profileId = profiles.profileIdForInstallToken(req.params.installToken);
-    res.json(profileId ? tokenManifest(profiles.getAddonCustomization(profileId)) : publicManifest());
+    res.json(profileId ? tokenManifest(manifestCustomization(profiles, profileId)) : publicManifest());
   });
 
   router.get("/u/:installToken/stream/:type/:id.json", async (req, res) => {
@@ -30,8 +30,9 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     if (!type || !profileId) return res.json({ streams: [] });
 
     const fileId = internalFileId(id);
-    const customization = profiles.getAddonCustomization(profileId);
-    const ftpConfig = profiles.getFtpConfig(profileId);
+    const customization = manifestCustomization(profiles, profileId);
+    const ftpConfigForServer = (serverId: number | null | undefined) =>
+      serverId ? profiles.getFtpServerConfig(profileId, serverId) : profiles.getFtpConfig(profileId);
     if (fileId) {
       const files = mediaRepository.otherCatalogStreams(profileId, fileId);
       return res.json({
@@ -41,7 +42,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
             installToken,
             match: file,
             streamDeliveryMode: customization.streamDeliveryMode,
-            ftpConfig,
+            ftpConfigForServer,
           }),
         ),
       });
@@ -60,7 +61,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
         metadata,
         mediaRepository,
         streamDeliveryMode: customization.streamDeliveryMode,
-        ftpConfig,
+        ftpConfigForServer,
       });
       res.json({ streams });
     } catch (error) {
@@ -74,7 +75,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const installToken = stringParam(req.params.installToken);
     const catalogId = stringParam(req.params.catalogId);
     const profileId = installToken ? profiles.profileIdForInstallToken(installToken) : null;
-    const customization = profileId ? profiles.getAddonCustomization(profileId) : null;
+    const customization = profileId ? manifestCustomization(profiles, profileId) : null;
     if (!type || !profileId || !customization?.catalogEnabled || !isCatalogId(type, catalogId)) return res.json({ metas: [] });
     const tmdbApiKey = effectiveTmdbApiKey(customization, config);
 
@@ -102,7 +103,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const type = stremioType(stringParam(req.params.type));
     const id = stringParam(req.params.id);
     const profileId = profiles.profileIdForInstallToken(stringParam(req.params.installToken));
-    const customization = profileId ? profiles.getAddonCustomization(profileId) : null;
+    const customization = profileId ? manifestCustomization(profiles, profileId) : null;
     if (!type || !profileId || !customization?.catalogEnabled) return res.json({ meta: null });
 
     const fileId = internalFileId(id);
@@ -150,6 +151,25 @@ function catalogKindForId(catalogId: string): TmdbCatalogKind | null {
 
 function effectiveTmdbApiKey(customization: AddonCustomization, config: AppConfig) {
   return customization.catalogTmdbApiKey?.trim() || config.tmdbApiKey;
+}
+
+function manifestCustomization(profiles: ProfileService, profileId: number): AddonCustomization {
+  const base = profiles.getAddonCustomization(profileId);
+  const servers = profiles.listFtpServers(profileId);
+  const contentTypes = servers.reduce(
+    (acc, server) => ({
+      movies: acc.movies || Boolean(server.customization.catalogContentTypes?.movies),
+      series: acc.series || Boolean(server.customization.catalogContentTypes?.series),
+      anime: acc.anime || Boolean(server.customization.catalogContentTypes?.anime),
+    }),
+    { movies: false, series: false, anime: false },
+  );
+  return {
+    ...base,
+    catalogEnabled: servers.some((server) => server.customization.catalogEnabled),
+    catalogTmdbApiKey: servers.find((server) => server.customization.catalogTmdbApiKey)?.customization.catalogTmdbApiKey || base.catalogTmdbApiKey,
+    catalogContentTypes: contentTypes,
+  };
 }
 
 function catalogKindEnabled(catalogKind: TmdbCatalogKind, customization: AddonCustomization) {

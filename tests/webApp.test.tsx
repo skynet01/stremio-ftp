@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/web/App";
 import {
+  cancelScan,
   createProfile,
   loadCustomization,
   loadFtpSettings,
@@ -20,6 +21,7 @@ import {
 } from "../src/web/api";
 
 vi.mock("../src/web/api", () => ({
+  cancelScan: vi.fn(),
   createProfile: vi.fn(),
   loadCustomization: vi.fn(),
   loadFtpSettings: vi.fn(),
@@ -35,6 +37,7 @@ vi.mock("../src/web/api", () => ({
   unlockProfile: vi.fn(),
 }));
 
+const cancelScanMock = vi.mocked(cancelScan);
 const createProfileMock = vi.mocked(createProfile);
 const loadCustomizationMock = vi.mocked(loadCustomization);
 const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
@@ -80,6 +83,7 @@ describe("App", () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.history.pushState({}, "", "/");
+    cancelScanMock.mockReset();
     createProfileMock.mockReset();
     loadCustomizationMock.mockReset();
     loadFtpSettingsMock.mockReset();
@@ -117,7 +121,7 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Show indexed FTP catalog in Stremio")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.2.4`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.3.0`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
@@ -256,8 +260,8 @@ describe("App", () => {
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toBeTruthy();
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.")).toHaveClass("notification");
     expect(screen.getByText("Profile unlocked. Saved FTP settings loaded.").parentElement).toHaveClass("install-action-row");
-    expect(screen.getByText("42")).toBeTruthy();
-    expect(screen.getByText(/May 02, 2026, 3:45 PM/)).toBeTruthy();
+    expect(screen.getAllByText("42").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/May 02, 2026, 3:45 PM/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Passed May 02, 2026, 3:40 PM/)).toBeTruthy();
   });
 
@@ -419,8 +423,8 @@ describe("App", () => {
     expect(screen.getByDisplayValue("ftp.example.test")).toBeTruthy();
     expect(screen.queryByDisplayValue("secret")).toBeNull();
     expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
-    expect(screen.getByText("7")).toBeTruthy();
-    expect(screen.getByText(/May 02, 2026, 3:45 PM/)).toBeTruthy();
+    expect(screen.getAllByText("7").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/May 02, 2026, 3:45 PM/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Passed May 02, 2026, 3:40 PM/)).toBeTruthy();
   });
 
@@ -620,6 +624,75 @@ describe("App", () => {
     expect(await screen.findByText("Indexed 3 media files.")).toBeTruthy();
     expect(screen.getByText("3")).toBeTruthy();
     expect(screen.getByText(/May 02, 2026, 3:45 PM/)).toBeTruthy();
+  });
+
+  it("shows a halt button while a scan is active", async () => {
+    window.localStorage.setItem("stremio-ftp-recovery-uid", "browser-uid");
+    window.localStorage.setItem("stremio-ftp-passphrase", "passphrase");
+    window.localStorage.setItem("stremio-ftp-manifest-url", "https://addon.example.test/u/token/manifest.json");
+    window.localStorage.setItem("stremio-ftp-stremio-install-url", "stremio://addon.example.test/u/token/manifest.json");
+    loadFtpSettingsMock.mockResolvedValue({
+      ftpConfig: {
+        host: "ftp.example.test",
+        port: 21,
+        username: "user",
+        password: "",
+        passwordConfigured: true,
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/Movies"],
+      },
+      indexStatus: {
+        lastScanAt: null,
+        mediaItems: 0,
+      },
+      scanStatus: {
+        ...idleScanStatus,
+        id: 12,
+        status: "running",
+        trigger: "manual",
+        progressPercent: 25,
+        entriesSeen: 500,
+        filesSeen: 100,
+        directoriesSeen: 12,
+        currentPath: "/Movies",
+        estimatedSecondsRemaining: 45,
+        message: "Scanning FTP library.",
+        queuedAt: "2026-05-02T22:44:00.000Z",
+        startedAt: "2026-05-02T22:44:01.000Z",
+      },
+      scanSchedule: manualScanSchedule,
+      connectionStatus: { lastTestedAt: null, ok: null },
+    });
+    loadCustomizationMock.mockResolvedValue({
+      customization: {
+        addonName: "Stremio FTP Addon",
+        addonLogoUrl: "",
+        addonDescription: "Stream movies and series episodes from your own FTP server.",
+        catalogEnabled: false,
+        ...defaultCatalogOptions,
+      },
+    });
+    cancelScanMock.mockResolvedValue({
+      scanStatus: {
+        ...idleScanStatus,
+        id: 12,
+        status: "cancelled",
+        trigger: "manual",
+        progressPercent: 25,
+        message: "Scan halted.",
+        finishedAt: "2026-05-02T22:44:10.000Z",
+      },
+    });
+
+    render(<App />);
+
+    const haltButton = await screen.findByRole("button", { name: "Halt scan" });
+    fireEvent.click(haltButton);
+
+    await waitFor(() => expect(cancelScanMock).toHaveBeenCalledWith({ browserUid: "browser-uid", passphrase: "passphrase" }));
+    expect(await screen.findByText("Scan halted.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Rescan" })).toBeEnabled();
   });
 
   it("saves scan frequency after profile setup", async () => {

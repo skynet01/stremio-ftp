@@ -20,6 +20,7 @@ const config: AppConfig = {
   logLevel: "error",
   crawlerConcurrency: 2,
   ftpTimeoutMs: 15000,
+  ftpMaxConnections: 4,
   maxOnDemandSearchMs: 4500,
   profileRateLimitWindowMs: 600000,
   profileRateLimitMax: 30,
@@ -570,6 +571,101 @@ describe("stremio routes", () => {
 
     expect(response.body.streams[0].url).toBe(
       "ftp://user%20name:p%40ss%2Fword@ftp.example.test:2121/movies/The.Matrix.1999.1080p.mkv",
+    );
+  });
+
+  it("returns duplicate title streams from every configured FTP server", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    const server1Id = service.defaultFtpServerId(created.profileId);
+    service.saveFtpServer(created.profileId, server1Id, {
+      name: "Server 1",
+      ftpConfig: {
+        host: "server1.example.test",
+        port: 21,
+        username: "user1",
+        password: "secret1",
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/movies"],
+      },
+      customization: {
+        catalogEnabled: true,
+        catalogContentTypes: { movies: true, series: true, anime: false },
+        streamDeliveryMode: "proxy",
+      },
+    });
+    const server2 = service.createFtpServer(created.profileId, {
+      name: "Server 2",
+      ftpConfig: {
+        host: "server2.example.test",
+        port: 21,
+        username: "user2",
+        password: "secret2",
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/movies"],
+      },
+      customization: {
+        catalogEnabled: true,
+        catalogContentTypes: { movies: true, series: true, anime: false },
+        streamDeliveryMode: "proxy",
+      },
+    });
+    const repository = new MediaRepository(db);
+    for (const [ftpServerId, filename] of [
+      [server1Id, "The.Matrix.1999.1080p.mkv"],
+      [server1Id, "The.Matrix.1999.2160p.mkv"],
+      [server2.id, "The.Matrix.1999.720p.mkv"],
+      [server2.id, "The.Matrix.1999.1080p.BluRay.mkv"],
+      [server2.id, "The.Matrix.1999.2160p.HDR.mkv"],
+    ] as const) {
+      repository.upsertParsedFile(created.profileId, {
+        ftpServerId,
+        mediaKind: "movie",
+        catalogKind: "movie",
+        ftpPath: `/movies/${filename}`,
+        filename,
+        normalizedFilename: filename.toLowerCase(),
+        extension: "mkv",
+        parsedTitle: "matrix",
+        parsedYear: 1999,
+        season: null,
+        episode: null,
+        imdbId: "tt0133093",
+        quality: filename.includes("2160p") ? "2160p" : filename.includes("720p") ? "720p" : "1080p",
+        confidence: 95,
+        sizeBytes: 1024,
+      });
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ meta: { id: "tt0133093", name: "The Matrix", releaseInfo: "1999" } }),
+      })),
+    );
+    const app = createApp(config, db);
+
+    const response = await request(app).get(`/u/${created.installUrlToken}/stream/movie/tt0133093.json`).expect(200);
+
+    expect(response.body.streams).toHaveLength(5);
+    expect(response.body.streams.map((stream: { name: string }) => stream.name)).toEqual(
+      expect.arrayContaining([
+        "FTP Server 1 - 1080p",
+        "FTP Server 1 - 2160p",
+        "FTP Server 2 - 720p",
+        "FTP Server 2 - 1080p",
+        "FTP Server 2 - 2160p",
+      ]),
+    );
+    expect(response.body.streams.map((stream: { description: string }) => stream.description)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Server 1\nThe.Matrix.1999.1080p.mkv"),
+        expect.stringContaining("Server 2\nThe.Matrix.1999.2160p.HDR.mkv"),
+      ]),
     );
   });
 

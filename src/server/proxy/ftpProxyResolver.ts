@@ -14,7 +14,8 @@ export function createFtpProxyResolver(
     const file = mediaRepository.getFileForProfile(profileId, fileId);
     if (!file) return null;
 
-    const ftpConfig = profiles.getFtpConfig(profileId);
+    const ftpConfig =
+      file.ftpServerId === null ? profiles.getFtpConfig(profileId) : profiles.getFtpServerConfig(profileId, file.ftpServerId);
     if (!ftpConfig) return null;
 
     return {

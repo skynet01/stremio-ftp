@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { AppConfig } from "../config.js";
-import { crawlProfileRoot, type CrawlProgress } from "../ftp/crawler.js";
+import { crawlProfileRoot, isScanCancelledError, ScanCancelledError, type CrawlProgress } from "../ftp/crawler.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { MediaRepository } from "../media/mediaRepository.js";
 import type { ProfileService } from "../profiles/profileService.js";
@@ -9,7 +9,7 @@ const MAX_ESTIMATED_SECONDS_REMAINING = 24 * 60 * 60;
 const SCAN_JOB_ROW_ERROR = "Invalid scan job row";
 
 export type ScanTrigger = "manual" | "scheduled";
-export type ScanJobStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped";
+export type ScanJobStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
 
 export type ProfileScanStatus = {
   id: number | null;
@@ -32,6 +32,7 @@ export type ProfileScanStatus = {
 type ScanJobRow = {
   id: number;
   profile_id: number;
+  ftp_server_id: number | null;
   status: Exclude<ScanJobStatus, "idle">;
   trigger: ScanTrigger;
   progress_percent: number;
@@ -51,6 +52,7 @@ export class ScanQueue {
   private readonly db: Database.Database;
   private activeCount = 0;
   private readonly running = new Set<number>();
+  private readonly activeControllers = new Map<number, AbortController>();
 
   constructor(
     private readonly config: AppConfig,
@@ -63,30 +65,30 @@ export class ScanQueue {
     this.pump();
   }
 
-  enqueueProfileScan(profileId: number, trigger: ScanTrigger): ProfileScanStatus {
+  enqueueProfileScan(profileId: number, trigger: ScanTrigger, ftpServerId = this.profileService.defaultFtpServerId(profileId)): ProfileScanStatus {
     const result = this.db.transaction((): ProfileScanStatus | number => {
-      const active = this.activeJobForProfile(profileId);
+      const active = this.activeJobForServer(profileId, ftpServerId);
       if (active) return this.rowToStatus(active);
 
       if (trigger === "manual") {
-        const cooldownStatus = this.cooldownStatus(profileId);
+        const cooldownStatus = this.cooldownStatus(profileId, ftpServerId);
         if (cooldownStatus) return cooldownStatus;
       }
 
       const queuedCount = countFromRow(this.db.prepare("select count(*) as count from scan_jobs where status = 'queued'").get());
       if (queuedCount >= this.config.scanQueueMax) {
-        return this.insertSkippedJob(profileId, trigger, "Scan queue is full.");
+        return this.insertSkippedJob(profileId, ftpServerId, trigger, "Scan queue is full.");
       }
 
       const now = new Date().toISOString();
       const insert = this.db
         .prepare(
           `
-          insert into scan_jobs (profile_id, status, trigger, progress_percent, message, queued_at)
-          values (?, 'queued', ?, 0, 'Waiting for scan worker.', ?)
+          insert into scan_jobs (profile_id, ftp_server_id, status, trigger, progress_percent, message, queued_at)
+          values (?, ?, 'queued', ?, 0, 'Waiting for scan worker.', ?)
         `,
         )
-        .run(profileId, trigger, now);
+        .run(profileId, ftpServerId, trigger, now);
       return Number(insert.lastInsertRowid);
     })();
 
@@ -96,9 +98,13 @@ export class ScanQueue {
   }
 
   getProfileScanStatus(profileId: number): ProfileScanStatus {
+    return this.getServerScanStatus(profileId, this.profileService.defaultFtpServerId(profileId));
+  }
+
+  getServerScanStatus(profileId: number, ftpServerId: number): ProfileScanStatus {
     const row = this.db
-      .prepare("select * from scan_jobs where profile_id = ? order by id desc limit 1")
-      .get(profileId);
+      .prepare("select * from scan_jobs where profile_id = ? and ftp_server_id = ? order by id desc limit 1")
+      .get(profileId, ftpServerId);
     const scanJob = optionalScanJobRow(row);
     if (!scanJob) {
       return {
@@ -116,7 +122,7 @@ export class ScanQueue {
         queuedAt: null,
         startedAt: null,
         finishedAt: null,
-        mediaItems: this.mediaRepository.countForProfile(profileId),
+        mediaItems: this.mediaRepository.countForServer(profileId, ftpServerId),
       };
     }
     return this.rowToStatus(scanJob);
@@ -128,25 +134,52 @@ export class ScanQueue {
     return this.rowToStatus(row);
   }
 
+  cancelProfileScan(profileId: number): ProfileScanStatus {
+    return this.cancelServerScan(profileId, this.profileService.defaultFtpServerId(profileId));
+  }
+
+  cancelServerScan(profileId: number, ftpServerId: number): ProfileScanStatus {
+    const active = this.activeJobForServer(profileId, ftpServerId);
+    if (!active) return this.getServerScanStatus(profileId, ftpServerId);
+
+    if (active.status === "queued") {
+      this.cancelJob(active.id);
+      return this.getJobStatus(active.id);
+    }
+
+    this.activeControllers.get(active.id)?.abort();
+    this.db
+      .prepare(
+        `
+        update scan_jobs
+        set message = 'Halting scan.'
+        where id = ? and status = 'running'
+      `,
+      )
+      .run(active.id);
+    return this.getJobStatus(active.id);
+  }
+
   enqueueDueScheduledScans(nowIso = new Date().toISOString()) {
-    for (const profileId of this.profileService.dueScheduledScanProfileIds(nowIso)) {
-      const schedule = this.profileService.getScanSchedule(profileId);
-      this.profileService.saveScanSchedule(profileId, {
+    for (const { profileId, serverId } of this.profileService.dueScheduledScanServerIds(nowIso)) {
+      const schedule = this.profileService.getFtpServerScanSchedule(profileId, serverId);
+      this.profileService.clearPendingScan(profileId, serverId);
+      this.profileService.saveFtpServerScanSchedule(profileId, serverId, {
         intervalMinutes: schedule.intervalMinutes,
-        nextScheduledScanAt: new Date(new Date(nowIso).getTime() + schedule.intervalMinutes * 60_000).toISOString(),
+        nextScheduledScanAt:
+          schedule.intervalMinutes > 0 ? new Date(new Date(nowIso).getTime() + schedule.intervalMinutes * 60_000).toISOString() : null,
       });
-      this.enqueueProfileScan(profileId, "scheduled");
+      this.enqueueProfileScan(profileId, "scheduled", serverId);
     }
   }
 
   private pump() {
     while (this.activeCount < this.config.scanGlobalConcurrency) {
-      const row = this.db
-        .prepare("select * from scan_jobs where status = 'queued' order by queued_at asc, id asc limit 1")
-        .get();
-      const scanJob = optionalScanJobRow(row);
+      const rows = this.db
+        .prepare("select * from scan_jobs where status = 'queued' order by queued_at asc, id asc limit ?")
+        .all(this.config.scanQueueMax);
+      const scanJob = rows.map(optionalScanJobRow).find((row) => row && !this.running.has(row.profile_id));
       if (!scanJob) return;
-      if (this.running.has(scanJob.profile_id)) return;
       this.startJob(scanJob);
     }
   }
@@ -167,28 +200,38 @@ export class ScanQueue {
       )
       .run(startedAt, row.id);
 
-    void this.runJob(row.id, row.profile_id)
+    const abortController = new AbortController();
+    this.activeControllers.set(row.id, abortController);
+
+    void this.runJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), abortController.signal)
       .catch((error: unknown) => {
+        if (isScanCancelledError(error)) {
+          this.cancelJob(row.id);
+          return;
+        }
         const message = error instanceof Error ? error.message : "Unable to refresh FTP index";
         this.failJob(row.id, message);
       })
       .finally(() => {
+        this.activeControllers.delete(row.id);
         this.running.delete(row.profile_id);
         this.activeCount -= 1;
         this.pump();
       });
   }
 
-  private async runJob(jobId: number, profileId: number) {
-    const ftpConfig = this.profileService.getFtpConfig(profileId);
+  private async runJob(jobId: number, profileId: number, ftpServerId: number, signal: AbortSignal) {
+    const ftpConfig = this.profileService.getFtpServerConfig(profileId, ftpServerId);
     if (!ftpConfig) throw new Error("FTP settings are not configured");
-    const customization = this.profileService.getAddonCustomization(profileId);
+    const customization = this.profileService.getFtpServerCustomization(profileId, ftpServerId);
 
     let filesSeen = 0;
     const startedAt = Date.now();
     for (const rootPath of ftpConfig.roots) {
+      throwIfScanCancelled(signal);
       const result = await crawlProfileRoot({
         profileId,
+        ftpServerId,
         rootPath,
         ftpConfig,
         factory: this.ftpClientFactory,
@@ -198,13 +241,15 @@ export class ScanQueue {
           libraryLayout: customization.libraryLayout,
         },
         onProgress: (progress) => this.saveProgress(jobId, startedAt, progress),
+        signal,
       });
       filesSeen += result.filesSeen;
     }
 
+    throwIfScanCancelled(signal);
     const lastScanAt = new Date().toISOString();
-    const mediaItems = this.mediaRepository.countForProfile(profileId);
-    this.profileService.saveIndexStatus(profileId, { lastScanAt, mediaItems });
+    const mediaItems = this.mediaRepository.countForServer(profileId, ftpServerId);
+    this.profileService.saveFtpServerIndexStatus(profileId, ftpServerId, { lastScanAt, mediaItems });
     this.db
       .prepare(
         `
@@ -272,13 +317,29 @@ export class ScanQueue {
       .run(error, new Date().toISOString(), jobId);
   }
 
-  private cooldownStatus(profileId: number) {
+  private cancelJob(jobId: number) {
+    this.db
+      .prepare(
+        `
+        update scan_jobs
+        set status = 'cancelled',
+            message = 'Scan halted.',
+            error = null,
+            finished_at = ?
+        where id = ?
+      `,
+      )
+      .run(new Date().toISOString(), jobId);
+  }
+
+  private cooldownStatus(profileId: number, ftpServerId: number) {
     const result = this.db
       .prepare(
         `
         select *
         from scan_jobs
         where profile_id = ?
+          and ftp_server_id = ?
           and trigger = 'manual'
           and status = 'succeeded'
           and finished_at is not null
@@ -286,42 +347,43 @@ export class ScanQueue {
         limit 1
       `,
       )
-      .get(profileId);
+      .get(profileId, ftpServerId);
     const row = optionalScanJobRow(result);
     if (!row?.finished_at) return null;
 
     const finishedAt = new Date(row.finished_at).getTime();
     const nextAllowedAt = finishedAt + this.config.scanCooldownMs;
     if (Date.now() >= nextAllowedAt) return null;
-    return this.insertSkippedJob(profileId, "manual", `Manual scan cooldown active. Try again after ${new Date(nextAllowedAt).toISOString()}.`);
+    return this.insertSkippedJob(profileId, ftpServerId, "manual", `Manual scan cooldown active. Try again after ${new Date(nextAllowedAt).toISOString()}.`);
   }
 
-  private insertSkippedJob(profileId: number, trigger: ScanTrigger, message: string) {
+  private insertSkippedJob(profileId: number, ftpServerId: number, trigger: ScanTrigger, message: string) {
     const now = new Date().toISOString();
     const result = this.db
       .prepare(
         `
-        insert into scan_jobs (profile_id, status, trigger, progress_percent, message, queued_at, finished_at)
-        values (?, 'skipped', ?, 0, ?, ?, ?)
+        insert into scan_jobs (profile_id, ftp_server_id, status, trigger, progress_percent, message, queued_at, finished_at)
+        values (?, ?, 'skipped', ?, 0, ?, ?, ?)
       `,
       )
-      .run(profileId, trigger, message, now, now);
+      .run(profileId, ftpServerId, trigger, message, now, now);
     return this.getJobStatus(Number(result.lastInsertRowid));
   }
 
-  private activeJobForProfile(profileId: number) {
+  private activeJobForServer(profileId: number, ftpServerId: number) {
     const row = this.db
       .prepare(
         `
         select *
         from scan_jobs
         where profile_id = ?
+          and ftp_server_id = ?
           and status in ('queued', 'running')
         order by id desc
         limit 1
       `,
       )
-      .get(profileId);
+      .get(profileId, ftpServerId);
     return optionalScanJobRow(row);
   }
 
@@ -341,7 +403,10 @@ export class ScanQueue {
       queuedAt: row.queued_at,
       startedAt: row.started_at,
       finishedAt: row.finished_at,
-      mediaItems: this.mediaRepository.countForProfile(row.profile_id),
+      mediaItems:
+        row.ftp_server_id === null
+          ? this.mediaRepository.countForProfile(row.profile_id)
+          : this.mediaRepository.countForServer(row.profile_id, row.ftp_server_id),
     };
   }
 
@@ -367,6 +432,10 @@ function countFromRow(row: unknown): number {
   return row.count;
 }
 
+function throwIfScanCancelled(signal: AbortSignal) {
+  if (signal.aborted) throw new ScanCancelledError();
+}
+
 function optionalScanJobRow(row: unknown): ScanJobRow | undefined {
   if (row === undefined) return undefined;
   return scanJobRow(row);
@@ -377,6 +446,7 @@ function scanJobRow(row: unknown): ScanJobRow {
   return {
     id: numberField(row, "id"),
     profile_id: numberField(row, "profile_id"),
+    ftp_server_id: nullableNumberField(row, "ftp_server_id"),
     status: persistedScanStatus(row.status),
     trigger: scanTrigger(row.trigger),
     progress_percent: numberField(row, "progress_percent"),
@@ -428,6 +498,7 @@ function persistedScanStatus(value: unknown): ScanJobRow["status"] {
     case "succeeded":
     case "failed":
     case "skipped":
+    case "cancelled":
       return value;
     default:
       throw new Error(`${SCAN_JOB_ROW_ERROR}: status`);

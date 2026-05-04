@@ -8,6 +8,7 @@ import helmet from "helmet";
 import type { AppConfig } from "./config.js";
 import { openDatabase } from "./db/database.js";
 import { createBasicFtpClient } from "./ftp/basicFtpClient.js";
+import { limitFtpClientFactory } from "./ftp/ftpConnectionLimiter.js";
 import type { FtpClientFactory } from "./ftp/ftpTypes.js";
 import { MediaRepository } from "./media/mediaRepository.js";
 import { ProfileService } from "./profiles/profileService.js";
@@ -47,7 +48,7 @@ export function createApp(
 
   const profileService = new ProfileService(db, config.encryptionKey);
   const mediaRepository = new MediaRepository(db);
-  const ftpClientFactory = options.ftpClientFactory ?? createBasicFtpClient;
+  const ftpClientFactory = limitFtpClientFactory(options.ftpClientFactory ?? createBasicFtpClient, config.ftpMaxConnections);
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
   const scanScheduler = setInterval(() => scanQueue.enqueueDueScheduledScans(), config.scanSchedulerIntervalMs);
   scanScheduler.unref();
