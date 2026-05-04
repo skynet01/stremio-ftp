@@ -26,6 +26,7 @@ describe("loadConfig", () => {
     expect(config.scanJobTimeoutMs).toBe(1800000);
     expect(config.scanSchedulerIntervalMs).toBe(60000);
     expect(config.scanProgressAverageItems).toBe(2000);
+    expect(config.scanTransientRetryDelayMs).toBe(300000);
     expect(config.setupToken).toBe("setup-secret-123");
     expect(config.allowPublicProfileApi).toBe(false);
     expect(config.tmdbApiKey).toBe("tmdb-key");
@@ -43,6 +44,7 @@ describe("loadConfig", () => {
       SCAN_JOB_TIMEOUT_MS: "900000",
       SCAN_SCHEDULER_INTERVAL_MS: "30000",
       SCAN_PROGRESS_AVERAGE_ITEMS: "5000",
+      SCAN_TRANSIENT_RETRY_DELAY_MS: "180000",
       FTP_MAX_CONNECTIONS: "1",
     });
 
@@ -54,6 +56,7 @@ describe("loadConfig", () => {
     expect(config.scanJobTimeoutMs).toBe(900000);
     expect(config.scanSchedulerIntervalMs).toBe(30000);
     expect(config.scanProgressAverageItems).toBe(5000);
+    expect(config.scanTransientRetryDelayMs).toBe(180000);
   });
 
   it("rejects an omitted setup token unless public profile APIs are explicitly enabled", () => {

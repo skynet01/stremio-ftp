@@ -322,9 +322,9 @@ textarea:focus-visible,
 
 .global-status-state {
   display: flex;
-  align-items: flex-end;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
   color: var(--muted);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.64rem;
@@ -334,7 +334,7 @@ textarea:focus-visible,
 
 .global-rescan-button {
   min-height: 32px;
-  margin-top: 4px;
+  white-space: nowrap;
 }
 
 .global-settings-row {
@@ -529,7 +529,7 @@ textarea:focus-visible,
 .server-detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 65fr) minmax(300px, 35fr);
-  gap: 24px;
+  gap: clamp(34px, 4.4vw, 64px);
   border-top: 1px solid rgba(255, 255, 255, 0.055);
 }
 

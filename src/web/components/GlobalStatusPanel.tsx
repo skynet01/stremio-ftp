@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { GlobalStats } from "../api.js";
-import { formatScanTime, StatusBadge } from "./ui.js";
+import { formatScanTime } from "./ui.js";
 
 export type GlobalScanProgress = {
   progressPercent: number;
@@ -23,7 +23,6 @@ export function GlobalStatusPanel({
   onRescanAll: () => void;
   children?: ReactNode;
 }) {
-  const tone = stats.status === "working" ? "amber" : stats.status === "ready" ? "green" : stats.status === "error" ? "red" : "gray";
   return (
     <section className="panel global-status-panel" aria-labelledby="global-status-heading">
       <div className="panel-header">
@@ -33,7 +32,6 @@ export function GlobalStatusPanel({
           <p>Combined library state across every FTP server in this manifest.</p>
         </div>
         <div className="global-status-state">
-          <StatusBadge tone={tone}>{stats.status === "working" ? "Scanning" : stats.status === "ready" ? "Ready" : "Idle"}</StatusBadge>
           <span>Last scan {formatScanTime(stats.lastCompletedScanAt)}</span>
           <button type="button" className="secondary-button global-rescan-button" disabled={!profileReady || scanActive} onClick={onRescanAll}>
             Rescan All

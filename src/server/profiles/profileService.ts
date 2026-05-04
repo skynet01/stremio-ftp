@@ -576,6 +576,13 @@ export class ProfileService {
       .run(new Date().toISOString(), profileId, serverId);
   }
 
+  schedulePendingScan(profileId: number, serverId: number, pendingScanAfter: string) {
+    const result = this.db
+      .prepare("update profile_ftp_servers set pending_scan_after = ?, updated_at = ? where profile_id = ? and id = ?")
+      .run(pendingScanAfter, new Date().toISOString(), profileId, serverId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
+  }
+
   rotateInstallToken(profileId: number) {
     const token = randomToken();
     const result = this.db

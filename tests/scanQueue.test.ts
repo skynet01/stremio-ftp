@@ -31,6 +31,7 @@ const baseConfig: AppConfig = {
   scanJobTimeoutMs: 1800000,
   scanSchedulerIntervalMs: 60000,
   scanProgressAverageItems: 4,
+  scanTransientRetryDelayMs: 60000,
 };
 
 function createHarness(factory: FtpClientFactory, config: AppConfig = baseConfig) {
@@ -194,6 +195,24 @@ describe("ScanQueue", () => {
 
     expect(listings.get("/")).toBe(2);
     expect(listings.get("/Movies")).toBe(1);
+  });
+
+  it("schedules a delayed retry for transient FTP disconnects", async () => {
+    const { profileService, queue } = createHarness(async () => ({
+      list: async () => {
+        throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+      },
+      openReadStream: async () => Readable.from("not used"),
+      close: async () => undefined,
+    }));
+    const profileId = await createProfileWithFtp(profileService);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    const failed = await waitForStatus(queue, profileId, "failed");
+    const server = profileService.getFtpServer(profileId, profileService.defaultFtpServerId(profileId));
+
+    expect(failed.message).toBe("Scan failed: Server sent FIN packet unexpectedly, closing connection. Retry queued in 1m.");
+    expect(server.pendingScanAfter).toEqual(expect.any(String));
   });
 
   it("persists scan progress and media count", async () => {

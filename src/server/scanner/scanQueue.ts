@@ -212,7 +212,7 @@ export class ScanQueue {
           return;
         }
         const message = error instanceof Error ? error.message : "Unable to refresh FTP index";
-        this.failJob(row.id, message);
+        this.failJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), message);
       })
       .finally(() => {
         this.activeControllers.delete(row.id);
@@ -304,7 +304,12 @@ export class ScanQueue {
       );
   }
 
-  private failJob(jobId: number, error: string) {
+  private failJob(jobId: number, profileId: number, ftpServerId: number, error: string) {
+    const retryDelayMs = isTransientFtpDisconnect(error) ? this.config.scanTransientRetryDelayMs : 0;
+    const retryMessage = retryDelayMs > 0 ? ` Retry queued in ${formatDuration(retryDelayMs)}.` : "";
+    if (retryDelayMs > 0) {
+      this.profileService.schedulePendingScan(profileId, ftpServerId, new Date(Date.now() + retryDelayMs).toISOString());
+    }
     this.db
       .prepare(
         `
@@ -316,7 +321,7 @@ export class ScanQueue {
         where id = ?
       `,
       )
-      .run(error, `Scan failed: ${error}`, new Date().toISOString(), jobId);
+      .run(error, `Scan failed: ${error}${retryMessage}`, new Date().toISOString(), jobId);
   }
 
   private cancelJob(jobId: number) {
@@ -447,6 +452,10 @@ function formatDuration(durationMs: number) {
   if (!hours) return `${minutes}m`;
   if (!minutes) return `${hours}h`;
   return `${hours}h ${minutes}m`;
+}
+
+function isTransientFtpDisconnect(error: string) {
+  return /\b(FIN packet|ECONNRESET|ETIMEDOUT|EPIPE|socket.*closed|connection.*(?:closed|reset|timeout|timed out))\b/i.test(error);
 }
 
 function throwIfScanCancelled(signal: AbortSignal) {

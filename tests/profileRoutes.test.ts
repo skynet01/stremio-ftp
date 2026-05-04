@@ -30,6 +30,7 @@ function config(): AppConfig {
     scanJobTimeoutMs: 1800000,
     scanSchedulerIntervalMs: 60000,
     scanProgressAverageItems: 2000,
+    scanTransientRetryDelayMs: 300000,
   };
 }
 

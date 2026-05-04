@@ -21,6 +21,7 @@ export type AppConfig = {
   scanJobTimeoutMs: number;
   scanSchedulerIntervalMs: number;
   scanProgressAverageItems: number;
+  scanTransientRetryDelayMs: number;
 };
 
 const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
@@ -89,5 +90,6 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     scanJobTimeoutMs: numberValue(env, "SCAN_JOB_TIMEOUT_MS", 1800000),
     scanSchedulerIntervalMs: numberValue(env, "SCAN_SCHEDULER_INTERVAL_MS", 60000),
     scanProgressAverageItems: numberValue(env, "SCAN_PROGRESS_AVERAGE_ITEMS", 2000),
+    scanTransientRetryDelayMs: numberValue(env, "SCAN_TRANSIENT_RETRY_DELAY_MS", 300000),
   };
 }
