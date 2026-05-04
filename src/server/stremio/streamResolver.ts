@@ -90,10 +90,11 @@ export function streamForMatch(input: {
     match,
     deliveryMode: deliveryMode ?? "proxy",
   });
+  const name = renderStreamTemplate(input.streamNameTemplate, formatterContext, "name");
   const description = renderStreamTemplate(input.streamDescriptionTemplate, formatterContext, "description");
   return {
-    name: renderStreamTemplate(input.streamNameTemplate, formatterContext, "name"),
-    title: description,
+    name,
+    title: name,
     description,
     url:
       deliveryMode === "direct" && ftpConfig
