@@ -1,5 +1,7 @@
 import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization } from "../profiles/profileService.js";
 
+const ADDON_VERSION = "0.4.0";
+
 export function publicManifest(customization: Partial<AddonCustomization> = {}) {
   const addonName = customization.addonName?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonName;
   const addonLogoUrl = customization.addonLogoUrl?.trim() || "";
@@ -14,7 +16,7 @@ export function publicManifest(customization: Partial<AddonCustomization> = {}) 
   ];
   return {
     id: "community.stremio-ftp",
-    version: "0.2.4",
+    version: ADDON_VERSION,
     name: addonName,
     description: addonDescription,
     resources: catalogEnabled ? ["stream", "catalog", "meta"] : ["stream"],
