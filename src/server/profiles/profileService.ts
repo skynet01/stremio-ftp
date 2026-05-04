@@ -286,7 +286,7 @@ export class ProfileService {
     return {
       ...profileCustomization,
       catalogEnabled: Boolean(row.catalog_enabled),
-      catalogTmdbApiKey: row.catalog_tmdb_api_key?.trim() || "",
+      catalogTmdbApiKey: profileCustomization.catalogTmdbApiKey,
       catalogContentTypes: {
         movies: row.catalog_content_movies === null ? true : Boolean(row.catalog_content_movies),
         series: row.catalog_content_series === null ? true : Boolean(row.catalog_content_series),
@@ -620,15 +620,16 @@ export class ProfileService {
   }
 
   private ftpServerFromRow(row: FtpServerRow): FtpServer {
+    const profileCustomization = this.getAddonCustomization(row.profile_id);
     return {
       id: row.id,
       profileId: row.profile_id,
       name: row.name,
       ftpConfig: row.encrypted_ftp_config ? decryptJson<FtpConfig>(row.encrypted_ftp_config, this.encryptionKey) : null,
       customization: {
-        ...this.getAddonCustomization(row.profile_id),
+        ...profileCustomization,
         catalogEnabled: Boolean(row.catalog_enabled),
-        catalogTmdbApiKey: row.catalog_tmdb_api_key?.trim() || "",
+        catalogTmdbApiKey: profileCustomization.catalogTmdbApiKey,
         catalogContentTypes: {
           movies: Boolean(row.catalog_content_movies),
           series: Boolean(row.catalog_content_series),

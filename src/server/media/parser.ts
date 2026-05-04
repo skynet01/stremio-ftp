@@ -1,6 +1,7 @@
 import { basename, normalizeTitle } from "./normalizer.js";
 
 const SUPPORTED_EXTENSIONS = new Set(["mkv", "mp4", "avi", "mov", "m4v", "ts", "webm"]);
+const RELEASE_YEAR_PATTERN = /(?:^|[^\d])(19\d{2}|20\d{2})(?=$|[^\d])/g;
 
 export type ParsedMedia = {
   mediaKind: "movie" | "series";
@@ -34,12 +35,19 @@ function qualityOf(value: string): string | null {
 function stripKnownTokens(value: string): string {
   return value
     .replace(/[\._-]+/g, " ")
+    .replace(/\b\d{3,5}x\d{3,5}\b/gi, " ")
     .replace(/\bweb[\s._-]?dl\b/gi, " ")
     .replace(/\bvr[\s._-]?sbs\b/gi, " ")
+    .replace(/\bfull[\s._-]?sbs\b/gi, " ")
     .replace(/\bhalf[\s._-]?sbs\b/gi, " ")
+    .replace(/\bhalf[\s._-]?ou\b/gi, " ")
     .replace(/\bai[\s._-]?upscaled\b/gi, " ")
     .replace(/\bdts[\s._-]?hd\b/gi, " ")
-    .replace(/\b(2160p|1080p|720p|480p|4k|bluray|webrip|hdtv|x264|x265|hevc|aac|dts|truehd|atmos|ma|rife|remastered|multiaudio\d*|dirtyhippie|fgt|3dff|fsbs|hsbs|sbs|3d|3840x)\b/gi, " ")
+    .replace(/\b(?:dc|wd)\s+s\b/gi, " ")
+    .replace(
+      /\b(2160p|1080p|720p|480p|4k|bluray|webrip|hdtv|x264|x265|hevc|aac|dts|truehd|atmos|ma|rife|remastered|multiaudio\d*|dirtyhippie|fgt|3dff|fsbs|hsbs|sbs|hou|ou|3d|3840x|isorip|ldf|decker)\b/gi,
+      " ",
+    )
     .replace(/\b\d+(?:fps|v\d+)\b/gi, " ")
     .replace(/\btt\d{7,8}\b/gi, " ");
 }
@@ -49,6 +57,14 @@ function folderTitleOf(ftpPath: string): string | null {
   const folders = parts.slice(0, -1);
   const title = folders.reverse().find((part) => !/^season\s*\d+$/i.test(part));
   return title ? normalizeTitle(title) : null;
+}
+
+function seriesTitleOf(ftpPath: string, filenameTitle: string, options: ParseMediaOptions): string {
+  if (options.libraryLayout === "folders") {
+    const folderTitle = folderTitleOf(ftpPath);
+    if (folderTitle) return folderTitle;
+  }
+  return normalizeTitle(stripKnownTokens(filenameTitle));
 }
 
 function positiveInteger(value: string | undefined): number | null {
@@ -83,7 +99,7 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
       filename,
       normalizedFilename,
       extension,
-      parsedTitle: normalizeTitle(sxe.groups.title),
+      parsedTitle: seriesTitleOf(ftpPath, sxe.groups.title, options),
       parsedYear: null,
       season,
       episode,
@@ -127,7 +143,7 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
       filename,
       normalizedFilename,
       extension,
-      parsedTitle: normalizeTitle(xPattern.groups.title),
+      parsedTitle: seriesTitleOf(ftpPath, xPattern.groups.title, options),
       parsedYear: null,
       season,
       episode,
@@ -229,9 +245,10 @@ function parseMoviePath(
   withoutExtension: string,
   options: ParseMediaOptions,
 ): ParsedMedia {
-  const yearMatch = Array.from(withoutExtension.matchAll(/\b(19\d{2}|20\d{2})\b/g)).at(-1);
+  const yearMatch = Array.from(withoutExtension.matchAll(RELEASE_YEAR_PATTERN)).at(-1);
   const year = yearMatch?.[1];
-  const movieTitle = movieTitleParts(ftpPath, withoutExtension, yearMatch?.index ?? null, year ? Number(year) : null, options);
+  const yearIndex = yearMatch ? (yearMatch.index ?? 0) + yearMatch[0].lastIndexOf(yearMatch[1]) : null;
+  const movieTitle = movieTitleParts(ftpPath, withoutExtension, yearIndex, year ? Number(year) : null, options);
 
   return {
     mediaKind: "movie",
@@ -251,10 +268,11 @@ function parseMoviePath(
 }
 
 function titleAndYearFrom(value: string, yearIndex: number | null, fallbackYear: number | null) {
-  const match = yearIndex === null ? Array.from(value.matchAll(/\b(19\d{2}|20\d{2})\b/g)).at(-1) : null;
-  const index = yearIndex ?? match?.index ?? null;
+  const match = yearIndex === null ? Array.from(value.matchAll(RELEASE_YEAR_PATTERN)).at(-1) : null;
+  const index = yearIndex ?? (match ? (match.index ?? 0) + match[0].lastIndexOf(match[1]) : null);
   const year = fallbackYear ?? (match?.[1] ? Number(match[1]) : null);
-  const titleSource = index !== null ? value.slice(0, index) : value;
+  const yearLength = year ? String(year).length : 0;
+  const titleSource = index !== null ? (index === 0 ? value.slice(index + yearLength) : value.slice(0, index)) : value;
   return {
     title: normalizeTitle(stripKnownTokens(titleSource)),
     year,

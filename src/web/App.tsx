@@ -31,7 +31,7 @@ import { SetupTokenPanel } from "./components/SetupTokenPanel.js";
 import { StreamFormatterPanel } from "./components/StreamFormatterPanel.js";
 import { Topbar } from "./components/Topbar.js";
 import { DEFAULT_STREAM_DESCRIPTION_TEMPLATE, DEFAULT_STREAM_NAME_TEMPLATE } from "../shared/streamFormatter.js";
-import { scanIsActive } from "./components/ui.js";
+import { filledClass, scanIsActive } from "./components/ui.js";
 import type { AddonCustomization, FtpConfigRequest, FtpServerSettings, GlobalStats, ScanStatus } from "./api.js";
 import type { ChangelogEntry } from "./types.js";
 
@@ -76,7 +76,6 @@ const APP_VERSION = __APP_VERSION__;
 const GITHUB_COMMITS_API = "https://api.github.com/repos/skynet01/stremio-ftp/commits?per_page=6";
 const SERVER_LIBRARY_SETTING_KEYS = new Set<keyof ServerForm>([
   "catalogEnabled",
-  "catalogTmdbApiKey",
   "catalogContentTypes",
   "libraryLayout",
   "streamDeliveryMode",
@@ -108,7 +107,6 @@ function emptyServerForm(id = 0): ServerForm {
     allowInvalidCertificate: false,
     rootPaths: "/",
     catalogEnabled: false,
-    catalogTmdbApiKey: "",
     catalogContentTypes: { movies: true, series: true, anime: false },
     libraryLayout: "auto",
     streamDeliveryMode: "proxy",
@@ -151,7 +149,6 @@ function serverFormFromPayload(server: FtpServerSettings): ServerForm {
     allowInvalidCertificate: Boolean(server.ftpConfig?.allowInvalidCertificate),
     rootPaths: server.ftpConfig?.roots.join("\n") ?? "/",
     catalogEnabled: server.customization.catalogEnabled,
-    catalogTmdbApiKey: server.customization.catalogTmdbApiKey ?? "",
     catalogContentTypes: server.customization.catalogContentTypes ?? { movies: true, series: true, anime: false },
     libraryLayout: server.customization.libraryLayout ?? "auto",
     streamDeliveryMode: server.customization.streamDeliveryMode ?? "proxy",
@@ -180,7 +177,6 @@ function serverFormFromLegacyPayload(
     allowInvalidCertificate: Boolean(loaded.ftpConfig?.allowInvalidCertificate),
     rootPaths: loaded.ftpConfig?.roots.join("\n") ?? "/",
     catalogEnabled: customization.catalogEnabled,
-    catalogTmdbApiKey: customization.catalogTmdbApiKey ?? "",
     catalogContentTypes: customization.catalogContentTypes ?? { movies: true, series: true, anime: false },
     libraryLayout: customization.libraryLayout ?? "auto",
     streamDeliveryMode: customization.streamDeliveryMode ?? "proxy",
@@ -232,6 +228,7 @@ export function App() {
   const [addonName, setAddonName] = useState(DEFAULT_CUSTOMIZATION.addonName);
   const [addonLogoUrl, setAddonLogoUrl] = useState(DEFAULT_CUSTOMIZATION.addonLogoUrl);
   const [addonDescription, setAddonDescription] = useState(DEFAULT_CUSTOMIZATION.addonDescription);
+  const [catalogTmdbApiKey, setCatalogTmdbApiKey] = useState(DEFAULT_CUSTOMIZATION.catalogTmdbApiKey ?? "");
   const [streamNameTemplate, setStreamNameTemplate] = useState(DEFAULT_STREAM_NAME_TEMPLATE);
   const [streamDescriptionTemplate, setStreamDescriptionTemplate] = useState(DEFAULT_STREAM_DESCRIPTION_TEMPLATE);
   const [editingName, setEditingName] = useState(false);
@@ -318,23 +315,25 @@ export function App() {
     setAddonName(customization.addonName || DEFAULT_CUSTOMIZATION.addonName);
     setAddonLogoUrl(customization.addonLogoUrl || "");
     setAddonDescription(customization.addonDescription || DEFAULT_CUSTOMIZATION.addonDescription);
+    setCatalogTmdbApiKey(customization.catalogTmdbApiKey || "");
     setStreamNameTemplate(customization.streamNameTemplate || DEFAULT_STREAM_NAME_TEMPLATE);
     setStreamDescriptionTemplate(customization.streamDescriptionTemplate || DEFAULT_STREAM_DESCRIPTION_TEMPLATE);
   }
 
-  function normalizedCustomization(server = servers[0]): AddonCustomization {
+  function normalizedCustomization(server: ServerForm | undefined = servers[0], overrides: Partial<AddonCustomization> = {}): AddonCustomization {
     return {
       ...DEFAULT_CUSTOMIZATION,
       addonName: addonName.trim() || DEFAULT_CUSTOMIZATION.addonName,
       addonLogoUrl: addonLogoUrl.trim(),
       addonDescription: addonDescription.trim() || DEFAULT_CUSTOMIZATION.addonDescription,
       catalogEnabled: server?.catalogEnabled ?? DEFAULT_CUSTOMIZATION.catalogEnabled,
-      catalogTmdbApiKey: server?.catalogTmdbApiKey ?? DEFAULT_CUSTOMIZATION.catalogTmdbApiKey,
+      catalogTmdbApiKey: catalogTmdbApiKey.trim(),
       catalogContentTypes: server?.catalogContentTypes ?? DEFAULT_CUSTOMIZATION.catalogContentTypes,
       libraryLayout: server?.libraryLayout ?? DEFAULT_CUSTOMIZATION.libraryLayout,
       streamDeliveryMode: server?.streamDeliveryMode ?? DEFAULT_CUSTOMIZATION.streamDeliveryMode,
       streamNameTemplate: streamNameTemplate.trim() || DEFAULT_STREAM_NAME_TEMPLATE,
       streamDescriptionTemplate: streamDescriptionTemplate.trim() || DEFAULT_STREAM_DESCRIPTION_TEMPLATE,
+      ...overrides,
     };
   }
 
@@ -495,6 +494,21 @@ export function App() {
     }
   }
 
+  async function saveGlobalTmdbApiKey(nextKey: string) {
+    const trimmed = nextKey.trim();
+    setCatalogTmdbApiKey(trimmed);
+    if (!profileReady) {
+      setCustomizationMessage("Create or unlock your profile to save the TMDB API key.");
+      return;
+    }
+    try {
+      await saveCustomization({ browserUid: recoveryUid, passphrase, customization: normalizedCustomization(servers[0], { catalogTmdbApiKey: trimmed }) });
+      setCustomizationMessage("TMDB API key saved. Refresh the addon in Stremio to update catalog matches.");
+    } catch (error) {
+      setCustomizationMessage(error instanceof Error ? error.message : "Unable to save TMDB API key.");
+    }
+  }
+
   async function addServer() {
     const result = await createFtpServer({ browserUid: recoveryUid, passphrase });
     const form = serverFormFromPayload(result.server);
@@ -521,7 +535,6 @@ export function App() {
         ftpConfig: ftpConfigFromServer(server),
         customization: {
           catalogEnabled: server.catalogEnabled,
-          catalogTmdbApiKey: server.catalogTmdbApiKey,
           catalogContentTypes: server.catalogContentTypes,
           libraryLayout: server.libraryLayout,
           streamDeliveryMode: server.streamDeliveryMode,
@@ -676,6 +689,19 @@ export function App() {
       {showSetupTokenMessage ? null : (
         <div className="portal-stack">
           <GlobalStatusPanel stats={globalStats} scanProgress={globalScanProgress}>
+            <div className="global-settings-row">
+              <div className="field-stack global-tmdb-field">
+                <label htmlFor="globalCatalogTmdbApiKey">TMDB API key</label>
+                <input
+                  id="globalCatalogTmdbApiKey"
+                  className={filledClass(catalogTmdbApiKey)}
+                  value={catalogTmdbApiKey}
+                  placeholder="Use server default"
+                  onChange={(event) => setCatalogTmdbApiKey(event.currentTarget.value)}
+                  onBlur={(event) => void saveGlobalTmdbApiKey(event.currentTarget.value)}
+                />
+              </div>
+            </div>
             <StreamFormatterPanel
               addonName={addonName}
               streamNameTemplate={streamNameTemplate}

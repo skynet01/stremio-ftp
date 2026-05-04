@@ -535,7 +535,6 @@ describe("profile routes", () => {
         },
         customization: {
           catalogEnabled: true,
-          catalogTmdbApiKey: "server-key",
           catalogContentTypes: { movies: true, series: false, anime: false },
           libraryLayout: "folders",
           streamDeliveryMode: "direct",
@@ -553,7 +552,7 @@ describe("profile routes", () => {
       },
       customization: {
         catalogEnabled: true,
-        catalogTmdbApiKey: "server-key",
+        catalogTmdbApiKey: "",
         libraryLayout: "folders",
         streamDeliveryMode: "direct",
       },

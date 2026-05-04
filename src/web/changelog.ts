@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { hash: "local", subject: "fix: make TMDB key global and improve uncategorized parsing" },
   { hash: "local", subject: "feat: add incremental scan snapshots" },
   { hash: "local", subject: "fix: refine scan schedule and progress UI" },
   { hash: "local", subject: "fix: skip zero-numbered episode files" },

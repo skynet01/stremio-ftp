@@ -161,6 +161,60 @@ describe("media parser", () => {
     });
   });
 
+  it("strips VR dimensions and 3D tokens from movie titles", () => {
+    expect(parseMediaPath("/3D Movies/VR-SBS_3840x1080_The_Amazing_Spider-Man__2012_.mkv")).toMatchObject({
+      mediaKind: "movie",
+      parsedTitle: "amazing spider man",
+      parsedYear: 2012,
+    });
+    expect(parseMediaPath("/3D Movies/VR-SBS_3840x1080_WD_s_Toy_Story_2_1999.mkv")).toMatchObject({
+      mediaKind: "movie",
+      parsedTitle: "toy story 2",
+      parsedYear: 1999,
+    });
+  });
+
+  it("parses movie titles when the filename starts with the release year", () => {
+    expect(parseMediaPath("/3D Movies/2000.Scary.Movie.DECKER_Full_SBS.mkv")).toMatchObject({
+      mediaKind: "movie",
+      parsedTitle: "scary movie",
+      parsedYear: 2000,
+    });
+  });
+
+  it("handles mixed-case SxxEyy episode filenames", () => {
+    expect(parseMediaPath("/TV/Ash Vs Evil Dead/Ash Vs Evil Dead S03e04.mkv")).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "ash vs evil dead",
+      season: 3,
+      episode: 4,
+    });
+  });
+
+  it("uses folder names for folder-layout movies and series episodes", () => {
+    expect(
+      parseMediaPath("/Movies/The Amazing Spider-Man (2012)/VR-SBS_3840x1080_random_extra_name.mkv", {
+        contentTypes: { movies: true, series: true, anime: false },
+        libraryLayout: "folders",
+      }),
+    ).toMatchObject({
+      mediaKind: "movie",
+      parsedTitle: "amazing spider man",
+      parsedYear: 2012,
+    });
+    expect(
+      parseMediaPath("/TV/Ash Vs Evil Dead/Season 03/random.S03E04.mkv", {
+        contentTypes: { movies: true, series: true, anime: false },
+        libraryLayout: "folders",
+      }),
+    ).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "ash vs evil dead",
+      season: 3,
+      episode: 4,
+    });
+  });
+
   it("ignores unsupported files", () => {
     expect(parseMediaPath("/TV/Show/notes.txt")).toBeNull();
   });

@@ -173,7 +173,7 @@ function manifestCustomization(profiles: ProfileService, profileId: number): Add
   return {
     ...base,
     catalogEnabled: servers.some((server) => server.customization.catalogEnabled),
-    catalogTmdbApiKey: servers.find((server) => server.customization.catalogTmdbApiKey)?.customization.catalogTmdbApiKey || base.catalogTmdbApiKey,
+    catalogTmdbApiKey: base.catalogTmdbApiKey,
     catalogContentTypes: contentTypes,
   };
 }

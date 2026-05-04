@@ -332,6 +332,13 @@ textarea:focus-visible,
   text-transform: uppercase;
 }
 
+.global-settings-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
+  gap: 20px;
+  margin-top: 22px;
+}
+
 .stream-formatter {
   margin-top: 24px;
 }
@@ -511,6 +518,17 @@ textarea:focus-visible,
 }
 
 .server-section:first-of-type {
+  border-top: 0;
+}
+
+.server-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 65fr) minmax(300px, 35fr);
+  gap: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.server-detail-grid .server-section {
   border-top: 0;
 }
 
@@ -1268,6 +1286,8 @@ input:-webkit-autofill:active {
   .profile-grid,
   .ftp-field-grid,
   .library-settings-grid,
+  .server-detail-grid,
+  .global-settings-row,
   .stream-formatter-grid {
     grid-template-columns: 1fr;
   }

@@ -30,7 +30,6 @@ export type ServerForm = {
   allowInvalidCertificate: boolean;
   rootPaths: string;
   catalogEnabled: boolean;
-  catalogTmdbApiKey: string;
   catalogContentTypes: CatalogContentTypes;
   libraryLayout: LibraryLayout;
   streamDeliveryMode: StreamDeliveryMode;
@@ -132,17 +131,6 @@ export function ServerAccordion({
                     </div>
                     <div className="library-settings-grid">
                       {field(
-                        "TMDB API key",
-                        `catalogTmdbApiKey-${server.id}`,
-                        <input
-                          id={`catalogTmdbApiKey-${server.id}`}
-                          className={filledClass(server.catalogTmdbApiKey)}
-                          value={server.catalogTmdbApiKey}
-                          placeholder="Use server default"
-                          onChange={(event) => onServerChange(server.id, { catalogTmdbApiKey: event.currentTarget.value })}
-                        />,
-                      )}
-                      {field(
                         "Library layout",
                         `libraryLayout-${server.id}`,
                         <select
@@ -206,9 +194,10 @@ export function ServerAccordion({
                     </div>
                   </div>
 
-                  <div className="server-section">
-                    <h3>Server Settings</h3>
-                    <div className="field-grid ftp-field-grid">
+                  <div className="server-detail-grid">
+                    <div className="server-section">
+                      <h3>Server Settings</h3>
+                      <div className="field-grid ftp-field-grid">
                       {field(
                         "Server name",
                         `serverName-${server.id}`,
@@ -304,12 +293,12 @@ export function ServerAccordion({
                         />,
                         "field-stack root-paths-field",
                       )}
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="server-section">
-                    <h3>Index status</h3>
-                    <dl className="status-list">
+                    <div className="server-section">
+                      <h3>Index status</h3>
+                      <dl className="status-list">
                       <div>
                         <dt>Last scan</dt>
                         <dd>{formatScanTime(server.indexStatus.lastScanAt)}</dd>
@@ -330,8 +319,8 @@ export function ServerAccordion({
                           </StatusBadge>
                         </dd>
                       </div>
-                    </dl>
-                    <div className="scan-controls">
+                      </dl>
+                      <div className="scan-controls">
                       {field(
                         "Rescan frequency",
                         `scanInterval-${server.id}`,
@@ -360,8 +349,9 @@ export function ServerAccordion({
                         </div>
                         {server.scanStatus.currentPath ? <p className="scan-current-path">{server.scanStatus.currentPath}</p> : null}
                       </div>
+                      </div>
+                      <Notice>{server.message}</Notice>
                     </div>
-                    <Notice>{server.message}</Notice>
                   </div>
 
                   <div className="button-row server-button-row">

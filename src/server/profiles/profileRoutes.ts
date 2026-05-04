@@ -58,6 +58,7 @@ const saveServerSchema = serverIdSchema.extend({
     addonName: true,
     addonLogoUrl: true,
     addonDescription: true,
+    catalogTmdbApiKey: true,
     streamNameTemplate: true,
     streamDescriptionTemplate: true,
   }),
