@@ -1,5 +1,10 @@
 import { normalizeTitle } from "../media/normalizer.js";
 import type { FtpConfig, StreamDeliveryMode } from "../profiles/profileService.js";
+import {
+  renderStreamTemplate,
+  streamExtension,
+  type StreamFormatterContext,
+} from "../../shared/streamFormatter.js";
 
 export type MediaMatch = {
   id: number;
@@ -33,6 +38,9 @@ export async function resolveStreams(input: {
   streamDeliveryMode?: StreamDeliveryMode;
   ftpConfig?: FtpConfig | null;
   ftpConfigForServer?: (serverId: number | null | undefined) => FtpConfig | null;
+  addonName?: string;
+  streamNameTemplate?: string | null;
+  streamDescriptionTemplate?: string | null;
 }) {
   if (!input.metadata) return [];
 
@@ -53,6 +61,9 @@ export async function resolveStreams(input: {
     streamDeliveryMode: input.streamDeliveryMode,
     ftpConfig: input.ftpConfig,
     ftpConfigForServer: input.ftpConfigForServer,
+    addonName: input.addonName,
+    streamNameTemplate: input.streamNameTemplate,
+    streamDescriptionTemplate: input.streamDescriptionTemplate,
   }));
 }
 
@@ -63,14 +74,21 @@ export function streamForMatch(input: {
   streamDeliveryMode?: StreamDeliveryMode;
   ftpConfig?: FtpConfig | null;
   ftpConfigForServer?: (serverId: number | null | undefined) => FtpConfig | null;
+  addonName?: string;
+  streamNameTemplate?: string | null;
+  streamDescriptionTemplate?: string | null;
 }) {
   const { match } = input;
-  const serverLabel = match.serverName ? `${match.serverName} - ` : "";
   const ftpConfig = input.ftpConfigForServer?.(match.ftpServerId) ?? input.ftpConfig;
   const deliveryMode = match.streamDeliveryMode ?? input.streamDeliveryMode;
+  const formatterContext = streamFormatterContext({
+    addonName: input.addonName,
+    match,
+    deliveryMode: deliveryMode ?? "proxy",
+  });
   return {
-    name: `FTP ${serverLabel}${match.quality ?? "Source"}`,
-    description: `${match.serverName ? `${match.serverName}\n` : ""}${match.filename}${match.sizeBytes ? `\n${formatBytes(match.sizeBytes)}` : ""}`,
+    name: renderStreamTemplate(input.streamNameTemplate, formatterContext, "name"),
+    description: renderStreamTemplate(input.streamDescriptionTemplate, formatterContext, "description"),
     url:
       deliveryMode === "direct" && ftpConfig
         ? ftpUrl(ftpConfig, match.ftpPath)
@@ -79,6 +97,36 @@ export function streamForMatch(input: {
       notWebReady: true,
       filename: match.filename,
       ...(match.sizeBytes ? { videoSize: match.sizeBytes } : {}),
+    },
+  };
+}
+
+function streamFormatterContext({
+  addonName,
+  match,
+  deliveryMode,
+}: {
+  addonName?: string;
+  match: MediaMatch;
+  deliveryMode: StreamDeliveryMode;
+}): StreamFormatterContext {
+  const serverName = match.serverName?.trim() ?? "";
+  const quality = match.quality?.trim() || "Source";
+  return {
+    addon: {
+      name: addonName?.trim() || "Stremio FTP Addon",
+    },
+    stream: {
+      mediaId: match.id,
+      serverId: match.ftpServerId ?? null,
+      serverName,
+      serverPrefix: serverName ? `${serverName} - ` : "",
+      filename: match.filename,
+      path: match.ftpPath,
+      extension: streamExtension(match.filename),
+      quality,
+      size: match.sizeBytes,
+      deliveryMode,
     },
   };
 }
@@ -127,10 +175,4 @@ function isPositiveDecimalInteger(value: string): boolean {
 function yearFrom(releaseInfo?: string): number | null {
   const year = releaseInfo?.match(/\b(19\d{2}|20\d{2})\b/)?.[1];
   return year ? Number(year) : null;
-}
-
-function formatBytes(bytes: number): string {
-  const gib = bytes / 1024 / 1024 / 1024;
-  if (gib >= 1) return `${gib.toFixed(1)} GB`;
-  return `${(bytes / 1024 / 1024).toFixed(0)} MB`;
 }

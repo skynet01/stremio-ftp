@@ -7,6 +7,7 @@ import {
   randomToken,
   verifyPassphrase,
 } from "../security/crypto.js";
+import { DEFAULT_STREAM_DESCRIPTION_TEMPLATE, DEFAULT_STREAM_NAME_TEMPLATE } from "../../shared/streamFormatter.js";
 
 export type FtpConfig = {
   host: string;
@@ -27,6 +28,8 @@ export type AddonCustomization = {
   catalogContentTypes?: CatalogContentTypes;
   libraryLayout?: LibraryLayout;
   streamDeliveryMode?: StreamDeliveryMode;
+  streamNameTemplate?: string;
+  streamDescriptionTemplate?: string;
 };
 
 export type CatalogContentTypes = {
@@ -81,6 +84,8 @@ export const DEFAULT_ADDON_CUSTOMIZATION: AddonCustomization = {
   catalogContentTypes: { movies: true, series: true, anime: false },
   libraryLayout: "auto",
   streamDeliveryMode: "proxy",
+  streamNameTemplate: DEFAULT_STREAM_NAME_TEMPLATE,
+  streamDescriptionTemplate: DEFAULT_STREAM_DESCRIPTION_TEMPLATE,
 };
 
 export class DuplicateProfileError extends Error {
@@ -167,7 +172,8 @@ export class ProfileService {
         `
         select addon_name, addon_logo_url, addon_description, catalog_enabled,
                catalog_tmdb_api_key, catalog_content_movies, catalog_content_series,
-               catalog_content_anime, library_layout, stream_delivery_mode
+               catalog_content_anime, library_layout, stream_delivery_mode,
+               stream_name_template, stream_description_template
         from profiles
         where id = ?
       `,
@@ -184,6 +190,8 @@ export class ProfileService {
           catalog_content_anime: number | null;
           library_layout: LibraryLayout | null;
           stream_delivery_mode: StreamDeliveryMode | null;
+          stream_name_template: string | null;
+          stream_description_template: string | null;
         }
       | undefined;
     if (!row) throw new ProfileNotFoundError();
@@ -200,6 +208,8 @@ export class ProfileService {
       },
       libraryLayout: row.library_layout || "auto",
       streamDeliveryMode: row.stream_delivery_mode || "proxy",
+      streamNameTemplate: row.stream_name_template?.trim() || DEFAULT_ADDON_CUSTOMIZATION.streamNameTemplate,
+      streamDescriptionTemplate: row.stream_description_template?.trim() || DEFAULT_ADDON_CUSTOMIZATION.streamDescriptionTemplate,
     };
   }
 
@@ -207,6 +217,9 @@ export class ProfileService {
     const contentTypes = customization.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
     const libraryLayout = customization.libraryLayout ?? DEFAULT_ADDON_CUSTOMIZATION.libraryLayout!;
     const streamDeliveryMode = customization.streamDeliveryMode ?? DEFAULT_ADDON_CUSTOMIZATION.streamDeliveryMode!;
+    const streamNameTemplate = customization.streamNameTemplate?.trim() || DEFAULT_ADDON_CUSTOMIZATION.streamNameTemplate!;
+    const streamDescriptionTemplate =
+      customization.streamDescriptionTemplate?.trim() || DEFAULT_ADDON_CUSTOMIZATION.streamDescriptionTemplate!;
     const result = this.db
       .prepare(
         `
@@ -221,6 +234,8 @@ export class ProfileService {
             catalog_content_anime = ?,
             library_layout = ?,
             stream_delivery_mode = ?,
+            stream_name_template = ?,
+            stream_description_template = ?,
             updated_at = ?
         where id = ?
       `,
@@ -236,6 +251,8 @@ export class ProfileService {
         contentTypes.anime ? 1 : 0,
         libraryLayout,
         streamDeliveryMode,
+        streamNameTemplate,
+        streamDescriptionTemplate,
         new Date().toISOString(),
         profileId,
     );

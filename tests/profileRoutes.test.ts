@@ -728,6 +728,8 @@ describe("profile routes", () => {
           catalogContentTypes: { movies: true, series: false, anime: true },
           libraryLayout: "folders",
           streamDeliveryMode: "direct",
+          streamNameTemplate: "{addon.name} | {stream.serverName} | {stream.quality}",
+          streamDescriptionTemplate: "{stream.filename}{tools.newLine}{stream.size::bytes}",
         },
       })
       .expect(200);
@@ -748,6 +750,8 @@ describe("profile routes", () => {
         catalogContentTypes: { movies: true, series: false, anime: true },
         libraryLayout: "folders",
         streamDeliveryMode: "direct",
+        streamNameTemplate: "{addon.name} | {stream.serverName} | {stream.quality}",
+        streamDescriptionTemplate: "{stream.filename}{tools.newLine}{stream.size::bytes}",
       },
     });
   });

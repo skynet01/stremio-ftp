@@ -43,6 +43,9 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
             match: file,
             streamDeliveryMode: customization.streamDeliveryMode,
             ftpConfigForServer,
+            addonName: customization.addonName,
+            streamNameTemplate: customization.streamNameTemplate,
+            streamDescriptionTemplate: customization.streamDescriptionTemplate,
           }),
         ),
       });
@@ -62,6 +65,9 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
         mediaRepository,
         streamDeliveryMode: customization.streamDeliveryMode,
         ftpConfigForServer,
+        addonName: customization.addonName,
+        streamNameTemplate: customization.streamNameTemplate,
+        streamDescriptionTemplate: customization.streamDescriptionTemplate,
       });
       res.json({ streams });
     } catch (error) {

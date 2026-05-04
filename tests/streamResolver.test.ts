@@ -35,6 +35,40 @@ describe("stream resolver", () => {
     });
   });
 
+  it("formats stream name and description with custom templates", async () => {
+    const streams = await resolveStreams({
+      baseUrl: "https://addon.example.test",
+      installToken: "token",
+      profileId: 1,
+      type: "movie",
+      id: "tt0133093",
+      metadata: { name: "The Matrix", releaseInfo: "1999" },
+      addonName: "Archive 3D",
+      streamNameTemplate: "{addon.name} | {stream.serverName} | {stream.quality}",
+      streamDescriptionTemplate: "{stream.filename}{tools.newLine}{stream.size::bytes}{tools.newLine}{stream.deliveryMode::upper}",
+      mediaRepository: {
+        findEpisode: () => [],
+        findMovie: () => [
+          {
+            id: 99,
+            ftpServerId: 4,
+            serverName: "Server 4",
+            filename: "The.Matrix.1999.2160p.mkv",
+            ftpPath: "/Movies/The.Matrix.1999.2160p.mkv",
+            quality: "2160p",
+            sizeBytes: 5368709120,
+          },
+        ],
+      },
+    });
+
+    expect(streams[0]).toMatchObject({
+      name: "Archive 3D | Server 4 | 2160p",
+      description: "The.Matrix.1999.2160p.mkv\n5.0 GB\nPROXY",
+      url: "https://addon.example.test/proxy/token/99",
+    });
+  });
+
   it("encodes proxy URL path segments and strips trailing slashes from base URL", async () => {
     const streams = await resolveStreams({
       baseUrl: "https://addon.example.test/",

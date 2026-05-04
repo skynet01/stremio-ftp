@@ -1,7 +1,8 @@
+import type { ReactNode } from "react";
 import type { GlobalStats } from "../api.js";
 import { formatScanTime, StatusBadge } from "./ui.js";
 
-export function GlobalStatusPanel({ stats }: { stats: GlobalStats }) {
+export function GlobalStatusPanel({ stats, children }: { stats: GlobalStats; children?: ReactNode }) {
   const tone = stats.status === "working" ? "amber" : stats.status === "ready" ? "green" : stats.status === "error" ? "red" : "gray";
   return (
     <section className="panel global-status-panel" aria-labelledby="global-status-heading">
@@ -47,6 +48,7 @@ export function GlobalStatusPanel({ stats }: { stats: GlobalStats }) {
           <dd>{formatScanTime(stats.lastCompletedScanAt)}</dd>
         </div>
       </dl>
+      {children}
     </section>
   );
 }

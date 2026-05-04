@@ -56,6 +56,8 @@ const defaultCatalogOptions = {
   catalogContentTypes: { movies: true, series: true, anime: false },
   libraryLayout: "auto",
   streamDeliveryMode: "proxy",
+  streamNameTemplate: "FTP {stream.serverPrefix}{stream.quality}",
+  streamDescriptionTemplate: "{stream.serverName}{tools.newLine}{stream.filename}{tools.newLine}{stream.size::bytes}",
 };
 const idleScanStatus = {
   id: null,
@@ -121,11 +123,60 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Show indexed FTP catalog in Stremio")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.3.0`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.0`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
       "https://github.com/skynet01/stremio-ftp",
+    );
+  });
+
+  it("edits stream formatter templates with a live preview", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("link", { name: "Install in Stremio" });
+
+    expect(screen.queryByLabelText("Stream name formatter")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stream formatter settings" }));
+    fireEvent.change(screen.getByLabelText("Stream name formatter"), {
+      target: { value: "{addon.name} | {stream.serverName} | {stream.quality}" },
+    });
+    fireEvent.change(screen.getByLabelText("Stream description formatter"), {
+      target: { value: "{stream.filename}{tools.newLine}{stream.size::bytes}" },
+    });
+
+    expect(screen.getByText("Stremio FTP Addon | Server 1 | 2160p")).toBeTruthy();
+    expect(screen.getByText("The.Matrix.1999.2160p.mkv")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save stream formatter" }));
+
+    await waitFor(() =>
+      expect(saveCustomizationMock).toHaveBeenLastCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        customization: {
+          addonName: "Stremio FTP Addon",
+          addonLogoUrl: "",
+          addonDescription:
+            "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+          catalogEnabled: false,
+          catalogTmdbApiKey: "",
+          catalogContentTypes: { movies: true, series: true, anime: false },
+          libraryLayout: "auto",
+          streamDeliveryMode: "proxy",
+          streamNameTemplate: "{addon.name} | {stream.serverName} | {stream.quality}",
+          streamDescriptionTemplate: "{stream.filename}{tools.newLine}{stream.size::bytes}",
+        },
+      }),
     );
   });
 
@@ -794,6 +845,8 @@ describe("App", () => {
           catalogContentTypes: { movies: true, series: true, anime: true },
           libraryLayout: "folders",
           streamDeliveryMode: "direct",
+          streamNameTemplate: defaultCatalogOptions.streamNameTemplate,
+          streamDescriptionTemplate: defaultCatalogOptions.streamDescriptionTemplate,
         },
       }),
     );
@@ -875,6 +928,8 @@ describe("App", () => {
           catalogContentTypes: { movies: true, series: true, anime: false },
           libraryLayout: "auto",
           streamDeliveryMode: "direct",
+          streamNameTemplate: defaultCatalogOptions.streamNameTemplate,
+          streamDescriptionTemplate: defaultCatalogOptions.streamDescriptionTemplate,
         },
       }),
     );

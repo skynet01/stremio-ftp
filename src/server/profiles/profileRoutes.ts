@@ -45,12 +45,20 @@ const customizationSchema = z.object({
     .default(DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!),
   libraryLayout: z.enum(["auto", "folders", "flat"]).default("auto"),
   streamDeliveryMode: z.enum(["proxy", "direct"]).default("proxy"),
+  streamNameTemplate: z.string().trim().max(1000).optional(),
+  streamDescriptionTemplate: z.string().trim().max(2000).optional(),
 });
 const saveCustomizationSchema = createSchema.extend({ customization: customizationSchema });
 const saveServerSchema = serverIdSchema.extend({
   name: z.string().trim().min(1).max(80),
   ftpConfig: ftpConfigSchema,
-  customization: customizationSchema.omit({ addonName: true, addonLogoUrl: true, addonDescription: true }),
+  customization: customizationSchema.omit({
+    addonName: true,
+    addonLogoUrl: true,
+    addonDescription: true,
+    streamNameTemplate: true,
+    streamDescriptionTemplate: true,
+  }),
 });
 
 function urls(baseUrl: string, token: string) {

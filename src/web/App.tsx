@@ -28,7 +28,9 @@ import { HeroPanel } from "./components/HeroPanel.js";
 import { InstallPanel } from "./components/InstallPanel.js";
 import { ServerAccordion, type ServerForm } from "./components/ServerAccordion.js";
 import { SetupTokenPanel } from "./components/SetupTokenPanel.js";
+import { StreamFormatterPanel } from "./components/StreamFormatterPanel.js";
 import { Topbar } from "./components/Topbar.js";
+import { DEFAULT_STREAM_DESCRIPTION_TEMPLATE, DEFAULT_STREAM_NAME_TEMPLATE } from "../shared/streamFormatter.js";
 import { scanIsActive } from "./components/ui.js";
 import type { AddonCustomization, FtpConfigRequest, FtpServerSettings, GlobalStats } from "./api.js";
 import type { ChangelogEntry } from "./types.js";
@@ -52,6 +54,8 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
   catalogContentTypes: { movies: true, series: true, anime: false },
   libraryLayout: "auto",
   streamDeliveryMode: "proxy",
+  streamNameTemplate: DEFAULT_STREAM_NAME_TEMPLATE,
+  streamDescriptionTemplate: DEFAULT_STREAM_DESCRIPTION_TEMPLATE,
 };
 
 const EMPTY_GLOBAL_STATS: GlobalStats = {
@@ -227,6 +231,8 @@ export function App() {
   const [addonName, setAddonName] = useState(DEFAULT_CUSTOMIZATION.addonName);
   const [addonLogoUrl, setAddonLogoUrl] = useState(DEFAULT_CUSTOMIZATION.addonLogoUrl);
   const [addonDescription, setAddonDescription] = useState(DEFAULT_CUSTOMIZATION.addonDescription);
+  const [streamNameTemplate, setStreamNameTemplate] = useState(DEFAULT_STREAM_NAME_TEMPLATE);
+  const [streamDescriptionTemplate, setStreamDescriptionTemplate] = useState(DEFAULT_STREAM_DESCRIPTION_TEMPLATE);
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingLogo, setEditingLogo] = useState(false);
@@ -298,6 +304,8 @@ export function App() {
     setAddonName(customization.addonName || DEFAULT_CUSTOMIZATION.addonName);
     setAddonLogoUrl(customization.addonLogoUrl || "");
     setAddonDescription(customization.addonDescription || DEFAULT_CUSTOMIZATION.addonDescription);
+    setStreamNameTemplate(customization.streamNameTemplate || DEFAULT_STREAM_NAME_TEMPLATE);
+    setStreamDescriptionTemplate(customization.streamDescriptionTemplate || DEFAULT_STREAM_DESCRIPTION_TEMPLATE);
   }
 
   function normalizedCustomization(server = servers[0]): AddonCustomization {
@@ -311,6 +319,8 @@ export function App() {
       catalogContentTypes: server?.catalogContentTypes ?? DEFAULT_CUSTOMIZATION.catalogContentTypes,
       libraryLayout: server?.libraryLayout ?? DEFAULT_CUSTOMIZATION.libraryLayout,
       streamDeliveryMode: server?.streamDeliveryMode ?? DEFAULT_CUSTOMIZATION.streamDeliveryMode,
+      streamNameTemplate: streamNameTemplate.trim() || DEFAULT_STREAM_NAME_TEMPLATE,
+      streamDescriptionTemplate: streamDescriptionTemplate.trim() || DEFAULT_STREAM_DESCRIPTION_TEMPLATE,
     };
   }
 
@@ -455,6 +465,19 @@ export function App() {
       setCustomizationMessage("Addon branding saved. Reinstall or refresh the addon in Stremio to see it there.");
     } catch (error) {
       setCustomizationMessage(error instanceof Error ? error.message : "Unable to save addon branding.");
+    }
+  }
+
+  async function saveStreamFormatter() {
+    if (!profileReady) {
+      setCustomizationMessage("Create or unlock your profile to save stream formatting.");
+      return;
+    }
+    try {
+      await saveCustomization({ browserUid: recoveryUid, passphrase, customization: normalizedCustomization() });
+      setCustomizationMessage("Stream formatter saved. Refresh the addon in Stremio to see updated stream labels.");
+    } catch (error) {
+      setCustomizationMessage(error instanceof Error ? error.message : "Unable to save stream formatter.");
     }
   }
 
@@ -638,7 +661,18 @@ export function App() {
       {showSetupTokenMessage ? <SetupTokenPanel onSubmit={unlockConfiguration} /> : null}
       {showSetupTokenMessage ? null : (
         <div className="portal-stack">
-          <GlobalStatusPanel stats={globalStats} />
+          <GlobalStatusPanel stats={globalStats}>
+            <StreamFormatterPanel
+              addonName={addonName}
+              streamNameTemplate={streamNameTemplate}
+              streamDescriptionTemplate={streamDescriptionTemplate}
+              profileReady={profileReady}
+              message={customizationMessage}
+              onStreamNameTemplateChange={setStreamNameTemplate}
+              onStreamDescriptionTemplateChange={setStreamDescriptionTemplate}
+              onSave={() => void saveStreamFormatter()}
+            />
+          </GlobalStatusPanel>
           <ServerAccordion
             servers={servers}
             expandedServerId={expandedServerId}

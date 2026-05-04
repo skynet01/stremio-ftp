@@ -41,6 +41,26 @@ export type ServerForm = {
   message: string;
 };
 
+function serverSummary(server: ServerForm) {
+  if (scanIsActive(server.scanStatus)) {
+    const path = server.scanStatus.currentPath ? ` - ${server.scanStatus.currentPath}` : "";
+    return `${server.scanStatus.progressPercent}% scanning${path}`;
+  }
+  return `${server.indexStatus.mediaItems} items - Last scan ${formatCompactScanTime(server.indexStatus.lastScanAt)}`;
+}
+
+function formatCompactScanTime(lastScanAt: string | null) {
+  if (!lastScanAt) return "Never";
+  const date = new Date(lastScanAt);
+  if (Number.isNaN(date.getTime())) return lastScanAt;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
 export function ServerAccordion({
   servers,
   expandedServerId,
@@ -91,6 +111,7 @@ export function ServerAccordion({
                 {expanded ? <ChevronDown size={18} aria-hidden={true} /> : <ChevronRight size={18} aria-hidden={true} />}
                 <span className="server-title">{server.name || `Server ${index + 1}`}</span>
                 <span className="server-subtitle">{server.host || "No host configured"}</span>
+                <span className="server-metrics">{serverSummary(server)}</span>
                 <StatusBadge tone={active ? "amber" : server.scanStatus.status === "failed" ? "red" : server.indexStatus.lastScanAt ? "green" : "gray"}>
                   {active ? "Scanning" : server.scanStatus.status === "failed" ? "Needs attention" : server.indexStatus.lastScanAt ? "Ready" : "Idle"}
                 </StatusBadge>
@@ -108,6 +129,7 @@ export function ServerAccordion({
                           value={server.name}
                           onChange={(event) => onServerChange(server.id, { name: event.currentTarget.value })}
                         />,
+                        "field-stack server-name-field",
                       )}
                       {field(
                         "Host",

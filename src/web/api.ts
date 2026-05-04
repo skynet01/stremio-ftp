@@ -31,6 +31,8 @@ export type AddonCustomization = {
   };
   libraryLayout?: "auto" | "folders" | "flat";
   streamDeliveryMode?: "proxy" | "direct";
+  streamNameTemplate?: string;
+  streamDescriptionTemplate?: string;
 };
 
 export type IndexStatus = {
@@ -152,7 +154,7 @@ export type ServerRequest = CreateProfileRequest & {
 export type SaveServerRequest = ServerRequest & {
   name: string;
   ftpConfig: FtpConfigRequest;
-  customization: Omit<AddonCustomization, "addonName" | "addonLogoUrl" | "addonDescription">;
+  customization: Omit<AddonCustomization, "addonName" | "addonLogoUrl" | "addonDescription" | "streamNameTemplate" | "streamDescriptionTemplate">;
 };
 
 export type AuthenticatedCustomizationRequest = CreateProfileRequest & {

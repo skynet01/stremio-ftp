@@ -320,6 +320,88 @@ textarea:focus-visible,
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.stream-formatter {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.stream-formatter-trigger {
+  width: 100%;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: var(--accent);
+  background: transparent;
+  text-align: left;
+}
+
+.stream-formatter-trigger::after {
+  content: "+";
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.stream-formatter-trigger[aria-expanded="true"]::after {
+  content: "-";
+}
+
+.stream-formatter-body {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.stream-formatter-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(280px, 0.92fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.stream-formatter-inputs {
+  display: grid;
+  gap: 18px;
+}
+
+.stream-formatter-actions {
+  justify-content: flex-start;
+  margin-top: 0;
+}
+
+.stream-preview {
+  min-height: 100%;
+  border-left: 1px solid var(--line-soft);
+  padding-left: 22px;
+}
+
+.stream-preview-title {
+  margin-bottom: 14px;
+  color: var(--accent);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+  line-height: 1.45;
+}
+
+.stream-preview-lines {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--cream-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.76rem;
+  line-height: 1.6;
+}
+
+.stream-formatter-notice {
+  margin-top: 0;
+}
+
 .server-accordion-panel .panel-header {
   align-items: center;
 }
@@ -341,7 +423,7 @@ textarea:focus-visible,
   width: 100%;
   min-height: 72px;
   display: grid;
-  grid-template-columns: 24px minmax(120px, 0.8fr) minmax(160px, 1fr) auto;
+  grid-template-columns: 24px minmax(145px, 0.85fr) minmax(180px, 1fr) minmax(210px, 1fr) auto;
   gap: 12px;
   align-items: center;
   padding: 16px 0;
@@ -352,6 +434,8 @@ textarea:focus-visible,
 }
 
 .server-title {
+  color: var(--accent);
+  font-size: 1.04rem;
   font-weight: 700;
 }
 
@@ -363,11 +447,25 @@ textarea:focus-visible,
   white-space: nowrap;
 }
 
+.server-metrics {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cream-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.045em;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .server-accordion-body {
+  width: 100%;
   padding: 6px 0 24px;
 }
 
 .server-section {
+  width: 100%;
   padding: 22px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.055);
 }
@@ -465,29 +563,37 @@ textarea:focus-visible,
 }
 
 .ftp-field-grid {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: minmax(170px, 1.05fr) minmax(260px, 1.8fr) minmax(84px, 0.46fr);
+  gap: 18px 20px;
+}
+
+.server-name-field {
+  grid-column: 1;
 }
 
 .host-field {
-  grid-column: span 4;
+  grid-column: 2;
 }
 
 .port-field {
-  grid-column: span 2;
+  grid-column: 3;
 }
 
-.username-field,
+.username-field {
+  grid-column: 1;
+}
+
 .password-field {
-  grid-column: span 3;
+  grid-column: 2 / span 2;
 }
 
 .tls-field {
-  grid-column: span 2;
+  grid-column: 1;
   align-self: start;
 }
 
 .root-paths-field {
-  grid-column: span 4;
+  grid-column: 2 / span 2;
 }
 
 .field-stack {
@@ -1085,7 +1191,8 @@ input:-webkit-autofill:active {
   .field-grid,
   .profile-grid,
   .ftp-field-grid,
-  .library-settings-grid {
+  .library-settings-grid,
+  .stream-formatter-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1112,9 +1219,23 @@ input:-webkit-autofill:active {
   .port-field,
   .username-field,
   .password-field,
+  .server-name-field,
   .tls-field,
   .root-paths-field {
     grid-column: span 1;
+  }
+
+  .server-title,
+  .server-subtitle,
+  .server-metrics {
+    white-space: normal;
+  }
+
+  .stream-preview {
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+    padding-top: 18px;
+    padding-left: 0;
   }
 
   .panel {

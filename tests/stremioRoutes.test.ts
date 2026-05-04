@@ -669,6 +669,55 @@ describe("stremio routes", () => {
     );
   });
 
+  it("uses saved custom stream formatter templates in Stremio stream results", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: false,
+      streamNameTemplate: "{addon.name} | {stream.serverName} | {stream.quality}",
+      streamDescriptionTemplate: "{stream.filename}{tools.newLine}{stream.size::bytes}{tools.newLine}{stream.deliveryMode::upper}",
+    });
+    const serverId = service.defaultFtpServerId(created.profileId);
+    service.renameFtpServer(created.profileId, serverId, "Main FTP");
+    const repository = new MediaRepository(db);
+    repository.upsertParsedFile(created.profileId, {
+      ftpServerId: serverId,
+      mediaKind: "movie",
+      ftpPath: "/movies/The.Matrix.1999.2160p.mkv",
+      filename: "The.Matrix.1999.2160p.mkv",
+      normalizedFilename: "the matrix 1999 2160p",
+      extension: "mkv",
+      parsedTitle: "matrix",
+      parsedYear: 1999,
+      season: null,
+      episode: null,
+      imdbId: "tt0133093",
+      quality: "2160p",
+      confidence: 95,
+      sizeBytes: 5368709120,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ meta: { id: "tt0133093", name: "The Matrix", releaseInfo: "1999" } }),
+      })),
+    );
+    const app = createApp(config, db);
+
+    const response = await request(app).get(`/u/${created.installUrlToken}/stream/movie/tt0133093.json`).expect(200);
+
+    expect(response.body.streams[0]).toMatchObject({
+      name: "Archive 3D | Main FTP | 2160p",
+      description: "The.Matrix.1999.2160p.mkv\n5.0 GB\nPROXY",
+    });
+  });
+
   it("keeps catalogs in the token manifest when direct FTP stream delivery is enabled", async () => {
     const db = new Database(":memory:");
     migrate(db);
