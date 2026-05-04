@@ -5,10 +5,10 @@ coverage/
 .env
 .config/
 .config-ui/
+._*
 HANDOFF.md
 REDDIT_POST.md
 TODO.md
-Screenshot.jpg
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
