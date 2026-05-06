@@ -2,14 +2,20 @@ import type Database from "better-sqlite3";
 import type { AppConfig } from "../config.js";
 import { crawlProfileRoot, isScanCancelledError, ScanCancelledError, type CrawlProgress } from "../ftp/crawler.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
-import type { MediaRepository } from "../media/mediaRepository.js";
+import type { CatalogEnrichmentCandidate, MediaRepository } from "../media/mediaRepository.js";
+import { tmdbCatalogEnrichment } from "../metadata/tmdbClient.js";
 import type { ProfileService } from "../profiles/profileService.js";
 
 const MAX_ESTIMATED_SECONDS_REMAINING = 24 * 60 * 60;
 const SCAN_JOB_ROW_ERROR = "Invalid scan job row";
+const ENRICHMENT_RETRY_DELAY_MS = 5 * 60 * 1000;
+const ENRICHMENT_BATCH_LIMIT = 5000;
 
 export type ScanTrigger = "manual" | "scheduled";
 export type ScanJobStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
+export type EnqueueScanOptions = {
+  force?: boolean;
+};
 
 export type ProfileScanStatus = {
   id: number | null;
@@ -65,12 +71,17 @@ export class ScanQueue {
     this.pump();
   }
 
-  enqueueProfileScan(profileId: number, trigger: ScanTrigger, ftpServerId = this.profileService.defaultFtpServerId(profileId)): ProfileScanStatus {
+  enqueueProfileScan(
+    profileId: number,
+    trigger: ScanTrigger,
+    ftpServerId = this.profileService.defaultFtpServerId(profileId),
+    options: EnqueueScanOptions = {},
+  ): ProfileScanStatus {
     const result = this.db.transaction((): ProfileScanStatus | number => {
       const active = this.activeJobForServer(profileId, ftpServerId);
       if (active) return this.rowToStatus(active);
 
-      if (trigger === "manual") {
+      if (trigger === "manual" && !options.force) {
         const cooldownStatus = this.cooldownStatus(profileId, ftpServerId);
         if (cooldownStatus) return cooldownStatus;
       }
@@ -81,16 +92,17 @@ export class ScanQueue {
       }
 
       if (trigger === "manual") this.profileService.clearPendingScan(profileId, ftpServerId);
+      if (options.force) this.mediaRepository.clearDirectorySnapshots(profileId, ftpServerId);
 
       const now = new Date().toISOString();
       const insert = this.db
         .prepare(
           `
           insert into scan_jobs (profile_id, ftp_server_id, status, trigger, progress_percent, message, queued_at)
-          values (?, ?, 'queued', ?, 0, 'Waiting for scan worker.', ?)
+          values (?, ?, 'queued', ?, 0, ?, ?)
         `,
         )
-        .run(profileId, ftpServerId, trigger, now);
+        .run(profileId, ftpServerId, trigger, options.force ? "Waiting for force reindex worker." : "Waiting for scan worker.", now);
       return Number(insert.lastInsertRowid);
     })();
 
@@ -253,6 +265,7 @@ export class ScanQueue {
     const lastScanAt = new Date().toISOString();
     const mediaItems = this.mediaRepository.countForServer(profileId, ftpServerId);
     this.profileService.saveFtpServerIndexStatus(profileId, ftpServerId, { lastScanAt, mediaItems });
+    const enrichment = await this.enrichCatalogMetadata(jobId, profileId, ftpServerId, lastScanAt, signal);
     this.db
       .prepare(
         `
@@ -266,7 +279,65 @@ export class ScanQueue {
         where id = ?
       `,
       )
-      .run(filesSeen, `Indexed ${filesSeen} media file${filesSeen === 1 ? "" : "s"}.`, lastScanAt, jobId);
+      .run(filesSeen, scanFinishedMessage(filesSeen, enrichment), lastScanAt, jobId);
+  }
+
+  private async enrichCatalogMetadata(jobId: number, profileId: number, ftpServerId: number, seenAt: string, signal: AbortSignal) {
+    const customization = this.profileService.getFtpServerCustomization(profileId, ftpServerId);
+    if (!customization.catalogEnabled) return null;
+
+    const catalogKinds = enabledCatalogKinds(customization.catalogContentTypes);
+    if (!catalogKinds.length) return null;
+
+    const candidates = this.mediaRepository.catalogEnrichmentCandidates(profileId, ftpServerId, catalogKinds);
+    this.mediaRepository.syncCatalogEnrichmentCandidates(profileId, ftpServerId, candidates, seenAt);
+    const pending = this.mediaRepository.pendingCatalogEnrichment(profileId, ftpServerId, new Date().toISOString(), ENRICHMENT_BATCH_LIMIT);
+    if (!pending.length) return this.mediaRepository.catalogEnrichmentStats(profileId, ftpServerId);
+
+    const apiKey = customization.catalogTmdbApiKey?.trim() || this.config.tmdbApiKey;
+    const total = pending.length;
+    let processed = 0;
+    let retryCount = 0;
+
+    this.saveEnrichmentProgress(jobId, processed, total, null);
+    for (const candidate of pending) {
+      throwIfScanCancelled(signal);
+      const result = await tmdbCatalogEnrichment(candidate, apiKey, candidate.catalogKind);
+      const now = new Date().toISOString();
+      if (result.status === "matched") {
+        this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
+      } else if (result.status === "unmatched") {
+        this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
+      } else {
+        retryCount += 1;
+        const nextAttemptAt = new Date(Date.now() + ENRICHMENT_RETRY_DELAY_MS).toISOString();
+        this.mediaRepository.saveCatalogEnrichmentRetry(candidate.id, result.error, nextAttemptAt, now);
+      }
+      processed += 1;
+      this.saveEnrichmentProgress(jobId, processed, total, candidate);
+    }
+
+    if (retryCount > 0) {
+      this.profileService.schedulePendingScan(profileId, ftpServerId, new Date(Date.now() + ENRICHMENT_RETRY_DELAY_MS).toISOString());
+    }
+    return this.mediaRepository.catalogEnrichmentStats(profileId, ftpServerId);
+  }
+
+  private saveEnrichmentProgress(jobId: number, processed: number, total: number, candidate: CatalogEnrichmentCandidate | null) {
+    const progressPercent = total > 0 ? Math.min(99, 95 + Math.floor((processed / total) * 4)) : 95;
+    const title = candidate?.parsedTitle ? ` - ${candidate.parsedTitle}` : "";
+    this.db
+      .prepare(
+        `
+        update scan_jobs
+        set progress_percent = ?,
+            estimated_seconds_remaining = null,
+            current_path = null,
+            message = ?
+        where id = ?
+      `,
+      )
+      .run(progressPercent, `Enriching TMDB metadata: ${processed}/${total}${title}.`, jobId);
   }
 
   private saveProgress(jobId: number, startedAt: number, progress: CrawlProgress, baselineItems: number | null) {
@@ -463,6 +534,27 @@ function scanProgressMessage(progress: CrawlProgress) {
   const fileLabel = `${progress.filesSeen} media file${progress.filesSeen === 1 ? "" : "s"}`;
   const entryLabel = `${progress.entriesSeen} entr${progress.entriesSeen === 1 ? "y" : "ies"}`;
   return `Scanning FTP library: ${fileLabel}, ${entryLabel} seen.`;
+}
+
+function scanFinishedMessage(
+  filesSeen: number,
+  enrichment: { matched: number; unmatched: number; pending: number; retry: number } | null,
+) {
+  const fileLabel = `Indexed ${filesSeen} media file${filesSeen === 1 ? "" : "s"}.`;
+  if (!enrichment) return fileLabel;
+  const parts = [`Enriched ${enrichment.matched} title${enrichment.matched === 1 ? "" : "s"}`];
+  if (enrichment.unmatched > 0) parts.push(`${enrichment.unmatched} unresolved`);
+  if (enrichment.pending + enrichment.retry > 0) parts.push(`${enrichment.pending + enrichment.retry} queued for retry`);
+  return `${fileLabel} ${parts.join("; ")}.`;
+}
+
+function enabledCatalogKinds(contentTypes: { movies: boolean; series: boolean; anime: boolean; uncategorized?: boolean } | undefined) {
+  const enabled = contentTypes ?? { movies: true, series: true, anime: false, uncategorized: true };
+  const kinds: Array<"movie" | "series" | "anime"> = [];
+  if (enabled.movies) kinds.push("movie");
+  if (enabled.series) kinds.push("series");
+  if (enabled.anime) kinds.push("anime");
+  return kinds;
 }
 
 function formatDuration(durationMs: number) {

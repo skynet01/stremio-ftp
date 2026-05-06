@@ -6,6 +6,7 @@ export function HeroPanel({
   addonDescription,
   addonLogoUrl,
   customizationMessage,
+  editable,
   editingName,
   editingDescription,
   editingLogo,
@@ -26,6 +27,7 @@ export function HeroPanel({
   addonDescription: string;
   addonLogoUrl: string;
   customizationMessage: string;
+  editable: boolean;
   editingName: boolean;
   editingDescription: boolean;
   editingLogo: boolean;
@@ -45,7 +47,7 @@ export function HeroPanel({
   return (
     <section className="hero">
       <span className="section-label">Private source addon</span>
-      {editingName ? (
+      {editable && editingName ? (
         <input
           className={filledClass(addonName, "hero-title-input")}
           aria-label="Addon name"
@@ -62,12 +64,14 @@ export function HeroPanel({
             }
           }}
         />
-      ) : (
+      ) : editable ? (
         <button type="button" className="editable-title" aria-label="Edit addon name" onClick={onEditName}>
           <h1>{addonName}</h1>
         </button>
+      ) : (
+        <h1>{addonName}</h1>
       )}
-      {editingDescription ? (
+      {editable && editingDescription ? (
         <textarea
           className={filledClass(addonDescription, "hero-description-input")}
           aria-label="Addon description"
@@ -85,13 +89,15 @@ export function HeroPanel({
             }
           }}
         />
-      ) : (
+      ) : editable ? (
         <button type="button" className="editable-description" aria-label="Edit addon description" onClick={onEditDescription}>
           <p>{addonDescription}</p>
         </button>
+      ) : (
+        <p>{addonDescription}</p>
       )}
-      <Notice className="customization-notice">{customizationMessage}</Notice>
-      {editingLogo ? (
+      {editable ? <Notice className="customization-notice">{customizationMessage}</Notice> : null}
+      {editable && editingLogo ? (
         <div className="avatar-editor">
           <label htmlFor="addonLogoUrl">Addon avatar URL</label>
           <input

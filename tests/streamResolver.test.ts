@@ -64,10 +64,10 @@ describe("stream resolver", () => {
 
     expect(streams[0]).toMatchObject({
       name: "Archive 3D | Server 4 | 2160p",
-      title: "Archive 3D | Server 4 | 2160p",
       description: "The.Matrix.1999.2160p.mkv\n5.0 GB\nPROXY",
       url: "https://addon.example.test/proxy/token/99",
     });
+    expect(streams[0]).not.toHaveProperty("title");
   });
 
   it("encodes proxy URL path segments and strips trailing slashes from base URL", async () => {

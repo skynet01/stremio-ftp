@@ -77,6 +77,7 @@ describe("schema", () => {
       .prepare("select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name")
       .all() as { name: string }[];
     expect(tables.map((row) => row.name)).toEqual([
+      "catalog_enrichment",
       "media_files",
       "profile_ftp_servers",
       "profile_install_tokens",
@@ -90,12 +91,14 @@ describe("schema", () => {
     const db = createDb();
     const profileColumns = db.prepare("pragma table_info(profiles)").all() as { name: string }[];
     const scanColumns = db.prepare("pragma table_info(scan_jobs)").all() as { name: string }[];
+    const enrichmentColumns = db.prepare("pragma table_info(catalog_enrichment)").all() as { name: string }[];
 
     expect(profileColumns.map((column) => column.name)).toEqual(
       expect.arrayContaining([
         "scan_interval_minutes",
         "next_scheduled_scan_at",
         "stream_delivery_mode",
+        "catalog_content_uncategorized",
         "stream_name_template",
         "stream_description_template",
       ]),
@@ -114,6 +117,7 @@ describe("schema", () => {
         "estimated_seconds_remaining",
       ]),
     );
+    expect(enrichmentColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["algorithm_version"]));
   });
 
   it("allows halted scan jobs to be stored as cancelled", () => {

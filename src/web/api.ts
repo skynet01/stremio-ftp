@@ -28,6 +28,7 @@ export type AddonCustomization = {
     movies: boolean;
     series: boolean;
     anime: boolean;
+    uncategorized?: boolean;
   };
   libraryLayout?: "auto" | "folders" | "flat";
   streamDeliveryMode?: "proxy" | "direct";
@@ -354,7 +355,7 @@ export async function saveCustomization(request: AuthenticatedCustomizationReque
   return readJson<{ ok: true }>(response);
 }
 
-export async function rescanIndex(request: CreateProfileRequest & { serverId?: number; all?: boolean }): Promise<RescanResponse> {
+export async function rescanIndex(request: CreateProfileRequest & { serverId?: number; all?: boolean; force?: boolean }): Promise<RescanResponse> {
   const response = await fetch("/api/profile/index/rescan", {
     method: "POST",
     headers: authHeaders(),

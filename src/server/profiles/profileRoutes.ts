@@ -4,7 +4,7 @@ import type { AppConfig } from "../config.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import { MediaRepository } from "../media/mediaRepository.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
-import { DEFAULT_ADDON_CUSTOMIZATION, DuplicateProfileError, ProfileService, type FtpServer } from "./profileService.js";
+import { DuplicateProfileError, ProfileService, type FtpServer } from "./profileService.js";
 
 const createSchema = z.object({
   browserUid: z.string().min(8),
@@ -43,8 +43,9 @@ const customizationSchema = z.object({
       movies: z.boolean().default(true),
       series: z.boolean().default(true),
       anime: z.boolean().default(false),
+      uncategorized: z.boolean().default(true),
     })
-    .default(DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!),
+    .default({ movies: true, series: true, anime: false, uncategorized: true }),
   libraryLayout: z.enum(["auto", "folders", "flat"]).default("auto"),
   streamDeliveryMode: z.enum(["proxy", "direct"]).default("proxy"),
   streamNameTemplate: z.string().trim().max(MAX_STREAM_FORMATTER_TEMPLATE_LENGTH).optional(),
@@ -112,7 +113,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/ftp/test", async (req, res) => {
+  router.post("/profile/ftp/test", rateLimitProfiles, async (req, res) => {
     const parsed = saveFtpSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid FTP settings request" });
 
@@ -145,7 +146,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/ftp", async (req, res) => {
+  router.post("/profile/ftp", rateLimitProfiles, async (req, res) => {
     const parsed = saveFtpSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid FTP settings request" });
 
@@ -206,7 +207,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/servers", async (req, res) => {
+  router.post("/profile/servers", rateLimitProfiles, async (req, res) => {
     const parsed = authenticatedSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid server create request" });
 
@@ -222,7 +223,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/servers/save", async (req, res) => {
+  router.post("/profile/servers/save", rateLimitProfiles, async (req, res) => {
     const parsed = saveServerSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid server save request" });
 
@@ -247,7 +248,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/servers/delete", async (req, res) => {
+  router.post("/profile/servers/delete", rateLimitProfiles, async (req, res) => {
     const parsed = serverIdSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid server delete request" });
 
@@ -265,7 +266,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/servers/test", async (req, res) => {
+  router.post("/profile/servers/test", rateLimitProfiles, async (req, res) => {
     const parsed = serverIdSchema.extend({ ftpConfig: ftpConfigSchema }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid server test request" });
 
@@ -311,7 +312,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/customization", async (req, res) => {
+  router.post("/profile/customization", rateLimitProfiles, async (req, res) => {
     const parsed = saveCustomizationSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid customization request" });
 
@@ -324,16 +325,19 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/index/rescan", async (req, res) => {
-    const parsed = authenticatedSchema.extend({ serverId: z.number().int().positive().optional(), all: z.boolean().optional() }).safeParse(req.body);
+  router.post("/profile/index/rescan", rateLimitProfiles, async (req, res) => {
+    const parsed = authenticatedSchema
+      .extend({ serverId: z.number().int().positive().optional(), all: z.boolean().optional(), force: z.boolean().optional() })
+      .safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid rescan request" });
 
     try {
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      const scanOptions = parsed.data.force ? { force: true } : undefined;
       if (parsed.data.all) {
         const servers = service.listFtpServers(unlocked.profileId).filter((server) => server.ftpConfig);
         if (!servers.length) return res.status(400).json({ error: "FTP settings are not configured" });
-        const scanStatuses = servers.map((server) => scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id));
+        const scanStatuses = servers.map((server) => scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id, scanOptions));
         return res.json({
           scanStatus: scanStatuses[0],
           scanStatuses,
@@ -344,13 +348,13 @@ export function profileRoutes(
       const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
       const ftpConfig = service.getFtpServerConfig(unlocked.profileId, serverId);
       if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
-      res.json({ scanStatus: scanQueue.enqueueProfileScan(unlocked.profileId, "manual", serverId) });
+      res.json({ scanStatus: scanQueue.enqueueProfileScan(unlocked.profileId, "manual", serverId, scanOptions) });
     } catch (error) {
       res.status(400).json({ error: ftpErrorMessage(error, "Unable to refresh FTP index") });
     }
   });
 
-  router.post("/profile/index/cancel", async (req, res) => {
+  router.post("/profile/index/cancel", rateLimitProfiles, async (req, res) => {
     const parsed = authenticatedSchema.extend({ serverId: z.number().int().positive().optional() }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid scan cancel request" });
 
@@ -381,7 +385,7 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/index/schedule", async (req, res) => {
+  router.post("/profile/index/schedule", rateLimitProfiles, async (req, res) => {
     const parsed = saveScanScheduleSchema.extend({ serverId: z.number().int().positive().optional() }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid scan schedule request" });
 

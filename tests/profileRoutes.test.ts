@@ -183,10 +183,10 @@ describe("profile routes", () => {
     expect(response.body).toEqual({ error: "Too many profile attempts" });
   });
 
-  it("does not rate limit authenticated settings updates after profile creation", async () => {
+  it("rate limits authenticated settings updates after profile creation", async () => {
     const db = new Database(":memory:");
     migrate(db);
-    const app = createApp({ ...config(), profileRateLimitMax: 1 }, db);
+    const app = createApp({ ...config(), profileRateLimitMax: 2 }, db);
 
     await request(app)
       .post("/api/profile")
@@ -212,6 +212,26 @@ describe("profile routes", () => {
             streamDeliveryMode: "proxy",
           },
         })
+        .expect(catalogEnabled ? 200 : 429);
+    }
+  });
+
+  it("does not rate limit scan status polling during active scans", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), profileRateLimitMax: 2 }, db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await request(app)
+        .post("/api/profile/index/status")
+        .set("x-setup-token", "setup-secret-123")
+        .send({ browserUid: "browser-uid", passphrase: "passphrase" })
         .expect(200);
     }
   });
@@ -393,6 +413,59 @@ describe("profile routes", () => {
     expect(response.body.scanStatuses).toHaveLength(2);
     expect(response.body.servers.map((server: { scanStatus: { status: string } }) => server.scanStatus.status)).toEqual(["queued", "queued"]);
     expect(response.body.globalStats).toMatchObject({ activeScans: 0, pendingScans: 2, status: "working" });
+  });
+
+  it("clears scan snapshots when a force global reindex is queued", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), scanGlobalConcurrency: 0 }, db, {
+      ftpClientFactory: async () => ({
+        list: async () => [],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+    });
+
+    const created = await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    await request(app)
+      .post("/api/profile/ftp")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp-one.example.test",
+          port: 21,
+          username: "user",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: false,
+          roots: ["/"],
+        },
+      })
+      .expect(200);
+    const serverId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(created.body.profileId) as number;
+    db.prepare(
+      `
+      insert into scan_directory_snapshots (profile_id, ftp_server_id, dir_path, entry_count, fingerprint, modified_at, last_seen_at)
+      values (?, ?, '/', 1, 'old-fingerprint', null, ?)
+    `,
+    ).run(created.body.profileId, serverId, new Date().toISOString());
+
+    await request(app)
+      .post("/api/profile/index/rescan")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", all: true, force: true })
+      .expect(200);
+
+    const remaining = db.prepare("select count(*) as count from scan_directory_snapshots where profile_id = ?").get(created.body.profileId) as {
+      count: number;
+    };
+    expect(remaining.count).toBe(0);
   });
 
   it("halts a running FTP index scan", async () => {
@@ -881,7 +954,7 @@ describe("profile routes", () => {
         addonDescription: "Stream the archive from my FTP server.",
         catalogEnabled: true,
         catalogTmdbApiKey: "profile-tmdb-key",
-        catalogContentTypes: { movies: true, series: false, anime: true },
+        catalogContentTypes: { movies: true, series: false, anime: true, uncategorized: true },
         libraryLayout: "folders",
         streamDeliveryMode: "direct",
         streamNameTemplate: "{addon.name} | {stream.serverName} | {stream.quality}",

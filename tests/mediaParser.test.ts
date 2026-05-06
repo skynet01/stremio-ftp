@@ -110,6 +110,42 @@ describe("media parser", () => {
     });
   });
 
+  it("parses common anime season and episode filename variants", () => {
+    const options = {
+      contentTypes: { movies: true, series: true, anime: true },
+      libraryLayout: "folders" as const,
+    };
+
+    expect(parseMediaPath("/Anime Shows/Cyberpunk - Edgerunners (2022)/Cyberpunk - Edgerunners.S1.01.H264.FSBS.3DFF.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      catalogKind: "anime",
+      parsedTitle: "cyberpunk edgerunners",
+      season: 1,
+      episode: 1,
+    });
+    expect(parseMediaPath("/Anime Shows/Dandadan (2024)/Dandadan.S2.E13.H264.FSBS.3DFF.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      catalogKind: "anime",
+      parsedTitle: "dandadan",
+      season: 2,
+      episode: 13,
+    });
+    expect(parseMediaPath("/Anime Shows/Attack on Titan (2013)/Attack On Titan.E01.H264.FSBS.3DFF.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      catalogKind: "anime",
+      parsedTitle: "attack on titan",
+      season: 1,
+      episode: 1,
+    });
+    expect(parseMediaPath("/TV Shows/Caprica (2009)/Caprica S01e03Full_SBS 3Dconv NeFud.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      catalogKind: "series",
+      parsedTitle: "caprica",
+      season: 1,
+      episode: 3,
+    });
+  });
+
   it("skips invalid zero-numbered anime absolute episodes", () => {
     expect(
       parseMediaPath("/Anime/Afro Samurai/Afro.Samurai.00.1080p.mkv", {
@@ -236,6 +272,73 @@ describe("media parser", () => {
       parsedTitle: "ash vs evil dead",
       season: 3,
       episode: 4,
+    });
+  });
+
+  it("lets clear movie folders override weak numeric anime episode patterns", () => {
+    const options = {
+      contentTypes: { movies: true, series: true, anime: true },
+      libraryLayout: "folders" as const,
+    };
+
+    expect(parseMediaPath("/Blockbuster Movies/Wreck-It Ralph (2012)/Wreck_It_Ralph_1_3D_2012_Half-OU_1080p_hevc.mkv", options)).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "wreck it ralph",
+      parsedYear: 2012,
+      confidence: 70,
+    });
+    expect(parseMediaPath("/Superhero Movies/The Lego Movie (2014)/The_Lego_Movie_1_3D__2014__H-SBS.mkv", options)).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "lego movie",
+      parsedYear: 2014,
+    });
+    expect(
+      parseMediaPath(
+        "/Anime Movies/The Boy and the Heron (2023)/The.Boy.and.the.Heron.2023.BluRay.2160p.UHD.REMUX.HEVC.10bit.DV.Atmos.DTS-HD.MA.7.1-AishaRFX_LRF_Full_SBS.mkv",
+        options,
+      ),
+    ).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "boy and heron",
+      parsedYear: 2023,
+    });
+  });
+
+  it("ignores movie-title E numbers and audio channel tokens in clear movie folders", () => {
+    const options = {
+      contentTypes: { movies: true, series: true, anime: true },
+      libraryLayout: "folders" as const,
+    };
+
+    expect(
+      parseMediaPath("/Blockbuster Movies/Star Wars - Attack of the Clones (2002)/Star Wars E2 Attack of the Clones 3D IMAX FSBS DTS-HD.mkv", options),
+    ).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "star wars attack of clones",
+      parsedYear: 2002,
+    });
+    expect(parseMediaPath("/Movies/Seven (1995)/Seven.1995.DTS-HD.MA.7.1.1080p.mkv", options)).toMatchObject({
+      mediaKind: "movie",
+      parsedTitle: "seven",
+      parsedYear: 1995,
+    });
+  });
+
+  it("falls back to filename parsing inside generic folder-layout movie folders", () => {
+    const options = {
+      contentTypes: { movies: true, series: true, anime: false },
+      libraryLayout: "folders" as const,
+    };
+
+    expect(parseMediaPath("/Movies/Other/Wandering.Rose.2014.3D.H-SBS.1080p.bluray.x264-value.mkv", options)).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "wandering rose",
+      parsedYear: 2014,
     });
   });
 

@@ -84,7 +84,7 @@ export function IndexStatusPanel({
         )}
         <div className="scan-progress-block">
           <div className="scan-progress-meta">
-            <span>{scanStatus.status === "idle" ? "No active scan" : scanStatus.status}</span>
+            <span>{scanProgressLabel(scanStatus)}</span>
             <span>{scanIsActive(scanStatus) ? formatEta(scanStatus.estimatedSecondsRemaining) : `${scanStatus.progressPercent}%`}</span>
           </div>
           <div
@@ -115,4 +115,10 @@ export function IndexStatusPanel({
       </div>
     </section>
   );
+}
+
+function scanProgressLabel(scanStatus: ScanStatus) {
+  if (scanStatus.status === "idle") return "No active scan";
+  if (scanStatus.message?.startsWith("Enriching TMDB metadata")) return scanStatus.message;
+  return scanStatus.status;
 }

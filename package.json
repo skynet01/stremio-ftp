@@ -1,6 +1,6 @@
 {
   "name": "stremio-ftp",
-  "version": "0.4.15",
+  "version": "0.4.31",
   "private": true,
   "type": "module",
   "engines": {
@@ -17,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@ctrl/video-filename-parser": "^5.4.1",
     "basic-ftp": "^5.0.5",
     "better-sqlite3": "^12.2.0",
     "express": "^5.1.0",

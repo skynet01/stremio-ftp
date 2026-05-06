@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 import type { ParsedMedia } from "./parser.js";
 
+const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 2;
+
 export type ParsedMediaFileInput = Omit<ParsedMedia, "catalogKind"> & {
   catalogKind?: ParsedMedia["catalogKind"];
   ftpServerId?: number | null;
@@ -28,14 +30,39 @@ export type CatalogItem = {
   imdbId: string | null;
 };
 
+export type CatalogEnrichmentCandidate = CatalogItem & {
+  id: number;
+  ftpServerId: number;
+  itemKey: string;
+};
+
+export type PersistedCatalogMeta = {
+  id: string;
+  type: "movie" | "series";
+  name: string;
+  poster?: string;
+  background?: string;
+  description?: string;
+  releaseInfo?: string;
+};
+
+export type CatalogEnrichmentStats = {
+  total: number;
+  matched: number;
+  unmatched: number;
+  pending: number;
+  retry: number;
+};
+
 export type OtherCatalogItem = {
   id: number;
   mediaKind: "movie" | "series";
-  filename: string;
+  folderName: string;
+  folderKey: string;
   parsedTitle: string;
   parsedYear: number | null;
-  quality: string | null;
-  sizeBytes: number | null;
+  fileCount: number;
+  serverCount: number;
 };
 
 export type DirectorySnapshotInput = {
@@ -66,26 +93,6 @@ function toMediaMatch(row: MediaFileRow): MediaMatch {
     streamDeliveryMode: row.stream_delivery_mode ?? null,
     ftpPath: row.ftp_path,
     filename: row.filename,
-    quality: row.quality,
-    sizeBytes: row.size_bytes,
-  };
-}
-
-function toOtherCatalogItem(row: {
-  id: number;
-  media_kind: "movie" | "series";
-  filename: string;
-  parsed_title: string;
-  parsed_year: number | null;
-  quality: string | null;
-  size_bytes: number | null;
-}): OtherCatalogItem {
-  return {
-    id: row.id,
-    mediaKind: row.media_kind,
-    filename: row.filename,
-    parsedTitle: row.parsed_title,
-    parsedYear: row.parsed_year,
     quality: row.quality,
     sizeBytes: row.size_bytes,
   };
@@ -253,20 +260,33 @@ export class MediaRepository {
         `
         select mf.id, mf.ftp_server_id, s.name as server_name, s.stream_delivery_mode, mf.ftp_path, mf.filename, mf.quality, mf.size_bytes
         from media_files mf
+        left join catalog_enrichment ce
+          on ce.profile_id = mf.profile_id
+         and ce.ftp_server_id = mf.ftp_server_id
+         and ce.item_key = ${catalogEnrichmentSqlKey("mf")}
+         and ce.status = 'matched'
         left join profile_ftp_servers s on s.id = mf.ftp_server_id
         where mf.profile_id = ?
-          and mf.media_kind = 'movie'
           and (
-            (mf.imdb_id is not null and mf.imdb_id = ?)
+            (
+              mf.media_kind = 'movie'
+              and (
+                (mf.imdb_id is not null and mf.imdb_id = ?)
+                or (
+                  mf.parsed_title = ?
+                  and (? is null or mf.parsed_year is null or mf.parsed_year = ?)
+                )
+              )
+            )
             or (
-              mf.parsed_title = ?
-              and (? is null or mf.parsed_year is null or mf.parsed_year = ?)
+              ce.meta_type = 'movie'
+              and ce.meta_id = ?
             )
           )
         order by s.name asc, mf.confidence desc, mf.size_bytes desc
       `,
       )
-      .all(profileId, imdbId, normalizedTitle, year, year) as MediaFileRow[];
+      .all(profileId, imdbId, normalizedTitle, year, year, imdbId) as MediaFileRow[];
     return rows.map(toMediaMatch);
   }
 
@@ -298,11 +318,34 @@ export class MediaRepository {
   }
 
   aggregateCountsForProfile(profileId: number) {
+    const total = this.countForProfile(profileId);
+    const enriched = this.db
+      .prepare(
+        `
+        select
+          count(*) as rows,
+          count(distinct case when status = 'matched' and catalog_kind = 'movie' then meta_id end) as movies,
+          count(distinct case when status = 'matched' and catalog_kind = 'series' then meta_id end) as series,
+          count(distinct case when status = 'matched' and catalog_kind = 'anime' then meta_id end) as anime,
+          count(distinct case when status = 'unmatched' then item_key end) as uncategorized
+        from catalog_enrichment
+        where profile_id = ?
+      `,
+      )
+      .get(profileId) as { rows: number; movies: number; series: number; anime: number; uncategorized: number };
+    if (enriched.rows > 0) {
+      return {
+        total,
+        movies: enriched.movies,
+        series: enriched.series,
+        anime: enriched.anime,
+        uncategorized: enriched.uncategorized,
+      };
+    }
     const counts = this.db
       .prepare(
         `
         select
-          count(*) as total,
           sum(case when category = 'movie' and needs_review = 0 then 1 else 0 end) as movies,
           sum(case when category = 'series' and needs_review = 0 then 1 else 0 end) as series,
           sum(case when category = 'anime' and needs_review = 0 then 1 else 0 end) as anime,
@@ -310,7 +353,7 @@ export class MediaRepository {
         from (
           select
             catalog_kind as category,
-            case when max(confidence) < 70 and max(case when imdb_id is not null then 1 else 0 end) = 0 then 1 else 0 end as needs_review
+            case when max(confidence) <= 70 and max(case when imdb_id is not null then 1 else 0 end) = 0 then 1 else 0 end as needs_review
           from media_files
           where profile_id = ?
             and parsed_title is not null
@@ -324,9 +367,9 @@ export class MediaRepository {
         )
       `,
       )
-      .get(profileId) as { total: number; movies: number | null; series: number | null; anime: number | null; uncategorized: number | null };
+      .get(profileId) as { movies: number | null; series: number | null; anime: number | null; uncategorized: number | null };
     return {
-      total: counts.total,
+      total,
       movies: counts.movies ?? 0,
       series: counts.series ?? 0,
       anime: counts.anime ?? 0,
@@ -422,6 +465,12 @@ export class MediaRepository {
       .run(lastSeenAt, profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath));
   }
 
+  clearDirectorySnapshots(profileId: number, ftpServerId?: number | null) {
+    return this.db
+      .prepare("delete from scan_directory_snapshots where profile_id = ? and (? is null or ftp_server_id = ?)")
+      .run(profileId, ftpServerId ?? null, ftpServerId ?? null).changes;
+  }
+
   markSeenUnderRoot(profileId: number, rootPath: string, seenAt: string, ftpServerId?: number | null) {
     const root = normalizeRootPath(rootPath);
     if (root === "/") {
@@ -444,21 +493,29 @@ export class MediaRepository {
       .run(seenAt, profileId, ftpServerId ?? null, ftpServerId ?? null, root, rootWithSlash.length, rootWithSlash).changes;
   }
 
-  catalogItems(profileId: number, catalogKind: "movie" | "series" | "anime", limit: number, skip: number): CatalogItem[] {
+  catalogItems(
+    profileId: number,
+    catalogKind: "movie" | "series" | "anime",
+    limit: number,
+    skip: number,
+    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean } = {},
+  ): CatalogItem[] {
+    const serverFilter = mediaServerFilter("mf", options.ftpServerIds, options.includeLegacyNullServer);
     const rows = this.db
       .prepare(
         `
-        select media_kind, catalog_kind, parsed_title, parsed_year, imdb_id, max(confidence) as max_confidence
-        from media_files
-        where profile_id = ?
-          and catalog_kind = ?
-          and parsed_title is not null
+        select mf.media_kind, mf.catalog_kind, mf.parsed_title, mf.parsed_year, mf.imdb_id, max(mf.confidence) as max_confidence
+        from media_files mf
+        where mf.profile_id = ?
+          and mf.catalog_kind = ?
+          and mf.parsed_title is not null
+          ${serverFilter.sql}
         group by media_kind, catalog_kind, parsed_title, parsed_year, imdb_id
         order by max_confidence desc, parsed_title asc
         limit ? offset ?
       `,
       )
-      .all(profileId, catalogKind, limit, skip) as Array<{
+      .all(profileId, catalogKind, ...serverFilter.params, limit, skip) as Array<{
       media_kind: "movie" | "series";
       catalog_kind: "movie" | "series" | "anime";
       parsed_title: string;
@@ -475,92 +532,520 @@ export class MediaRepository {
     }));
   }
 
-  otherCatalogItems(profileId: number, limit: number, skip: number): OtherCatalogItem[] {
+  catalogEnrichmentCandidates(
+    profileId: number,
+    ftpServerId: number,
+    catalogKinds: Array<"movie" | "series" | "anime">,
+  ): CatalogEnrichmentCandidate[] {
+    if (!catalogKinds.length) return [];
     const rows = this.db
       .prepare(
         `
-        select mf.id, mf.media_kind, mf.filename, mf.parsed_title, mf.parsed_year, mf.quality, mf.size_bytes
+        select
+          min(mf.id) as id,
+          mf.ftp_server_id,
+          mf.media_kind,
+          mf.catalog_kind,
+          mf.parsed_title,
+          mf.parsed_year,
+          mf.imdb_id,
+          max(mf.confidence) as max_confidence
         from media_files mf
-        join (
-          select parsed_title, parsed_year, min(id) as id
-          from media_files
-          where profile_id = ?
-            and imdb_id is null
-            and parsed_title is not null
-          group by parsed_title, parsed_year
-        ) grouped on grouped.id = mf.id
-        order by mf.parsed_title asc, mf.filename asc
+        where mf.profile_id = ?
+          and mf.ftp_server_id = ?
+          and mf.catalog_kind in (${catalogKinds.map(() => "?").join(", ")})
+          and mf.parsed_title is not null
+        group by mf.ftp_server_id, mf.media_kind, mf.catalog_kind, mf.parsed_title, mf.parsed_year, mf.imdb_id
+        order by max_confidence desc, mf.parsed_title asc
+      `,
+      )
+      .all(profileId, ftpServerId, ...catalogKinds) as Array<{
+      id: number;
+      ftp_server_id: number;
+      media_kind: "movie" | "series";
+      catalog_kind: "movie" | "series" | "anime";
+      parsed_title: string;
+      parsed_year: number | null;
+      imdb_id: string | null;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      ftpServerId: row.ftp_server_id,
+      mediaKind: row.media_kind,
+      catalogKind: row.catalog_kind,
+      parsedTitle: row.parsed_title,
+      parsedYear: row.parsed_year,
+      imdbId: row.imdb_id,
+      itemKey: catalogEnrichmentKey(row.catalog_kind, row.parsed_title, row.parsed_year, row.imdb_id),
+    }));
+  }
+
+  syncCatalogEnrichmentCandidates(profileId: number, ftpServerId: number, candidates: CatalogEnrichmentCandidate[], seenAt: string) {
+    const upsert = this.db.prepare(
+      `
+      insert into catalog_enrichment (
+        profile_id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year,
+        source_imdb_id, status, algorithm_version, last_seen_at, created_at, updated_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+      on conflict(profile_id, ftp_server_id, item_key) do update set
+        media_kind = excluded.media_kind,
+        catalog_kind = excluded.catalog_kind,
+        parsed_title = excluded.parsed_title,
+        parsed_year = excluded.parsed_year,
+        source_imdb_id = excluded.source_imdb_id,
+        status = case
+          when catalog_enrichment.status = 'unmatched'
+            and catalog_enrichment.algorithm_version < excluded.algorithm_version
+          then 'pending'
+          else catalog_enrichment.status
+        end,
+        algorithm_version = excluded.algorithm_version,
+        error = case
+          when catalog_enrichment.status = 'unmatched'
+            and catalog_enrichment.algorithm_version < excluded.algorithm_version
+          then null
+          else catalog_enrichment.error
+        end,
+        next_attempt_at = case
+          when catalog_enrichment.status = 'unmatched'
+            and catalog_enrichment.algorithm_version < excluded.algorithm_version
+          then null
+          else catalog_enrichment.next_attempt_at
+        end,
+        last_seen_at = excluded.last_seen_at
+    `,
+    );
+    const removeStale = this.db.prepare("delete from catalog_enrichment where profile_id = ? and ftp_server_id = ? and last_seen_at <> ?");
+    this.db.transaction(() => {
+      for (const candidate of candidates) {
+        upsert.run(
+          profileId,
+          ftpServerId,
+          candidate.itemKey,
+          candidate.mediaKind,
+          candidate.catalogKind,
+          candidate.parsedTitle,
+          candidate.parsedYear,
+          candidate.imdbId,
+          CATALOG_ENRICHMENT_ALGORITHM_VERSION,
+          seenAt,
+          seenAt,
+          seenAt,
+        );
+      }
+      removeStale.run(profileId, ftpServerId, seenAt);
+    })();
+  }
+
+  pendingCatalogEnrichment(profileId: number, ftpServerId: number, nowIso: string, limit: number): CatalogEnrichmentCandidate[] {
+    const rows = this.db
+      .prepare(
+        `
+        select id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year, source_imdb_id
+        from catalog_enrichment
+        where profile_id = ?
+          and ftp_server_id = ?
+          and (
+            status = 'pending'
+            or (status = 'retry' and (next_attempt_at is null or next_attempt_at <= ?))
+          )
+        order by updated_at asc, id asc
+        limit ?
+      `,
+      )
+      .all(profileId, ftpServerId, nowIso, limit) as Array<{
+      id: number;
+      ftp_server_id: number;
+      item_key: string;
+      media_kind: "movie" | "series";
+      catalog_kind: "movie" | "series" | "anime";
+      parsed_title: string;
+      parsed_year: number | null;
+      source_imdb_id: string | null;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      ftpServerId: row.ftp_server_id,
+      itemKey: row.item_key,
+      mediaKind: row.media_kind,
+      catalogKind: row.catalog_kind,
+      parsedTitle: row.parsed_title,
+      parsedYear: row.parsed_year,
+      imdbId: row.source_imdb_id,
+    }));
+  }
+
+  saveCatalogEnrichmentMatch(enrichmentId: number, meta: PersistedCatalogMeta, nowIso: string) {
+    this.db
+      .prepare(
+        `
+        update catalog_enrichment
+        set status = 'matched',
+            meta_id = ?,
+            meta_type = ?,
+            meta_name = ?,
+            poster = ?,
+            background = ?,
+            description = ?,
+            release_info = ?,
+            attempts = attempts + 1,
+            error = null,
+            next_attempt_at = null,
+            updated_at = ?
+        where id = ?
+      `,
+      )
+      .run(meta.id, meta.type, meta.name, meta.poster ?? null, meta.background ?? null, meta.description ?? null, meta.releaseInfo ?? null, nowIso, enrichmentId);
+  }
+
+  saveCatalogEnrichmentUnmatched(enrichmentId: number, nowIso: string) {
+    this.db
+      .prepare(
+        `
+        update catalog_enrichment
+        set status = 'unmatched',
+            attempts = attempts + 1,
+            error = null,
+            next_attempt_at = null,
+            updated_at = ?
+        where id = ?
+      `,
+      )
+      .run(nowIso, enrichmentId);
+  }
+
+  saveCatalogEnrichmentRetry(enrichmentId: number, error: string, nextAttemptAt: string, nowIso: string) {
+    this.db
+      .prepare(
+        `
+        update catalog_enrichment
+        set status = 'retry',
+            attempts = attempts + 1,
+            error = ?,
+            next_attempt_at = ?,
+            updated_at = ?
+        where id = ?
+      `,
+      )
+      .run(error, nextAttemptAt, nowIso, enrichmentId);
+  }
+
+  catalogEnrichmentStats(profileId: number, ftpServerId: number): CatalogEnrichmentStats {
+    const row = this.db
+      .prepare(
+        `
+        select
+          count(*) as total,
+          sum(case when status = 'matched' then 1 else 0 end) as matched,
+          sum(case when status = 'unmatched' then 1 else 0 end) as unmatched,
+          sum(case when status = 'pending' then 1 else 0 end) as pending,
+          sum(case when status = 'retry' then 1 else 0 end) as retry
+        from catalog_enrichment
+        where profile_id = ?
+          and ftp_server_id = ?
+      `,
+      )
+      .get(profileId, ftpServerId) as {
+      total: number;
+      matched: number | null;
+      unmatched: number | null;
+      pending: number | null;
+      retry: number | null;
+    };
+    return {
+      total: row.total,
+      matched: row.matched ?? 0,
+      unmatched: row.unmatched ?? 0,
+      pending: row.pending ?? 0,
+      retry: row.retry ?? 0,
+    };
+  }
+
+  catalogMetas(
+    profileId: number,
+    catalogKind: "movie" | "series" | "anime",
+    limit: number,
+    skip: number,
+    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; search?: string } = {},
+  ): PersistedCatalogMeta[] {
+    const serverFilter = mediaServerFilter("ce", options.ftpServerIds, options.includeLegacyNullServer);
+    const catalogFilter =
+      catalogKind === "movie"
+        ? { sql: "and ce.meta_type = 'movie'", params: [] as string[] }
+        : { sql: "and ce.catalog_kind = ? and ce.meta_type = 'series'", params: [catalogKind] };
+    const searchFilter = catalogSearchFilter("ce", options.search);
+    const rows = this.db
+      .prepare(
+        `
+        select ce.meta_id, ce.meta_type, ce.meta_name, ce.poster, ce.background, ce.description, ce.release_info, min(ce.id) as first_id
+        from catalog_enrichment ce
+        where ce.profile_id = ?
+          and ce.status = 'matched'
+          and ce.meta_id is not null
+          and ce.meta_name is not null
+          ${catalogFilter.sql}
+          ${serverFilter.sql}
+          ${searchFilter.sql}
+        group by ce.meta_id, ce.meta_type, ce.meta_name, ce.poster, ce.background, ce.description, ce.release_info
+        order by ${searchFilter.orderSql} first_id asc
         limit ? offset ?
       `,
       )
-      .all(profileId, limit, skip) as Array<{
-      id: number;
-      media_kind: "movie" | "series";
-      filename: string;
-      parsed_title: string;
-      parsed_year: number | null;
-      quality: string | null;
-      size_bytes: number | null;
+      .all(profileId, ...catalogFilter.params, ...serverFilter.params, ...searchFilter.params, ...searchFilter.orderParams, limit, skip) as Array<{
+      meta_id: string;
+      meta_type: "movie" | "series";
+      meta_name: string;
+      poster: string | null;
+      background: string | null;
+      description: string | null;
+      release_info: string | null;
     }>;
-
-    return rows.map(toOtherCatalogItem);
+    return rows.map((row) => ({
+      id: row.meta_id,
+      type: row.meta_type,
+      name: row.meta_name,
+      poster: row.poster ?? undefined,
+      background: row.background ?? undefined,
+      description: row.description ?? undefined,
+      releaseInfo: row.release_info ?? undefined,
+    }));
   }
 
-  otherCatalogStreams(profileId: number, representativeFileId: number): MediaMatch[] {
+  otherCatalogItems(
+    profileId: number,
+    limit: number,
+    skip: number,
+    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; includeUnenrichedServerIds?: number[]; search?: string } = {},
+  ): OtherCatalogItem[] {
+    const serverFilter = mediaServerFilter("mf", options.ftpServerIds, options.includeLegacyNullServer);
+    const unenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
+    const rows = this.db
+      .prepare(
+        `
+        select mf.id, mf.ftp_server_id, mf.media_kind, mf.filename, mf.ftp_path, mf.parsed_title, mf.parsed_year
+        from media_files mf
+        left join catalog_enrichment ce
+          on ce.profile_id = mf.profile_id
+         and ce.ftp_server_id = mf.ftp_server_id
+         and ce.item_key = ${catalogEnrichmentSqlKey("mf")}
+        where mf.profile_id = ?
+          and mf.parsed_title is not null
+          ${serverFilter.sql}
+          and (ce.status = 'unmatched'${unenrichedFilter.sql})
+        order by mf.filename asc, mf.id asc
+      `,
+      )
+      .all(profileId, ...serverFilter.params, ...unenrichedFilter.params) as OtherCatalogRow[];
+
+    const search = normalizedSearch(options.search);
+    return Array.from(groupOtherCatalogRows(rows).values())
+      .filter((item) => !search || item.searchText.includes(search))
+      .sort((a, b) => a.folderName.localeCompare(b.folderName) || a.id - b.id)
+      .slice(skip, skip + limit);
+  }
+
+  otherCatalogStreams(
+    profileId: number,
+    representativeFileId: number,
+    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; includeUnenrichedServerIds?: number[] } = {},
+  ): MediaMatch[] {
+    const baseUnenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
     const base = this.db
       .prepare(
         `
-        select parsed_title, parsed_year
-        from media_files
-        where profile_id = ?
-          and id = ?
-          and imdb_id is null
+        select mf.ftp_path, mf.filename, mf.media_kind
+        from media_files mf
+        left join catalog_enrichment ce
+          on ce.profile_id = mf.profile_id
+         and ce.ftp_server_id = mf.ftp_server_id
+         and ce.item_key = ${catalogEnrichmentSqlKey("mf")}
+        where mf.profile_id = ?
+          and mf.id = ?
+          and (ce.status = 'unmatched'${baseUnenrichedFilter.sql})
       `,
       )
-      .get(profileId, representativeFileId) as { parsed_title: string; parsed_year: number | null } | undefined;
+      .get(profileId, representativeFileId, ...baseUnenrichedFilter.params) as { ftp_path: string; filename: string; media_kind: "movie" | "series" } | undefined;
     if (!base) return [];
 
+    const folderKey = otherFolderKey(base.ftp_path, base.filename);
+    const serverFilter = mediaServerFilter("mf", options.ftpServerIds, options.includeLegacyNullServer);
+    const unenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
     const rows = this.db
       .prepare(
         `
         select mf.id, mf.ftp_server_id, s.name as server_name, s.stream_delivery_mode, mf.ftp_path, mf.filename, mf.quality, mf.size_bytes
         from media_files mf
+        left join catalog_enrichment ce
+          on ce.profile_id = mf.profile_id
+         and ce.ftp_server_id = mf.ftp_server_id
+         and ce.item_key = ${catalogEnrichmentSqlKey("mf")}
         left join profile_ftp_servers s on s.id = mf.ftp_server_id
         where mf.profile_id = ?
-          and mf.imdb_id is null
-          and mf.parsed_title = ?
-          and (mf.parsed_year is ? or mf.parsed_year = ?)
+          and mf.media_kind = ?
+          ${serverFilter.sql}
+          and (ce.status = 'unmatched'${unenrichedFilter.sql})
         order by s.name asc, mf.size_bytes desc, mf.filename asc
       `,
       )
-      .all(profileId, base.parsed_title, base.parsed_year, base.parsed_year) as MediaFileRow[];
-    return rows.map(toMediaMatch);
+      .all(profileId, base.media_kind, ...serverFilter.params, ...unenrichedFilter.params) as MediaFileRow[];
+    return rows.filter((row) => otherFolderKey(row.ftp_path, row.filename) === folderKey).map(toMediaMatch);
   }
 
-  otherCatalogItem(profileId: number, fileId: number): OtherCatalogItem | null {
-    const row = this.db
+  otherCatalogItem(
+    profileId: number,
+    fileId: number,
+    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; includeUnenrichedServerIds?: number[] } = {},
+  ): OtherCatalogItem | null {
+    const unenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
+    const base = this.db
       .prepare(
         `
-        select id, media_kind, filename, parsed_title, parsed_year, quality, size_bytes
-        from media_files
-        where profile_id = ?
-          and id = ?
+        select mf.id
+        from media_files mf
+        left join catalog_enrichment ce
+          on ce.profile_id = mf.profile_id
+         and ce.ftp_server_id = mf.ftp_server_id
+         and ce.item_key = ${catalogEnrichmentSqlKey("mf")}
+        where mf.profile_id = ?
+          and mf.id = ?
+          and (ce.status = 'unmatched'${unenrichedFilter.sql})
       `,
       )
-      .get(profileId, fileId) as
-      | {
-          id: number;
-          media_kind: "movie" | "series";
-          filename: string;
-          parsed_title: string;
-          parsed_year: number | null;
-          quality: string | null;
-          size_bytes: number | null;
-        }
-      | undefined;
+      .get(profileId, fileId, ...unenrichedFilter.params) as { id: number } | undefined;
 
-    return row ? toOtherCatalogItem(row) : null;
+    if (!base) return null;
+    return this.otherCatalogItems(profileId, Number.MAX_SAFE_INTEGER, 0, options).find((item) => item.id === base.id) ?? null;
   }
+}
+
+type OtherCatalogRow = {
+  id: number;
+  ftp_server_id: number | null;
+  media_kind: "movie" | "series";
+  filename: string;
+  ftp_path: string;
+  parsed_title: string;
+  parsed_year: number | null;
+};
+
+type OtherCatalogGroup = OtherCatalogItem & { searchText: string; serverIds: Set<string> };
+
+function groupOtherCatalogRows(rows: OtherCatalogRow[]) {
+  const groups = new Map<string, OtherCatalogGroup>();
+  for (const row of rows) {
+    const folderName = otherFolderName(row.ftp_path, row.filename, row.parsed_title);
+    const folderKey = `${row.media_kind}:${normalizeFolderKey(folderName)}`;
+    const existing = groups.get(folderKey);
+    if (!existing) {
+      groups.set(folderKey, {
+        id: row.id,
+        mediaKind: row.media_kind,
+        folderName,
+        folderKey,
+        parsedTitle: row.parsed_title,
+        parsedYear: row.parsed_year,
+        fileCount: 1,
+        serverCount: 1,
+        searchText: otherSearchText(folderName, row),
+        serverIds: new Set([String(row.ftp_server_id ?? "legacy")]),
+      });
+      continue;
+    }
+    existing.fileCount += 1;
+    existing.serverIds.add(String(row.ftp_server_id ?? "legacy"));
+    existing.serverCount = existing.serverIds.size;
+    existing.searchText = `${existing.searchText} ${otherSearchText(folderName, row)}`;
+    if (row.id < existing.id) existing.id = row.id;
+  }
+  for (const group of groups.values()) {
+    delete (group as Partial<OtherCatalogGroup>).serverIds;
+  }
+  return groups;
+}
+
+function mediaServerFilter(alias: string, ftpServerIds: number[] | undefined, includeLegacyNullServer: boolean | undefined) {
+  if (!ftpServerIds) return { sql: "", params: [] as number[] };
+  const parts: string[] = [];
+  const params: number[] = [];
+  if (ftpServerIds.length) {
+    parts.push(`${alias}.ftp_server_id in (${ftpServerIds.map(() => "?").join(", ")})`);
+    params.push(...ftpServerIds);
+  }
+  if (includeLegacyNullServer) parts.push(`${alias}.ftp_server_id is null`);
+  if (!parts.length) return { sql: "and 1 = 0", params };
+  return { sql: `and (${parts.join(" or ")})`, params };
+}
+
+function unenrichedOtherFilter(alias: string, ftpServerIds: number[] | undefined) {
+  if (!ftpServerIds?.length) return { sql: "", params: [] as number[] };
+  return {
+    sql: ` or ${alias}.ftp_server_id in (${ftpServerIds.map(() => "?").join(", ")})`,
+    params: ftpServerIds,
+  };
+}
+
+function catalogSearchFilter(alias: string, search: string | undefined) {
+  const normalized = search?.trim().toLowerCase();
+  if (!normalized) return { sql: "", params: [] as string[], orderSql: "", orderParams: [] as string[] };
+  const like = `%${escapeLike(normalized)}%`;
+  return {
+    sql: `and lower(${alias}.meta_name) like ? escape '\\'`,
+    params: [like],
+    orderSql: `case when lower(${alias}.meta_name) = ? then 0 else 1 end, instr(lower(${alias}.meta_name), ?),`,
+    orderParams: [normalized, normalized],
+  };
+}
+
+function escapeLike(value: string) {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function catalogEnrichmentKey(catalogKind: string, parsedTitle: string, parsedYear: number | null, imdbId: string | null) {
+  return [catalogKind, imdbId ?? "", parsedTitle.toLowerCase(), parsedYear ?? ""].join("|");
+}
+
+function catalogEnrichmentSqlKey(alias: string) {
+  return `${alias}.catalog_kind || '|' || coalesce(${alias}.imdb_id, '') || '|' || lower(${alias}.parsed_title) || '|' || coalesce(${alias}.parsed_year, '')`;
+}
+
+function otherFolderName(ftpPath: string, filename: string, fallbackTitle: string) {
+  const normalizedPath = normalizeRootPath(ftpPath);
+  const segments = normalizedPath.split("/").filter(Boolean);
+  if (segments.length > 1) return titleCasePathSegment(segments[segments.length - 2]);
+  const stem = filename.replace(/\.[^.]+$/, "").replace(/[._-]+/g, " ").trim();
+  return titleCasePathSegment(stem || fallbackTitle);
+}
+
+function otherFolderKey(ftpPath: string, filename: string) {
+  const normalizedPath = normalizeRootPath(ftpPath);
+  const segments = normalizedPath.split("/").filter(Boolean);
+  const folder = segments.length > 1 ? segments[segments.length - 2] : filename.replace(/\.[^.]+$/, "");
+  return normalizeFolderKey(folder);
+}
+
+function normalizeFolderKey(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function otherSearchText(folderName: string, row: OtherCatalogRow) {
+  return normalizedSearch([folderName, row.filename, row.parsed_title, row.parsed_year ?? ""].join(" "));
+}
+
+function normalizedSearch(value: string | undefined) {
+  return (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function titleCasePathSegment(value: string) {
+  return value
+    .replace(/[._-]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 function normalizeRootPath(path: string) {

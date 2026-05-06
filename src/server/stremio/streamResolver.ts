@@ -94,7 +94,6 @@ export function streamForMatch(input: {
   const description = renderStreamTemplate(input.streamDescriptionTemplate, formatterContext, "description");
   return {
     name,
-    title: name,
     description,
     url:
       deliveryMode === "direct" && ftpConfig

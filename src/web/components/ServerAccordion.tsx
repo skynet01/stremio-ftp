@@ -47,6 +47,10 @@ function serverSummary(server: ServerForm) {
     const path = server.scanStatus.currentPath ? ` - ${server.scanStatus.currentPath}` : "";
     return `${server.scanStatus.progressPercent}% scanning${path}`;
   }
+  if (server.scanStatus.status === "failed") {
+    const reason = server.scanStatus.error || server.scanStatus.message || "Scan failed";
+    return server.pendingScanAfter ? `${reason} - retry pending` : reason;
+  }
   return `${server.indexStatus.mediaItems} items - Last scan ${formatCompactScanTime(server.indexStatus.lastScanAt)}`;
 }
 
@@ -65,10 +69,17 @@ function formatCompactScanTime(lastScanAt: string | null) {
 function serverBadge(server: ServerForm): { tone: StatusTone; label: string } {
   if (server.scanStatus.status === "queued") return { tone: "amber", label: "Queued" };
   if (server.scanStatus.status === "running") return { tone: "amber", label: "Scanning" };
+  if (server.scanStatus.status === "failed" && server.pendingScanAfter) return { tone: "amber", label: "Retry pending" };
   if (server.pendingScanAfter) return { tone: "amber", label: "Pending" };
   if (server.scanStatus.status === "failed") return { tone: "red", label: "Needs attention" };
   if (server.indexStatus.lastScanAt) return { tone: "green", label: "Ready" };
   return { tone: "gray", label: "Idle" };
+}
+
+function scanProgressLabel(scanStatus: ScanStatus) {
+  if (scanStatus.status === "idle") return "No active scan";
+  if (scanStatus.message?.startsWith("Enriching TMDB metadata")) return scanStatus.message;
+  return scanStatus.status;
 }
 
 export function ServerAccordion({
@@ -132,38 +143,60 @@ export function ServerAccordion({
                       <h3>Library settings</h3>
                     </div>
                     <div className="library-settings-grid">
-                      {field(
-                        "Library layout",
-                        `libraryLayout-${server.id}`,
-                        <select
-                          id={`libraryLayout-${server.id}`}
-                          className={filledClass(server.libraryLayout)}
-                          value={server.libraryLayout}
-                          onChange={(event) => onServerChange(server.id, { libraryLayout: event.currentTarget.value as LibraryLayout })}
-                        >
-                          <option value="auto">Auto detect</option>
-                          <option value="folders">Organized by folders</option>
-                          <option value="flat">Single folder of files</option>
-                        </select>,
-                      )}
-                      {field(
-                        "Stream delivery",
-                        `streamDeliveryMode-${server.id}`,
-                        <select
-                          id={`streamDeliveryMode-${server.id}`}
-                          className={filledClass(server.streamDeliveryMode)}
-                          value={server.streamDeliveryMode}
-                          onChange={(event) => onServerChange(server.id, { streamDeliveryMode: event.currentTarget.value as StreamDeliveryMode })}
-                        >
-                          <option value="proxy">Proxy through addon</option>
-                          <option value="direct">Direct FTP URL</option>
-                        </select>,
-                      )}
-                      {server.streamDeliveryMode === "direct" ? (
-                        <p className="field-hint">Direct FTP sends FTP URLs to Stremio clients that can open them.</p>
-                      ) : null}
-                      <div className="content-type-options" role="group" aria-label="Server content types">
-                        <div className="server-content-row">
+                      <div className="library-select-column">
+                        {field(
+                          "Library layout",
+                          `libraryLayout-${server.id}`,
+                          <select
+                            id={`libraryLayout-${server.id}`}
+                            className={filledClass(server.libraryLayout)}
+                            value={server.libraryLayout}
+                            onChange={(event) => onServerChange(server.id, { libraryLayout: event.currentTarget.value as LibraryLayout })}
+                          >
+                            <option value="auto">Auto detect</option>
+                            <option value="folders">Organized by folders</option>
+                            <option value="flat">Single folder of files</option>
+                          </select>,
+                        )}
+                        {field(
+                          "Stream delivery",
+                          `streamDeliveryMode-${server.id}`,
+                          <select
+                            id={`streamDeliveryMode-${server.id}`}
+                            className={filledClass(server.streamDeliveryMode)}
+                            value={server.streamDeliveryMode}
+                            onChange={(event) => onServerChange(server.id, { streamDeliveryMode: event.currentTarget.value as StreamDeliveryMode })}
+                          >
+                            <option value="proxy">Proxy through addon</option>
+                            <option value="direct">Direct FTP URL</option>
+                          </select>,
+                        )}
+                        {server.streamDeliveryMode === "direct" ? (
+                          <p className="field-hint">Direct FTP sends FTP URLs to Stremio clients that can open them.</p>
+                        ) : null}
+                      </div>
+                      <div className="catalog-options-column" role="group" aria-label="Catalog settings">
+                        <label className="toggle-row catalog-toggle" htmlFor={`catalogEnabled-${server.id}`}>
+                          <input
+                            id={`catalogEnabled-${server.id}`}
+                            type="checkbox"
+                            checked={server.catalogEnabled}
+                            onChange={(event) => {
+                              const catalogEnabled = event.currentTarget.checked;
+                              onServerChange(
+                                server.id,
+                                catalogEnabled
+                                  ? { catalogEnabled }
+                                  : {
+                                      catalogEnabled,
+                                      catalogContentTypes: { ...server.catalogContentTypes, uncategorized: false },
+                                    },
+                              );
+                            }}
+                          />
+                          Show catalogs in Stremio
+                        </label>
+                        <div className="content-type-options" role="group" aria-label="Server content types">
                           <span className="field-label">Server content</span>
                           <div className="server-content-toggles">
                             {(["movies", "series", "anime"] as const).map((key) => (
@@ -182,16 +215,21 @@ export function ServerAccordion({
                               </label>
                             ))}
                           </div>
-                          <label className="toggle-row catalog-toggle" htmlFor={`catalogEnabled-${server.id}`}>
-                            <input
-                              id={`catalogEnabled-${server.id}`}
-                              type="checkbox"
-                              checked={server.catalogEnabled}
-                              onChange={(event) => onServerChange(server.id, { catalogEnabled: event.currentTarget.checked })}
-                            />
-                            Show indexed FTP catalog in Stremio
-                          </label>
                         </div>
+                        <label className="toggle-row" htmlFor={`uncategorized-${server.id}`}>
+                          <input
+                            id={`uncategorized-${server.id}`}
+                            type="checkbox"
+                            checked={server.catalogContentTypes.uncategorized !== false}
+                            disabled={!server.catalogEnabled}
+                            onChange={(event) =>
+                              onServerChange(server.id, {
+                                catalogContentTypes: { ...server.catalogContentTypes, uncategorized: event.currentTarget.checked },
+                              })
+                            }
+                          />
+                          Show uncategorized
+                        </label>
                       </div>
                     </div>
                   </div>
@@ -343,7 +381,7 @@ export function ServerAccordion({
                         )}
                         <div className="scan-progress-block">
                           <div className="scan-progress-meta">
-                            <span>{server.scanStatus.status === "idle" ? "No active scan" : server.scanStatus.status}</span>
+                            <span>{scanProgressLabel(server.scanStatus)}</span>
                             <span>{active ? formatEta(server.scanStatus.estimatedSecondsRemaining) : `${server.scanStatus.progressPercent}%`}</span>
                           </div>
                           <div className="scan-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={server.scanStatus.progressPercent}>

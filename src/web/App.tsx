@@ -51,7 +51,7 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
     "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
   catalogEnabled: false,
   catalogTmdbApiKey: "",
-  catalogContentTypes: { movies: true, series: true, anime: false },
+  catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
   libraryLayout: "auto",
   streamDeliveryMode: "proxy",
   streamNameTemplate: DEFAULT_STREAM_NAME_TEMPLATE,
@@ -107,7 +107,7 @@ function emptyServerForm(id = 0): ServerForm {
     allowInvalidCertificate: false,
     rootPaths: "/",
     catalogEnabled: false,
-    catalogContentTypes: { movies: true, series: true, anime: false },
+    catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
     libraryLayout: "auto",
     streamDeliveryMode: "proxy",
     indexStatus: { lastScanAt: null, mediaItems: 0 },
@@ -149,7 +149,7 @@ function serverFormFromPayload(server: FtpServerSettings): ServerForm {
     allowInvalidCertificate: Boolean(server.ftpConfig?.allowInvalidCertificate),
     rootPaths: server.ftpConfig?.roots.join("\n") ?? "/",
     catalogEnabled: server.customization.catalogEnabled,
-    catalogContentTypes: server.customization.catalogContentTypes ?? { movies: true, series: true, anime: false },
+    catalogContentTypes: server.customization.catalogContentTypes ?? { movies: true, series: true, anime: false, uncategorized: true },
     libraryLayout: server.customization.libraryLayout ?? "auto",
     streamDeliveryMode: server.customization.streamDeliveryMode ?? "proxy",
     indexStatus: server.indexStatus,
@@ -177,7 +177,7 @@ function serverFormFromLegacyPayload(
     allowInvalidCertificate: Boolean(loaded.ftpConfig?.allowInvalidCertificate),
     rootPaths: loaded.ftpConfig?.roots.join("\n") ?? "/",
     catalogEnabled: customization.catalogEnabled,
-    catalogContentTypes: customization.catalogContentTypes ?? { movies: true, series: true, anime: false },
+    catalogContentTypes: customization.catalogContentTypes ?? { movies: true, series: true, anime: false, uncategorized: true },
     libraryLayout: customization.libraryLayout ?? "auto",
     streamDeliveryMode: customization.streamDeliveryMode ?? "proxy",
     indexStatus: loaded.indexStatus,
@@ -210,9 +210,10 @@ function hasCompleteFtpConfig(server: ServerForm) {
 
 export function App() {
   const [hasSetupToken, setHasSetupToken] = useState(() => setupTokenAvailable());
-  const needsSetupProbe = window.location.pathname === "/configure" && !hasSetupToken;
+  const needsSetupProbe = !hasSetupToken;
   const [setupTokenRequired, setSetupTokenRequired] = useState<boolean | null>(() => (needsSetupProbe ? null : false));
-  const showSetupTokenMessage = window.location.pathname === "/configure" && !hasSetupToken && setupTokenRequired !== false;
+  const showSetupTokenMessage = !hasSetupToken && setupTokenRequired !== false;
+  const settingsUnlocked = !showSetupTokenMessage;
   const [recoveryUid, setRecoveryUid] = useState(() => {
     const stored = window.localStorage.getItem(STORAGE_KEYS.recoveryUid);
     if (stored) return stored;
@@ -251,9 +252,10 @@ export function App() {
       activeServers.reduce((sum, server) => sum + Math.max(0, Math.min(100, server.scanStatus.progressPercent)), 0) / activeServers.length,
     );
     const currentPath = activeServers.find((server) => server.scanStatus.currentPath)?.scanStatus.currentPath ?? null;
+    const activeMessage = activeServers.find((server) => server.scanStatus.message?.startsWith("Enriching TMDB metadata"))?.scanStatus.message;
     return {
       progressPercent,
-      label: `${activeServers.length} ${activeServers.length === 1 ? "server" : "servers"} ${queuedOnly ? "queued" : "indexing"}`,
+      label: activeMessage || `${activeServers.length} ${activeServers.length === 1 ? "server" : "servers"} ${queuedOnly ? "queued" : "indexing"}`,
       currentPath,
     };
   }, [servers]);
@@ -580,9 +582,15 @@ export function App() {
     }
   }
 
-  async function refreshAllServers() {
+  async function refreshAllServers(force = false) {
+    if (force) {
+      const confirmed = window.confirm(
+        "Force reindex will clear incremental scan snapshots and reparse every configured FTP server. Continue?",
+      );
+      if (!confirmed) return;
+    }
     try {
-      const result = await rescanIndex({ browserUid: recoveryUid, passphrase, all: true });
+      const result = await rescanIndex({ browserUid: recoveryUid, passphrase, all: true, ...(force ? { force: true } : {}) });
       if (result.servers) setServers(result.servers.map(serverFormFromPayload));
       if (result.globalStats) setGlobalStats(result.globalStats);
       if (!result.servers) await refreshScanStatus();
@@ -672,6 +680,7 @@ export function App() {
       <Topbar
         addonName={addonName}
         addonLogoUrl={addonLogoUrl}
+        editable={settingsUnlocked}
         profileReady={profileReady}
         profileState={profileState}
         onEditLogo={() => setEditingLogo(true)}
@@ -681,6 +690,7 @@ export function App() {
         addonDescription={addonDescription}
         addonLogoUrl={addonLogoUrl}
         customizationMessage={customizationMessage}
+        editable={settingsUnlocked}
         editingName={editingName}
         editingDescription={editingDescription}
         editingLogo={editingLogo}
@@ -706,6 +716,7 @@ export function App() {
             profileReady={profileReady}
             scanActive={anyScanActive}
             onRescanAll={() => void refreshAllServers()}
+            onForceReindexAll={() => void refreshAllServers(true)}
           >
             <div className="global-settings-row">
               <div className="field-stack global-tmdb-field">
@@ -772,6 +783,11 @@ function scanStatusMessage(scanStatus: ScanStatus) {
 }
 
 function serverMessage(pendingScanAfter: string | null, scanStatus: ScanStatus, fallback: string) {
+  if (pendingScanAfter && scanStatus.status === "failed") {
+    const retryAt = new Date(pendingScanAfter);
+    const retryText = Number.isNaN(retryAt.getTime()) ? "Retry is pending." : `Retry scheduled for ${retryAt.toLocaleString()}.`;
+    return `${scanStatusMessage(scanStatus) ?? "Scan failed."} ${retryText}`;
+  }
   if (pendingScanAfter) return "Settings saved. Auto-scan is pending.";
   return scanStatusMessage(scanStatus) ?? fallback;
 }

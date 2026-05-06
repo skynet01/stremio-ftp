@@ -13,6 +13,21 @@ function createProfile(db: Database.Database) {
   );
 }
 
+function createServer(db: Database.Database, profileId: number) {
+  return Number(
+    db
+      .prepare(
+        `
+        insert into profile_ftp_servers (
+          profile_id, name, catalog_enabled, catalog_content_movies, catalog_content_series,
+          catalog_content_anime, library_layout, stream_delivery_mode, created_at, updated_at
+        ) values (?, 'Server 1', 1, 1, 1, 0, 'auto', 'proxy', 'n', 'n')
+      `,
+      )
+      .run(profileId).lastInsertRowid,
+  );
+}
+
 describe("MediaRepository", () => {
   it("upserts and queries episode rows", () => {
     const db = new Database(":memory:");
@@ -118,7 +133,7 @@ describe("MediaRepository", () => {
     ]);
   });
 
-  it("aggregates unique catalog counts and uncategorized catalog entries", () => {
+  it("aggregates unique catalog counts and parser-review catalog entries", () => {
     const db = new Database(":memory:");
     migrate(db);
     const profileId = createProfile(db);
@@ -130,7 +145,7 @@ describe("MediaRepository", () => {
       { ftpPath: "/TV/Show.Name.S01E01.mkv", mediaKind: "series", catalogKind: "series", title: "show name", year: null, imdbId: "tt7654321" },
       { ftpPath: "/TV/Show.Name.S01E02.mkv", mediaKind: "series", catalogKind: "series", title: "show name", year: null, imdbId: "tt7654321" },
       { ftpPath: "/Anime/Afro.Samurai.01.mkv", mediaKind: "series", catalogKind: "anime", title: "afro samurai", year: null, imdbId: null },
-      { ftpPath: "/Other/Mystery.File.2020.mkv", mediaKind: "movie", catalogKind: "movie", title: "mystery file", year: 2020, imdbId: null },
+      { ftpPath: "/Other/Mystery.File.2020.mkv", mediaKind: "movie", catalogKind: "movie", title: "mystery file", year: 2020, imdbId: null, confidence: 70 },
       { ftpPath: "/Other/Unknown.Clip.mkv", mediaKind: "movie", catalogKind: "movie", title: "unknown clip", year: null, imdbId: null, confidence: 45 },
     ] as const) {
       repo.upsertParsedFile(profileId, {
@@ -151,12 +166,97 @@ describe("MediaRepository", () => {
     }
 
     expect(repo.aggregateCountsForProfile(profileId)).toEqual({
-      total: 5,
-      movies: 2,
+      total: 7,
+      movies: 1,
       series: 1,
       anime: 1,
+      uncategorized: 2,
+    });
+  });
+
+  it("uses persisted enrichment state for catalog and uncategorized counts when available", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const repo = new MediaRepository(db);
+
+    for (const file of [
+      { ftpPath: "/Movies/The.Matrix.1999.mkv", title: "matrix", year: 1999 },
+      { ftpPath: "/Other/Home.Video.2024.mp4", title: "home video", year: 2024 },
+    ]) {
+      repo.upsertParsedFile(profileId, {
+        ftpServerId: serverId,
+        ftpPath: file.ftpPath,
+        filename: file.ftpPath.split("/").at(-1) ?? "",
+        normalizedFilename: file.title,
+        extension: file.ftpPath.endsWith(".mp4") ? "mp4" : "mkv",
+        mediaKind: "movie",
+        catalogKind: "movie",
+        parsedTitle: file.title,
+        parsedYear: file.year,
+        season: null,
+        episode: null,
+        imdbId: null,
+        quality: null,
+        confidence: 70,
+      });
+    }
+
+    const seenAt = "2026-05-04T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), seenAt);
+    const pending = repo.pendingCatalogEnrichment(profileId, serverId, seenAt, 10);
+    repo.saveCatalogEnrichmentMatch(pending.find((item) => item.parsedTitle === "matrix")!.id, { id: "tt0133093", type: "movie", name: "The Matrix" }, seenAt);
+    repo.saveCatalogEnrichmentUnmatched(pending.find((item) => item.parsedTitle === "home video")!.id, seenAt);
+
+    expect(repo.aggregateCountsForProfile(profileId)).toEqual({
+      total: 2,
+      movies: 1,
+      series: 0,
+      anime: 0,
       uncategorized: 1,
     });
+
+    db.prepare("update catalog_enrichment set algorithm_version = 1").run();
+    repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), "2026-05-05T00:00:00.000Z");
+
+    expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-05-05T00:00:00.000Z", 10).map((item) => item.parsedTitle)).toEqual(["home video"]);
+  });
+
+  it("serves movie fallback enrichment from the movie catalog and movie stream lookup", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const repo = new MediaRepository(db);
+
+    repo.upsertParsedFile(profileId, {
+      ftpServerId: serverId,
+      ftpPath: "/TV Shows/The Animatrix (2003)/The Animatrix.S1E01_3DFF_FSBS.mkv",
+      filename: "The Animatrix.S1E01_3DFF_FSBS.mkv",
+      normalizedFilename: "animatrix",
+      extension: "mkv",
+      mediaKind: "series",
+      catalogKind: "series",
+      parsedTitle: "animatrix",
+      parsedYear: null,
+      season: 1,
+      episode: 1,
+      imdbId: null,
+      quality: null,
+      confidence: 80,
+    });
+
+    const seenAt = "2026-05-04T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["series"]), seenAt);
+    const [candidate] = repo.pendingCatalogEnrichment(profileId, serverId, seenAt, 10);
+    repo.saveCatalogEnrichmentMatch(candidate.id, { id: "tt0328832", type: "movie", name: "The Animatrix" }, seenAt);
+
+    expect(repo.catalogMetas(profileId, "series", 10, 0)).toEqual([]);
+    expect(repo.catalogMetas(profileId, "movie", 10, 0)).toEqual([expect.objectContaining({ id: "tt0328832", type: "movie", name: "The Animatrix" })]);
+    expect(repo.findMovie(profileId, "tt0328832", "animatrix", 2003)).toEqual([
+      expect.objectContaining({ filename: "The Animatrix.S1E01_3DFF_FSBS.mkv" }),
+    ]);
   });
 
   it("deletes stale files under a root and treats slash root as the whole profile", () => {

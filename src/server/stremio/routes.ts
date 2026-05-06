@@ -32,12 +32,31 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const profileId = installToken ? profiles.profileIdForInstallToken(installToken) : null;
     if (!type || !profileId) return res.json({ streams: [] });
 
-    const fileId = internalFileId(id);
     const customization = manifestCustomization(profiles, profileId);
     const ftpConfigForServer = (serverId: number | null | undefined) =>
       serverId ? profiles.getFtpServerConfig(profileId, serverId) : profiles.getFtpConfig(profileId);
+    const folderId = internalFolderId(id);
+    if (folderId) {
+      const files = mediaRepository.otherCatalogStreams(profileId, folderId, catalogServerScope(profiles, profileId));
+      return res.json({
+        streams: files.map((file) =>
+          streamForMatch({
+            baseUrl: config.baseUrl,
+            installToken,
+            match: file,
+            streamDeliveryMode: customization.streamDeliveryMode,
+            ftpConfigForServer,
+            addonName: customization.addonName,
+            streamNameTemplate: customization.streamNameTemplate,
+            streamDescriptionTemplate: customization.streamDescriptionTemplate,
+          }),
+        ),
+      });
+    }
+
+    const fileId = internalFileId(id);
     if (fileId) {
-      const files = mediaRepository.otherCatalogStreams(profileId, fileId);
+      const files = mediaRepository.otherCatalogStreams(profileId, fileId, catalogServerScope(profiles, profileId));
       return res.json({
         streams: files.map((file) =>
           streamForMatch({
@@ -86,25 +105,20 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const profileId = installToken ? profiles.profileIdForInstallToken(installToken) : null;
     const customization = profileId ? manifestCustomization(profiles, profileId) : null;
     if (!type || !profileId || !customization?.catalogEnabled || !isCatalogId(type, catalogId)) return res.json({ metas: [] });
-    const tmdbApiKey = effectiveTmdbApiKey(customization, config);
 
-    const skip = skipFromExtra(stringParam(req.params.extra));
+    const extra = catalogExtraFrom(stringParam(req.params.extra));
     if (catalogId === "ftp-other") {
-      const items = mediaRepository.otherCatalogItems(profileId, 100, skip);
-      const metas = (
-        await Promise.all(
-          items.map(async (item) => {
-            return (await resolvesInEnabledCatalog(item, tmdbApiKey, customization)) ? null : otherCatalogMeta(item);
-          }),
-        )
-      ).filter(Boolean);
-      return res.json({ metas });
+      const scope = catalogServerScope(profiles, profileId);
+      const items = mediaRepository.otherCatalogItems(profileId, 100, extra.skip, { ...scope, search: extra.search });
+      return res.json({ metas: items.map((item) => otherCatalogMeta(item, config.baseUrl)) });
     }
 
     const catalogKind = catalogKindForId(catalogId);
     if (!catalogKind || !catalogKindEnabled(catalogKind, customization)) return res.json({ metas: [] });
-    const items = mediaRepository.catalogItems(profileId, catalogKind, 100, skip);
-    const metas = (await Promise.all(items.map((item) => tmdbCatalogMeta(item, tmdbApiKey, catalogKind)))).filter(Boolean);
+    const metas = mediaRepository.catalogMetas(profileId, catalogKind, 100, extra.skip, {
+      ...catalogServerScope(profiles, profileId, catalogKind),
+      search: extra.search,
+    });
     res.json({ metas });
   });
 
@@ -115,10 +129,10 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const customization = profileId ? manifestCustomization(profiles, profileId) : null;
     if (!type || !profileId || !customization?.catalogEnabled) return res.json({ meta: null });
 
-    const fileId = internalFileId(id);
-    if (fileId) {
-      const item = mediaRepository.otherCatalogItem(profileId, fileId);
-      return res.json({ meta: item ? otherCatalogMeta(item) : null });
+    const folderId = internalFolderId(id) ?? internalFileId(id);
+    if (folderId) {
+      const item = mediaRepository.otherCatalogItem(profileId, folderId, catalogServerScope(profiles, profileId));
+      return res.json({ meta: item ? otherCatalogMeta(item, config.baseUrl) : null });
     }
 
     if (!/^tt\d{7,8}$/i.test(id)) return res.json({ meta: null });
@@ -164,58 +178,72 @@ function effectiveTmdbApiKey(customization: AddonCustomization, config: AppConfi
 
 function manifestCustomization(profiles: ProfileService, profileId: number): AddonCustomization {
   const base = profiles.getAddonCustomization(profileId);
-  const servers = profiles.listFtpServers(profileId);
+  const servers = profiles.listFtpServerCatalogSettings(profileId);
   const contentTypes = servers.reduce(
     (acc, server) => ({
-      movies: acc.movies || Boolean(server.customization.catalogContentTypes?.movies),
-      series: acc.series || Boolean(server.customization.catalogContentTypes?.series),
-      anime: acc.anime || Boolean(server.customization.catalogContentTypes?.anime),
+      movies: acc.movies || Boolean(server.customization.catalogEnabled && server.customization.catalogContentTypes?.movies),
+      series: acc.series || Boolean(server.customization.catalogEnabled && server.customization.catalogContentTypes?.series),
+      anime: acc.anime || Boolean(server.customization.catalogEnabled && server.customization.catalogContentTypes?.anime),
+      uncategorized:
+        acc.uncategorized ||
+        Boolean(server.customization.catalogEnabled && server.customization.catalogContentTypes?.uncategorized !== false),
     }),
-    { movies: false, series: false, anime: false },
+    { movies: false, series: false, anime: false, uncategorized: false },
   );
   return {
     ...base,
-    catalogEnabled: servers.some((server) => server.customization.catalogEnabled),
+    catalogEnabled: servers.some((server) => server.customization.catalogEnabled && hasAnyEnabledCatalogType(server.customization)),
     catalogTmdbApiKey: base.catalogTmdbApiKey,
     catalogContentTypes: contentTypes,
   };
 }
 
-function catalogKindEnabled(catalogKind: TmdbCatalogKind, customization: AddonCustomization) {
+function catalogKindEnabled(catalogKind: TmdbCatalogKind, customization: Pick<AddonCustomization, "catalogContentTypes">) {
   const contentTypes = customization.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
   if (catalogKind === "movie") return contentTypes.movies;
   if (catalogKind === "series") return contentTypes.series;
   return contentTypes.anime;
 }
 
-async function resolvesInEnabledCatalog(
-  item: { mediaKind: "movie" | "series"; parsedTitle: string; parsedYear: number | null; imdbId?: string | null },
-  tmdbApiKey: string | null,
-  customization: AddonCustomization,
-) {
-  for (const catalogKind of ["movie", "series", "anime"] as const) {
-    if (!catalogKindEnabled(catalogKind, customization)) continue;
-    const meta = await tmdbCatalogMeta(
-      {
-        mediaKind: catalogKind === "movie" ? "movie" : "series",
-        catalogKind,
-        parsedTitle: item.parsedTitle,
-        parsedYear: item.parsedYear,
-        imdbId: item.imdbId ?? null,
-      },
-      tmdbApiKey,
-      catalogKind,
-    );
-    if (meta) return true;
-  }
-  return false;
+function catalogServerScope(profiles: ProfileService, profileId: number, catalogKind?: TmdbCatalogKind) {
+  const servers = profiles.listFtpServerCatalogSettings(profileId);
+  const enabledServers = servers.filter((server) => {
+    if (!server.customization.catalogEnabled) return false;
+    return catalogKind ? catalogKindEnabled(catalogKind, server.customization) : otherCatalogEnabled(server.customization);
+  });
+  const includeUnenrichedServerIds = catalogKind
+    ? []
+    : enabledServers.filter((server) => !hasAnyTypedCatalogContentType(server.customization)).map((server) => server.id);
+  const defaultServerId = servers[0]?.id;
+  return {
+    ftpServerIds: enabledServers.map((server) => server.id),
+    includeLegacyNullServer: Boolean(defaultServerId && enabledServers.some((server) => server.id === defaultServerId)),
+    includeUnenrichedServerIds,
+  };
 }
 
-function skipFromExtra(extra: string | undefined) {
-  if (!extra) return 0;
-  const params = new URLSearchParams(extra.replace(/^\?/, ""));
+function otherCatalogEnabled(customization: Pick<AddonCustomization, "catalogContentTypes">) {
+  const contentTypes = customization.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
+  return contentTypes.uncategorized !== false;
+}
+
+function hasAnyTypedCatalogContentType(customization: Pick<AddonCustomization, "catalogContentTypes">) {
+  const contentTypes = customization.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
+  return Boolean(contentTypes.movies || contentTypes.series || contentTypes.anime);
+}
+
+function hasAnyEnabledCatalogType(customization: Pick<AddonCustomization, "catalogContentTypes">) {
+  return hasAnyTypedCatalogContentType(customization) || otherCatalogEnabled(customization);
+}
+
+function catalogExtraFrom(extra: string | undefined) {
+  const params = new URLSearchParams((extra ?? "").replace(/^\?/, ""));
   const raw = params.get("skip");
-  return raw && /^\d+$/.test(raw) ? Number(raw) : 0;
+  const search = params.get("search")?.trim() || undefined;
+  return {
+    skip: raw && /^\d+$/.test(raw) ? Number(raw) : 0,
+    search,
+  };
 }
 
 function stringParam(value: string | string[] | undefined): string {
@@ -227,6 +255,11 @@ function internalFileId(id: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+function internalFolderId(id: string): number | null {
+  const match = id.match(/^ftp-folder:(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
 function loggableError(error: unknown): string {
   if (error instanceof Error) return redactSecrets(error.stack || error.message);
   return redactSecrets(String(error));
@@ -234,23 +267,21 @@ function loggableError(error: unknown): string {
 
 function otherCatalogMeta(item: {
   id: number;
-  filename: string;
-  parsedTitle: string;
+  folderName: string;
   parsedYear: number | null;
-}) {
+  fileCount: number;
+  serverCount: number;
+}, baseUrl: string) {
   return {
-    id: `ftp:${item.id}`,
+    id: `ftp-folder:${item.id}`,
     type: "movie",
-    name: titleCase(item.parsedTitle),
-    description: item.filename,
+    name: item.folderName,
+    description: `${item.fileCount} ${item.fileCount === 1 ? "file" : "files"} across ${item.serverCount} ${item.serverCount === 1 ? "server" : "servers"}`,
+    poster: defaultFolderPosterUrl(baseUrl),
     releaseInfo: item.parsedYear ? String(item.parsedYear) : undefined,
   };
 }
 
-function titleCase(value: string) {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
+function defaultFolderPosterUrl(baseUrl: string) {
+  return `${baseUrl}/assets/default-folder-poster.png`;
 }

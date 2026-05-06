@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 import type { GlobalStats } from "../api.js";
 import { formatScanTime } from "./ui.js";
 
@@ -14,6 +15,7 @@ export function GlobalStatusPanel({
   profileReady,
   scanActive,
   onRescanAll,
+  onForceReindexAll,
   children,
 }: {
   stats: GlobalStats;
@@ -21,8 +23,22 @@ export function GlobalStatusPanel({
   profileReady: boolean;
   scanActive: boolean;
   onRescanAll: () => void;
+  onForceReindexAll?: () => void;
   children?: ReactNode;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const actionDisabled = !profileReady || scanActive;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function closeOnOutsidePointer(event: MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    }
+    window.addEventListener("mousedown", closeOnOutsidePointer);
+    return () => window.removeEventListener("mousedown", closeOnOutsidePointer);
+  }, [menuOpen]);
+
   return (
     <section className="panel global-status-panel" aria-labelledby="global-status-heading">
       <div className="panel-header">
@@ -33,9 +49,35 @@ export function GlobalStatusPanel({
         </div>
         <div className="global-status-state">
           <span>Last scan {formatScanTime(stats.lastCompletedScanAt)}</span>
-          <button type="button" className="secondary-button global-rescan-button" disabled={!profileReady || scanActive} onClick={onRescanAll}>
-            Rescan All
-          </button>
+          <div className="global-rescan-actions" ref={menuRef}>
+            <button type="button" className="secondary-button global-rescan-button" disabled={actionDisabled} onClick={onRescanAll}>
+              Rescan All
+            </button>
+            <button
+              type="button"
+              className="icon-button global-rescan-menu-button"
+              aria-label="Rescan all options"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              disabled={actionDisabled || !onForceReindexAll}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              <ChevronDown size={16} aria-hidden="true" />
+            </button>
+            {menuOpen && onForceReindexAll ? (
+              <div className="global-rescan-menu" role="menu">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onForceReindexAll();
+                  }}
+                >
+                  Force reindex all
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
       <dl className="status-list global-status-list">

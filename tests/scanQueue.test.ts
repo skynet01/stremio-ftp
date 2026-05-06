@@ -1,10 +1,13 @@
 import Database from "better-sqlite3";
 import { Readable } from "node:stream";
-import { describe, expect, it } from "vitest";
+import request from "supertest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
 import type { FtpClientFactory } from "../src/server/ftp/ftpTypes";
 import { MediaRepository } from "../src/server/media/mediaRepository";
+import { clearTmdbCatalogCache } from "../src/server/metadata/tmdbClient";
 import { ProfileService } from "../src/server/profiles/profileService";
 import { ScanQueue } from "../src/server/scanner/scanQueue";
 
@@ -75,6 +78,16 @@ async function waitForStatus(queue: ScanQueue, profileId: number, status: string
   throw new Error(`Timed out waiting for ${status}`);
 }
 
+async function waitForNextStatus(queue: ScanQueue, profileId: number, previousId: number | null, status: string) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    const current = queue.getProfileScanStatus(profileId);
+    if (current.id !== previousId && current.status === status) return current;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for next ${status}`);
+}
+
 async function waitForEstimatedStatus(queue: ScanQueue, profileId: number) {
   const deadline = Date.now() + 1000;
   while (Date.now() < deadline) {
@@ -95,7 +108,23 @@ async function waitForProgressPath(queue: ScanQueue, profileId: number, currentP
   throw new Error(`Timed out waiting for scan progress at ${currentPath}`);
 }
 
+async function waitForMessage(queue: ScanQueue, profileId: number, messageText: string) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    const current = queue.getProfileScanStatus(profileId);
+    if (current.status === "running" && current.message?.includes(messageText)) return current;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for scan message containing ${messageText}`);
+}
+
 describe("ScanQueue", () => {
+  afterEach(() => {
+    clearTmdbCatalogCache();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   it("locks duplicate scans for the same profile while a scan is running", async () => {
     let listCalls = 0;
     const releaseList = deferred<Array<{ name: string; path: string; type: "file"; size: number }>>();
@@ -197,6 +226,30 @@ describe("ScanQueue", () => {
     expect(listings.get("/Movies")).toBe(1);
   });
 
+  it("force manual scans clear snapshots and bypass cooldown", async () => {
+    const listings = new Map<string, number>();
+    const { profileService, queue } = createHarness(async () => ({
+      list: async (path) => {
+        listings.set(path, (listings.get(path) ?? 0) + 1);
+        if (path === "/") return [{ name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" }];
+        if (path === "/Movies") return [{ name: "Movie.2020.mkv", path: "/Movies/Movie.2020.mkv", type: "file", size: 1000 }];
+        return [];
+      },
+      openReadStream: async () => Readable.from("not used"),
+      close: async () => undefined,
+    }));
+    const profileId = await createProfileWithFtp(profileService);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    await waitForStatus(queue, profileId, "succeeded");
+    const forced = queue.enqueueProfileScan(profileId, "manual", profileService.defaultFtpServerId(profileId), { force: true });
+    await waitForStatus(queue, profileId, "succeeded");
+
+    expect(["queued", "running"]).toContain(forced.status);
+    expect(listings.get("/")).toBe(2);
+    expect(listings.get("/Movies")).toBe(2);
+  });
+
   it("schedules a delayed retry for transient FTP disconnects", async () => {
     const { profileService, queue } = createHarness(async () => ({
       list: async () => {
@@ -274,6 +327,227 @@ describe("ScanQueue", () => {
     expect(finished.mediaItems).toBe(2);
     expect(finished.finishedAt).toEqual(expect.any(String));
     expect(profileService.getIndexStatus(profileId).mediaItems).toBe(2);
+  });
+
+  it("persists TMDB enrichment during scan and serves catalogs without live TMDB calls", async () => {
+    const releaseTmdb = deferred<void>();
+    const { db, profileService, queue } = createHarness(
+      async () => ({
+        list: async (path) =>
+          path === "/"
+            ? [{ name: "Movies", path: "/Movies", type: "directory" }]
+            : [
+                { name: "The.Matrix.1999.mkv", path: "/Movies/The.Matrix.1999.mkv", type: "file", size: 1024 * 1024 },
+                { name: "Home.Video.2024.mp4", path: "/Movies/Home Videos/Home.Video.2024.mp4", type: "file", size: 512 * 1024 },
+              ],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, tmdbApiKey: "tmdb-key", scanCooldownMs: 0 },
+    );
+    const created = await profileService.createProfile(`browser-${Math.random()}`, "passphrase");
+    const profileId = created.profileId;
+    profileService.saveFtpConfig(profileId, {
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/"],
+    });
+    profileService.saveAddonCustomization(profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive.",
+      catalogEnabled: true,
+    });
+
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("query=matrix")) {
+        await releaseTmdb.promise;
+        return {
+          ok: true,
+          json: async () => ({
+            results: [
+              {
+                id: 603,
+                title: "The Matrix",
+                overview: "A hacker discovers reality.",
+                poster_path: "/matrix.jpg",
+                backdrop_path: "/matrix-bg.jpg",
+                release_date: "1999-03-31",
+              },
+            ],
+          }),
+        };
+      }
+      if (url.includes("/3/movie/603/external_ids")) {
+        return { ok: true, json: async () => ({ imdb_id: "tt0133093" }) };
+      }
+      return { ok: true, json: async () => ({ results: [] }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    const enriching = await waitForMessage(queue, profileId, "Enriching TMDB metadata");
+    expect(enriching.progressPercent).toBeGreaterThanOrEqual(95);
+    releaseTmdb.resolve();
+    const finished = await waitForStatus(queue, profileId, "succeeded");
+
+    expect(finished.message).toContain("Enriched 1 title");
+    expect(finished.message).toContain("1 unresolved");
+    fetchMock.mockClear();
+
+    const app = createApp({ ...baseConfig, tmdbApiKey: "tmdb-key" }, db);
+    const movieCatalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-movies.json`).expect(200);
+    const otherCatalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-other.json`).expect(200);
+
+    expect(movieCatalog.body.metas).toEqual([
+      {
+        id: "tt0133093",
+        type: "movie",
+        name: "The Matrix",
+        poster: "https://image.tmdb.org/t/p/w500/matrix.jpg",
+        background: "https://image.tmdb.org/t/p/w500/matrix-bg.jpg",
+        description: "A hacker discovers reality.",
+        releaseInfo: "1999",
+      },
+    ]);
+    expect(otherCatalog.body.metas).toEqual([
+      expect.objectContaining({
+        id: expect.stringMatching(/^ftp-folder:\d+$/),
+        type: "movie",
+        name: "Home Videos",
+        poster: "https://addon.example.test/assets/default-folder-poster.png",
+      }),
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps transient TMDB enrichment failures resumable on a later scan", async () => {
+    const { db, profileService, queue } = createHarness(
+      async () => ({
+        list: async () => [{ name: "The.Matrix.1999.mkv", path: "/The.Matrix.1999.mkv", type: "file", size: 1024 * 1024 }],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, tmdbApiKey: "tmdb-key", scanCooldownMs: 0 },
+    );
+    const created = await profileService.createProfile(`browser-${Math.random()}`, "passphrase");
+    const profileId = created.profileId;
+    profileService.saveFtpConfig(profileId, {
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/"],
+    });
+    profileService.saveAddonCustomization(profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive.",
+      catalogEnabled: true,
+    });
+
+    let searchAttempts = 0;
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("/search/movie")) {
+        searchAttempts += 1;
+        if (searchAttempts === 1) return { ok: false, status: 429, json: async () => ({}) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            results: [{ id: 603, title: "The Matrix", poster_path: null, backdrop_path: null, release_date: "1999-03-31" }],
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ imdb_id: "tt0133093" }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    const paused = await waitForStatus(queue, profileId, "succeeded");
+    const server = profileService.getFtpServer(profileId, profileService.defaultFtpServerId(profileId));
+
+    expect(paused.message).toContain("queued for retry");
+    expect(server.pendingScanAfter).toEqual(expect.any(String));
+    db.prepare("update catalog_enrichment set next_attempt_at = ? where profile_id = ?").run("2026-05-04T00:00:00.000Z", profileId);
+
+    queue.enqueueDueScheduledScans(new Date(Date.now() + 6 * 60 * 1000).toISOString());
+    const resumed = await waitForNextStatus(queue, profileId, paused.id, "succeeded");
+    expect(resumed.message).toContain("Enriched 1 title");
+
+    fetchMock.mockClear();
+    const app = createApp({ ...baseConfig, tmdbApiKey: "tmdb-key" }, db);
+    const movieCatalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-movies.json`).expect(200);
+
+    expect(movieCatalog.body.metas).toEqual([
+      expect.objectContaining({
+        id: "tt0133093",
+        type: "movie",
+        name: "The Matrix",
+        releaseInfo: "1999",
+      }),
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps catalog-only servers with no typed catalogs visible in Other", async () => {
+    const { db, profileService, queue } = createHarness(
+      async () => ({
+        list: async (path) =>
+          path === "/"
+            ? [{ name: "Clips", path: "/Clips", type: "directory" }]
+            : [
+                { name: "Family.Video.2024.mp4", path: "/Clips/Family.Video.2024.mp4", type: "file", size: 512 * 1024 },
+                { name: "Trip.Video.2025.mp4", path: "/Clips/Trip.Video.2025.mp4", type: "file", size: 768 * 1024 },
+              ],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, tmdbApiKey: "tmdb-key", scanCooldownMs: 0 },
+    );
+    const created = await profileService.createProfile(`browser-${Math.random()}`, "passphrase");
+    const profileId = created.profileId;
+    profileService.saveFtpConfig(profileId, {
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/"],
+    });
+    profileService.saveAddonCustomization(profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive.",
+      catalogEnabled: true,
+      catalogContentTypes: { movies: false, series: false, anime: false },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    const finished = await waitForStatus(queue, profileId, "succeeded");
+    const app = createApp({ ...baseConfig, tmdbApiKey: "tmdb-key" }, db);
+    const otherCatalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-other.json`).expect(200);
+
+    expect(finished.message).toBe("Indexed 2 media files.");
+    expect(otherCatalog.body.metas).toEqual([
+      expect.objectContaining({
+        id: expect.stringMatching(/^ftp-folder:\d+$/),
+        name: "Clips",
+        description: "2 files across 1 server",
+      }),
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("caps scan progress ETA at one day", async () => {

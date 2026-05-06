@@ -243,35 +243,50 @@ function LibrarySettings({
             onBlur={onCommitCatalogTmdbApiKey}
           />,
         )}
-        {field(
-          "Library layout",
-          "libraryLayout",
-          <select
-            id="libraryLayout"
-            className={filledClass(libraryLayout)}
-            value={libraryLayout}
-            onChange={(event) => onLibraryLayoutChange(event.currentTarget.value as LibraryLayout)}
-          >
-            <option value="auto">Auto detect</option>
-            <option value="folders">Organized by folders</option>
-            <option value="flat">Single folder of files</option>
-          </select>,
-        )}
-        {field(
-          "Stream delivery",
-          "streamDeliveryMode",
-          <select
-            id="streamDeliveryMode"
-            className={filledClass(streamDeliveryMode)}
-            value={streamDeliveryMode}
-            onChange={(event) => onStreamDeliveryModeChange(event.currentTarget.value as StreamDeliveryMode)}
-          >
-            <option value="proxy">Proxy through addon</option>
-            <option value="direct">Direct FTP URL</option>
-          </select>,
-        )}
-        <div className="content-type-options" role="group" aria-label="Server content types">
-          <div className="server-content-row">
+        <div className="library-select-column">
+          {field(
+            "Library layout",
+            "libraryLayout",
+            <select
+              id="libraryLayout"
+              className={filledClass(libraryLayout)}
+              value={libraryLayout}
+              onChange={(event) => onLibraryLayoutChange(event.currentTarget.value as LibraryLayout)}
+            >
+              <option value="auto">Auto detect</option>
+              <option value="folders">Organized by folders</option>
+              <option value="flat">Single folder of files</option>
+            </select>,
+          )}
+          {field(
+            "Stream delivery",
+            "streamDeliveryMode",
+            <select
+              id="streamDeliveryMode"
+              className={filledClass(streamDeliveryMode)}
+              value={streamDeliveryMode}
+              onChange={(event) => onStreamDeliveryModeChange(event.currentTarget.value as StreamDeliveryMode)}
+            >
+              <option value="proxy">Proxy through addon</option>
+              <option value="direct">Direct FTP URL</option>
+            </select>,
+          )}
+        </div>
+        <div className="catalog-options-column" role="group" aria-label="Catalog settings">
+          <label className="toggle-row catalog-toggle" htmlFor="catalogEnabled">
+            <input
+              id="catalogEnabled"
+              type="checkbox"
+              checked={catalogEnabled}
+              onChange={(event) => {
+                const enabled = event.currentTarget.checked;
+                onCatalogEnabledChange(enabled);
+                if (!enabled) onCatalogContentTypeChange("uncategorized", false);
+              }}
+            />
+            Show catalogs in Stremio
+          </label>
+          <div className="content-type-options" role="group" aria-label="Server content types">
             <span className="field-label">Server content</span>
             <div className="server-content-toggles">
               <label className="toggle-row" htmlFor="catalogMovies">
@@ -302,16 +317,17 @@ function LibrarySettings({
                 Anime
               </label>
             </div>
-            <label className="toggle-row catalog-toggle" htmlFor="catalogEnabled">
-              <input
-                id="catalogEnabled"
-                type="checkbox"
-                checked={catalogEnabled}
-                onChange={(event) => onCatalogEnabledChange(event.currentTarget.checked)}
-              />
-              Show indexed FTP catalog in Stremio
-            </label>
           </div>
+          <label className="toggle-row" htmlFor="catalogUncategorized">
+            <input
+              id="catalogUncategorized"
+              type="checkbox"
+              checked={catalogContentTypes.uncategorized !== false}
+              disabled={!catalogEnabled}
+              onChange={(event) => onCatalogContentTypeChange("uncategorized", event.currentTarget.checked)}
+            />
+            Show uncategorized
+          </label>
         </div>
       </div>
       {streamDeliveryMode === "direct" ? (

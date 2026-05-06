@@ -54,6 +54,34 @@ const SCAN_DIRECTORY_SNAPSHOTS_COLUMNS = `
       unique(profile_id, ftp_server_id, dir_path)
 `;
 
+const CATALOG_ENRICHMENT_COLUMNS = `
+      id integer primary key autoincrement,
+      profile_id integer not null references profiles(id) on delete cascade,
+      ftp_server_id integer not null references profile_ftp_servers(id) on delete cascade,
+      item_key text not null,
+      media_kind text not null check (media_kind in ('movie', 'series')),
+      catalog_kind text not null check (catalog_kind in ('movie', 'series', 'anime')),
+      parsed_title text not null,
+      parsed_year integer check (parsed_year is null or parsed_year between 1888 and 2200),
+      source_imdb_id text,
+      status text not null check (status in ('pending', 'matched', 'unmatched', 'retry')),
+      meta_id text,
+      meta_type text check (meta_type is null or meta_type in ('movie', 'series')),
+      meta_name text,
+      poster text,
+      background text,
+      description text,
+      release_info text,
+      algorithm_version integer not null default 1 check (algorithm_version >= 1),
+      attempts integer not null default 0 check (attempts >= 0),
+      error text,
+      next_attempt_at text,
+      last_seen_at text not null,
+      created_at text not null,
+      updated_at text not null,
+      unique(profile_id, ftp_server_id, item_key)
+`;
+
 export function migrate(db: Database.Database) {
   db.exec(`
     create table if not exists profiles (
@@ -69,6 +97,7 @@ export function migrate(db: Database.Database) {
       catalog_content_movies integer not null default 1 check (catalog_content_movies in (0, 1)),
       catalog_content_series integer not null default 1 check (catalog_content_series in (0, 1)),
       catalog_content_anime integer not null default 0 check (catalog_content_anime in (0, 1)),
+      catalog_content_uncategorized integer not null default 1 check (catalog_content_uncategorized in (0, 1)),
       library_layout text not null default 'auto' check (library_layout in ('auto', 'folders', 'flat')),
       stream_delivery_mode text not null default 'proxy' check (stream_delivery_mode in ('proxy', 'direct')),
       stream_name_template text,
@@ -102,6 +131,7 @@ export function migrate(db: Database.Database) {
       catalog_content_movies integer not null default 1 check (catalog_content_movies in (0, 1)),
       catalog_content_series integer not null default 1 check (catalog_content_series in (0, 1)),
       catalog_content_anime integer not null default 0 check (catalog_content_anime in (0, 1)),
+      catalog_content_uncategorized integer not null default 1 check (catalog_content_uncategorized in (0, 1)),
       library_layout text not null default 'auto' check (library_layout in ('auto', 'folders', 'flat')),
       stream_delivery_mode text not null default 'proxy' check (stream_delivery_mode in ('proxy', 'direct')),
       indexed_media_count integer not null default 0 check (indexed_media_count >= 0),
@@ -134,9 +164,15 @@ ${SCAN_JOBS_COLUMNS}
 ${SCAN_DIRECTORY_SNAPSHOTS_COLUMNS}
     );
 
+    create table if not exists catalog_enrichment (
+${CATALOG_ENRICHMENT_COLUMNS}
+    );
+
     create index if not exists idx_scan_jobs_profile_status on scan_jobs(profile_id, status);
     create index if not exists idx_scan_jobs_status_queued on scan_jobs(status, queued_at);
     create index if not exists idx_scan_directory_snapshots_profile_server on scan_directory_snapshots(profile_id, ftp_server_id);
+    create index if not exists idx_catalog_enrichment_status on catalog_enrichment(profile_id, ftp_server_id, status, next_attempt_at);
+    create index if not exists idx_catalog_enrichment_catalog on catalog_enrichment(profile_id, catalog_kind, status);
 
   `);
   ensureProfileColumn(db, "addon_name", "text");
@@ -147,6 +183,7 @@ ${SCAN_DIRECTORY_SNAPSHOTS_COLUMNS}
   ensureProfileColumn(db, "catalog_content_movies", "integer not null default 1");
   ensureProfileColumn(db, "catalog_content_series", "integer not null default 1");
   ensureProfileColumn(db, "catalog_content_anime", "integer not null default 0");
+  ensureProfileColumn(db, "catalog_content_uncategorized", "integer not null default 1");
   ensureProfileColumn(db, "library_layout", "text not null default 'auto'");
   ensureProfileColumn(db, "stream_delivery_mode", "text not null default 'proxy'");
   ensureProfileColumn(db, "stream_name_template", "text");
@@ -159,16 +196,25 @@ ${SCAN_DIRECTORY_SNAPSHOTS_COLUMNS}
   ensureProfileColumn(db, "next_scheduled_scan_at", "text");
   ensureMediaColumn(db, "catalog_kind", "text not null default 'movie'");
   ensureMediaColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
+  ensureFtpServerColumn(db, "catalog_content_uncategorized", "integer not null default 1");
   ensureScanJobColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
   ensureMediaServerUnique(db);
   ensureScanJobsCancelledStatus(db);
   ensureDefaultFtpServers(db);
+  ensureCatalogEnrichmentTable(db);
+  ensureCatalogEnrichmentColumn(db, "algorithm_version", "integer not null default 1");
 }
 
 function ensureProfileColumn(db: Database.Database, name: string, definition: string) {
   const columns = db.prepare("pragma table_info(profiles)").all() as { name: string }[];
   if (columns.some((column) => column.name === name)) return;
   db.prepare(`alter table profiles add column ${name} ${definition}`).run();
+}
+
+function ensureFtpServerColumn(db: Database.Database, name: string, definition: string) {
+  const columns = db.prepare("pragma table_info(profile_ftp_servers)").all() as { name: string }[];
+  if (columns.some((column) => column.name === name)) return;
+  db.prepare(`alter table profile_ftp_servers add column ${name} ${definition}`).run();
 }
 
 function ensureMediaColumn(db: Database.Database, name: string, definition: string) {
@@ -181,6 +227,22 @@ function ensureScanJobColumn(db: Database.Database, name: string, definition: st
   const columns = db.prepare("pragma table_info(scan_jobs)").all() as { name: string }[];
   if (columns.some((column) => column.name === name)) return;
   db.prepare(`alter table scan_jobs add column ${name} ${definition}`).run();
+}
+
+function ensureCatalogEnrichmentColumn(db: Database.Database, name: string, definition: string) {
+  const columns = db.prepare("pragma table_info(catalog_enrichment)").all() as { name: string }[];
+  if (columns.some((column) => column.name === name)) return;
+  db.prepare(`alter table catalog_enrichment add column ${name} ${definition}`).run();
+}
+
+function ensureCatalogEnrichmentTable(db: Database.Database) {
+  db.exec(`
+    create table if not exists catalog_enrichment (
+${CATALOG_ENRICHMENT_COLUMNS}
+    );
+    create index if not exists idx_catalog_enrichment_status on catalog_enrichment(profile_id, ftp_server_id, status, next_attempt_at);
+    create index if not exists idx_catalog_enrichment_catalog on catalog_enrichment(profile_id, catalog_kind, status);
+  `);
 }
 
 function ensureMediaServerUnique(db: Database.Database) {
@@ -249,6 +311,7 @@ function ensureDefaultFtpServers(db: Database.Database) {
     catalog_content_movies: number;
     catalog_content_series: number;
     catalog_content_anime: number;
+    catalog_content_uncategorized: number;
     library_layout: string;
     stream_delivery_mode: string;
     indexed_media_count: number;
@@ -266,10 +329,11 @@ function ensureDefaultFtpServers(db: Database.Database) {
     insert into profile_ftp_servers (
       profile_id, name, encrypted_ftp_config, catalog_enabled, catalog_tmdb_api_key,
       catalog_content_movies, catalog_content_series, catalog_content_anime,
+      catalog_content_uncategorized,
       library_layout, stream_delivery_mode, indexed_media_count, last_indexed_at,
       last_ftp_tested_at, last_ftp_test_ok, scan_interval_minutes, next_scheduled_scan_at,
       created_at, updated_at
-    ) values (?, 'Server 1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) values (?, 'Server 1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const updateMedia = db.prepare("update media_files set ftp_server_id = ? where profile_id = ? and ftp_server_id is null");
   const updateJobs = db.prepare("update scan_jobs set ftp_server_id = ? where profile_id = ? and ftp_server_id is null");
@@ -286,6 +350,7 @@ function ensureDefaultFtpServers(db: Database.Database) {
         profile.catalog_content_movies,
         profile.catalog_content_series,
         profile.catalog_content_anime,
+        profile.catalog_content_uncategorized,
         profile.library_layout,
         profile.stream_delivery_mode,
         profile.indexed_media_count,

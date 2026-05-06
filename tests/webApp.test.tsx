@@ -53,7 +53,7 @@ const testFtpSettingsMock = vi.mocked(testFtpSettings);
 const unlockProfileMock = vi.mocked(unlockProfile);
 const defaultCatalogOptions = {
   catalogTmdbApiKey: "",
-  catalogContentTypes: { movies: true, series: true, anime: false },
+  catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
   libraryLayout: "auto",
   streamDeliveryMode: "proxy",
   streamNameTemplate: "FTP {stream.serverPrefix}{stream.quality}",
@@ -98,7 +98,7 @@ describe("App", () => {
     saveScanScheduleMock.mockReset();
     saveSetupTokenMock.mockReset();
     setupTokenAvailableMock.mockReset();
-    setupTokenAvailableMock.mockReturnValue(false);
+    setupTokenAvailableMock.mockReturnValue(true);
     testFtpSettingsMock.mockReset();
     unlockProfileMock.mockReset();
   });
@@ -135,8 +135,9 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Movies")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
-    expect(within(serverContent).getByLabelText("Show indexed FTP catalog in Stremio")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.15`)).toBeTruthy();
+    expect(screen.getByLabelText("Show catalogs in Stremio")).toBeTruthy();
+    expect(screen.getByLabelText("Show uncategorized")).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.31`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
@@ -191,7 +192,7 @@ describe("App", () => {
             "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: false,
           catalogTmdbApiKey: "",
-          catalogContentTypes: { movies: true, series: true, anime: false },
+          catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
           libraryLayout: "auto",
           streamDeliveryMode: "proxy",
           streamNameTemplate: "{addon.name} | {stream.serverName} | {stream.quality}",
@@ -503,16 +504,31 @@ describe("App", () => {
   });
 
   it("shows only the setup token message on /configure without a token when setup is locked", async () => {
+    setupTokenAvailableMock.mockReturnValue(false);
     window.history.pushState({}, "", "/configure");
     render(<App />);
 
     expect(screen.getByRole("heading", { name: "Setup token required" })).toBeTruthy();
     expect(screen.queryByLabelText("Host")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit addon name" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
+    await waitFor(() => expect(loadSetupStatusMock).toHaveBeenCalled());
+  });
+
+  it("shows only the setup token message on / without a token when setup is locked", async () => {
+    setupTokenAvailableMock.mockReturnValue(false);
+    window.history.pushState({}, "", "/");
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "Setup token required" })).toBeTruthy();
+    expect(screen.queryByLabelText("Host")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit addon name" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create profile" })).toBeNull();
     await waitFor(() => expect(loadSetupStatusMock).toHaveBeenCalled());
   });
 
   it("accepts a setup token on /configure without keeping it in the URL", async () => {
+    setupTokenAvailableMock.mockReturnValue(false);
     window.history.pushState({}, "", "/configure");
     render(<App />);
 
@@ -535,6 +551,7 @@ describe("App", () => {
   });
 
   it("allows /configure without a setup token when the server has no setup token configured", async () => {
+    setupTokenAvailableMock.mockReturnValue(false);
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false });
     window.history.pushState({}, "", "/configure");
     render(<App />);
@@ -545,6 +562,7 @@ describe("App", () => {
   });
 
   it("does not auto-load a saved profile on /configure without a setup token when setup is locked", async () => {
+    setupTokenAvailableMock.mockReturnValue(false);
     window.history.pushState({}, "", "/configure");
     window.localStorage.setItem("stremio-ftp-recovery-uid", "remembered-browser");
     window.localStorage.setItem("stremio-ftp-passphrase", "passphrase");
@@ -728,8 +746,53 @@ describe("App", () => {
     });
     expect(await screen.findByText("Indexed 3 media files.")).toBeTruthy();
     expect(screen.getAllByText("3").length).toBeGreaterThan(0);
-    expect(screen.getByText("Uncategorized")).toBeTruthy();
+    expect(screen.getAllByText("Uncategorized").length).toBeGreaterThan(0);
     expect(screen.getByText("Last scan May 02, 2026, 3:45 PM")).toBeTruthy();
+  });
+
+  it("confirms and queues a force reindex from the Rescan All dropdown", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    rescanIndexMock.mockResolvedValue({
+      scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual", message: "Waiting for scan worker." },
+      servers: [],
+      globalStats: {
+        totalItems: 0,
+        movies: 0,
+        series: 0,
+        anime: 0,
+        uncategorized: 0,
+        servers: 1,
+        activeScans: 0,
+        pendingScans: 1,
+        lastCompletedScanAt: null,
+        status: "working",
+      },
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    const recoveryUidValue = (screen.getByLabelText("Recovery UID") as HTMLInputElement).value;
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    await screen.findByRole("link", { name: "Install in Stremio" });
+    fireEvent.click(screen.getByRole("button", { name: "Rescan all options" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Force reindex all" }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("clear incremental scan snapshots"));
+    await waitFor(() =>
+      expect(rescanIndexMock).toHaveBeenCalledWith({
+        browserUid: recoveryUidValue,
+        passphrase: "passphrase",
+        all: true,
+        force: true,
+      }),
+    );
   });
 
   it("shows a halt button while a scan is active", async () => {
@@ -850,7 +913,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
     await screen.findByRole("link", { name: "Install in Stremio" });
 
-    fireEvent.click(screen.getByLabelText("Show indexed FTP catalog in Stremio"));
+    fireEvent.click(screen.getByLabelText("Show catalogs in Stremio"));
 
     await waitFor(() =>
       expect(saveCustomizationMock).toHaveBeenCalledWith({
@@ -900,7 +963,7 @@ describe("App", () => {
             "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: false,
           catalogTmdbApiKey: "profile-tmdb-key",
-          catalogContentTypes: { movies: true, series: true, anime: true },
+          catalogContentTypes: { movies: true, series: true, anime: true, uncategorized: true },
           libraryLayout: "folders",
           streamDeliveryMode: "direct",
           streamNameTemplate: defaultCatalogOptions.streamNameTemplate,
@@ -926,7 +989,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
     await screen.findByRole("link", { name: "Install in Stremio" });
 
-    fireEvent.click(screen.getByLabelText("Show indexed FTP catalog in Stremio"));
+    fireEvent.click(screen.getByLabelText("Show catalogs in Stremio"));
     fireEvent.change(screen.getByLabelText("Stream delivery"), { target: { value: "direct" } });
 
     await waitFor(() =>
@@ -964,7 +1027,7 @@ describe("App", () => {
     fireEvent.change(screen.getByLabelText("Host"), { target: { value: "ftp.example.test" } });
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
-    fireEvent.click(screen.getByLabelText("Show indexed FTP catalog in Stremio"));
+    fireEvent.click(screen.getByLabelText("Show catalogs in Stremio"));
     fireEvent.change(screen.getByLabelText("TMDB API key"), { target: { value: "profile-tmdb-key" } });
     fireEvent.change(screen.getByLabelText("Stream delivery"), { target: { value: "direct" } });
     await waitFor(() => expect(saveCustomizationMock).toHaveBeenCalled());
@@ -983,7 +1046,7 @@ describe("App", () => {
             "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: true,
           catalogTmdbApiKey: "profile-tmdb-key",
-          catalogContentTypes: { movies: true, series: true, anime: false },
+          catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
           libraryLayout: "auto",
           streamDeliveryMode: "direct",
           streamNameTemplate: defaultCatalogOptions.streamNameTemplate,

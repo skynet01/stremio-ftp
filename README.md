@@ -2,7 +2,7 @@
 
 Stremio FTP is a self-hosted Stremio source addon that lets users stream movies and series episodes from one or more FTP/FTPS servers through a single private Stremio manifest. It exposes a web configuration portal where a user saves FTP credentials, scans each FTP library, and receives a private Stremio manifest URL.
 
-By default this is a stream-source addon: open a movie or episode from another Stremio catalog, and this addon appears as a streaming option when the clicked title is found in the indexed FTP library. Profiles can also enable optional FTP catalogs so indexed movies, series, anime, and unresolved files appear in Stremio with TMDB posters and metadata where possible.
+By default this is a stream-source addon: open a movie or episode from another Stremio catalog, and this addon appears as a streaming option when the clicked title is found in the indexed FTP library. Profiles can also enable optional FTP catalogs so indexed movies, series, anime, and folder-grouped Other files appear in Stremio with TMDB posters and metadata where possible. All FTP catalogs support Stremio search; the Other catalog searches folder groups without calling TMDB at catalog-load time.
 
 ![Stremio FTP configuration portal](https://raw.githubusercontent.com/skynet01/stremio-ftp/main/screenshot-1.jpg)
 
@@ -20,7 +20,8 @@ By default this is a stream-source addon: open a movie or episode from another S
 - Halt control for active scans
 - Persisted scan progress with reload-safe status, progress bar, approximate ETA, and improved repeated-scan estimates from prior successful scans
 - Automatic delayed retry for transient FTP disconnects such as FIN/reset/timeout errors
-- Optional movie, series, anime, and other catalogs generated from the indexed FTP library
+- Optional movie, series, anime, and folder-grouped Other catalogs generated from the indexed FTP library
+- Stremio catalog search for Movies, Series, Anime, and Other
 - Optional TMDB metadata enrichment for catalog posters, descriptions, and artwork
 - Global TMDB API key, plus per-server content type toggles, folder-layout hint, and proxy/direct FTP stream delivery mode
 - Private per-profile manifest URLs for Stremio
@@ -31,8 +32,9 @@ By default this is a stream-source addon: open a movie or episode from another S
 ## Important Caveats
 
 - Use this only with media you own, are licensed to access, or are otherwise legally allowed to stream.
-- Catalogs are off by default per profile. Enable `Show indexed FTP catalog in Stremio` in the portal if you want this addon to expose browsable FTP catalogs.
-- The `Other` catalog is for indexed videos that cannot be resolved by TMDB under the enabled Movies, Series, or Anime options.
+- Catalogs are off by default per profile. Enable `Show catalogs in Stremio` in the portal if you want this addon to expose browsable FTP catalogs.
+- The `Other` catalog is folder-grouped. It includes indexed videos that cannot be resolved by TMDB under the enabled Movies, Series, or Anime options, plus catalog-enabled servers where Movies, Series, and Anime are all disabled. Disable `Show uncategorized` to exclude that server from Other.
+- Typed catalog search uses already-persisted movie, series, and anime metadata. Other catalog search filters folder names, underlying filenames, parsed titles, and parsed years. Catalog loads and searches do not call TMDB live.
 - TMDB enrichment requires `TMDB_API_KEY`. Without it, catalog items that already have IMDb IDs can still appear with basic title/year metadata but no TMDB poster art.
 - After changing FTP or library settings, click `Save FTP settings`. The server schedules a delayed scan for that FTP server about 5 minutes later, unless you manually click `Rescan` first.
 - Scans run in a background queue. New files do not appear as Stremio source options until the next manual or scheduled scan finishes.
@@ -172,8 +174,8 @@ If `SETUP_TOKEN` is set, enter it in the portal unlock form. Older `?setup=...` 
 3. Click `Create profile`. If the FTP form is complete, the portal creates the profile and saves FTP settings in one action.
 4. Click `Test connection`.
 5. Click `Rescan`. The scan runs in the background; you can leave and come back to see the latest persisted status. If needed, click `Halt scan` while it is active.
-6. Optionally enable `Show indexed FTP catalog in Stremio`.
-7. If catalogs are enabled, choose the content types on that server: Movies, Series, Anime, and set a global TMDB key if you want TMDB posters and richer catalog metadata.
+6. Optionally enable `Show catalogs in Stremio`.
+7. If catalogs are enabled, choose the content types on that server: Movies, Series, Anime, and `Show uncategorized`, and set a global TMDB key if you want TMDB posters and richer catalog metadata. If you leave Movies, Series, and Anime disabled while keeping catalogs enabled, that server is treated as an Other-only catalog source unless `Show uncategorized` is disabled.
 8. Choose the library layout hint: auto detect, organized by folders, or a single folder of files.
 9. Keep `Proxy through addon` stream delivery unless you specifically want Stremio clients to receive direct FTP URLs.
 10. Click `Save FTP settings` after changing FTP or library options. A delayed auto-scan is scheduled about 5 minutes later so you can keep editing without immediately locking the form behind a scan.
@@ -190,6 +192,15 @@ For an existing browser profile:
 5. Leave the password field blank to keep the saved password when testing or saving.
 
 The portal remembers the last browser UID, passphrase, and manifest URL in that browser's local storage so repeat visits load the profile automatically. Use this only on trusted devices.
+
+## Stremio Catalog Search
+
+The addon advertises Stremio's optional `search` extra on all four FTP catalogs:
+
+- Movies, Series, and Anime search already-enriched catalog metadata stored during scanning.
+- Other search preserves folder grouping and matches folder names, filenames inside each folder, parsed titles, and parsed years.
+- Search never triggers live TMDB requests during Stremio catalog browsing. TMDB work happens during scan-time enrichment and resumes on later scans if transient errors interrupt it.
+- Other entries without poster art use `/assets/default-folder-poster.png`, a transparent PNG folder-outline poster for Stremio clients that do not render SVG artwork.
 
 ## FTP Root Paths
 
