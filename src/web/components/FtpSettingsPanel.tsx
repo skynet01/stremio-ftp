@@ -229,63 +229,39 @@ function LibrarySettings({
     <div className="library-settings">
       <div className="library-settings-header">
         <h3>Library settings</h3>
+        <h4 className="catalog-options-title">Catalogs</h4>
       </div>
       <div className="library-settings-grid">
-        {field(
-          "TMDB API key",
-          "catalogTmdbApiKey",
-          <input
-            id="catalogTmdbApiKey"
-            className={filledClass(catalogTmdbApiKey)}
-            value={catalogTmdbApiKey}
-            placeholder="Use server default"
-            onChange={(event) => onCatalogTmdbApiKeyChange(event.currentTarget.value)}
-            onBlur={onCommitCatalogTmdbApiKey}
-          />,
-        )}
         <div className="library-select-column">
-          {field(
-            "Library layout",
-            "libraryLayout",
-            <select
-              id="libraryLayout"
-              className={filledClass(libraryLayout)}
-              value={libraryLayout}
-              onChange={(event) => onLibraryLayoutChange(event.currentTarget.value as LibraryLayout)}
-            >
-              <option value="auto">Auto detect</option>
-              <option value="folders">Organized by folders</option>
-              <option value="flat">Single folder of files</option>
-            </select>,
-          )}
-          {field(
-            "Stream delivery",
-            "streamDeliveryMode",
-            <select
-              id="streamDeliveryMode"
-              className={filledClass(streamDeliveryMode)}
-              value={streamDeliveryMode}
-              onChange={(event) => onStreamDeliveryModeChange(event.currentTarget.value as StreamDeliveryMode)}
-            >
-              <option value="proxy">Proxy through addon</option>
-              <option value="direct">Direct FTP URL</option>
-            </select>,
-          )}
-        </div>
-        <div className="catalog-options-column" role="group" aria-label="Catalog settings">
-          <label className="toggle-row catalog-toggle" htmlFor="catalogEnabled">
-            <input
-              id="catalogEnabled"
-              type="checkbox"
-              checked={catalogEnabled}
-              onChange={(event) => {
-                const enabled = event.currentTarget.checked;
-                onCatalogEnabledChange(enabled);
-                if (!enabled) onCatalogContentTypeChange("uncategorized", false);
-              }}
-            />
-            Show catalogs in Stremio
-          </label>
+          <div className="library-select-row">
+            {field(
+              "Library layout",
+              "libraryLayout",
+              <select
+                id="libraryLayout"
+                className={filledClass(libraryLayout)}
+                value={libraryLayout}
+                onChange={(event) => onLibraryLayoutChange(event.currentTarget.value as LibraryLayout)}
+              >
+                <option value="auto">Auto detect</option>
+                <option value="folders">Organized by folders</option>
+                <option value="flat">Single folder of files</option>
+              </select>,
+            )}
+            {field(
+              "Stream delivery",
+              "streamDeliveryMode",
+              <select
+                id="streamDeliveryMode"
+                className={filledClass(streamDeliveryMode)}
+                value={streamDeliveryMode}
+                onChange={(event) => onStreamDeliveryModeChange(event.currentTarget.value as StreamDeliveryMode)}
+              >
+                <option value="proxy">Proxy through addon</option>
+                <option value="direct">Direct FTP URL</option>
+              </select>,
+            )}
+          </div>
           <div className="content-type-options" role="group" aria-label="Server content types">
             <span className="field-label">Server content</span>
             <div className="server-content-toggles">
@@ -318,6 +294,33 @@ function LibrarySettings({
               </label>
             </div>
           </div>
+          {field(
+            "TMDB API key",
+            "catalogTmdbApiKey",
+            <input
+              id="catalogTmdbApiKey"
+              className={filledClass(catalogTmdbApiKey)}
+              value={catalogTmdbApiKey}
+              placeholder="Use server default"
+              onChange={(event) => onCatalogTmdbApiKeyChange(event.currentTarget.value)}
+              onBlur={onCommitCatalogTmdbApiKey}
+            />,
+          )}
+        </div>
+        <div className="catalog-options-column" role="group" aria-label="Catalogs">
+          <label className="toggle-row" htmlFor="catalogEnabled">
+            <input
+              id="catalogEnabled"
+              type="checkbox"
+              checked={catalogEnabled}
+              onChange={(event) => {
+                const enabled = event.currentTarget.checked;
+                onCatalogEnabledChange(enabled);
+                if (!enabled) onCatalogContentTypeChange("uncategorized", false);
+              }}
+            />
+            Show content catalogs
+          </label>
           <label className="toggle-row" htmlFor="catalogUncategorized">
             <input
               id="catalogUncategorized"
@@ -326,7 +329,7 @@ function LibrarySettings({
               disabled={!catalogEnabled}
               onChange={(event) => onCatalogContentTypeChange("uncategorized", event.currentTarget.checked)}
             />
-            Show uncategorized
+            Show Uncategorized catalogs
           </label>
         </div>
       </div>

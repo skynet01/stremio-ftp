@@ -130,13 +130,23 @@ describe("App", () => {
     expect(screen.getByLabelText("TMDB API key")).toBeTruthy();
     expect(screen.getByLabelText("Library layout")).toBeTruthy();
     expect(screen.getByLabelText("Stream delivery")).toBeTruthy();
+    const catalogsGroup = screen.getByRole("group", { name: "Catalogs" });
+    const contentCatalogsToggle = within(catalogsGroup).getByLabelText("Show content catalogs");
+    const uncategorizedCatalogsToggle = within(catalogsGroup).getByLabelText("Show Uncategorized catalogs");
+    expect(screen.getByRole("heading", { name: "Catalogs" }).closest(".library-settings-header")).toBeTruthy();
+    expect(contentCatalogsToggle).toBeTruthy();
+    expect(uncategorizedCatalogsToggle).toBeTruthy();
+    expect(contentCatalogsToggle.closest("label")?.classList.contains("catalog-toggle")).toBe(false);
+    expect(
+      Boolean(
+        contentCatalogsToggle.compareDocumentPosition(uncategorizedCatalogsToggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
     const serverContent = screen.getByRole("group", { name: "Server content types" });
     expect(within(serverContent).getByText("Server content")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Movies")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
-    expect(screen.getByLabelText("Show catalogs in Stremio")).toBeTruthy();
-    expect(screen.getByLabelText("Show uncategorized")).toBeTruthy();
     expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.31`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
@@ -913,7 +923,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
     await screen.findByRole("link", { name: "Install in Stremio" });
 
-    fireEvent.click(screen.getByLabelText("Show catalogs in Stremio"));
+    fireEvent.click(screen.getByLabelText("Show content catalogs"));
 
     await waitFor(() =>
       expect(saveCustomizationMock).toHaveBeenCalledWith({
@@ -989,7 +999,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
     await screen.findByRole("link", { name: "Install in Stremio" });
 
-    fireEvent.click(screen.getByLabelText("Show catalogs in Stremio"));
+    fireEvent.click(screen.getByLabelText("Show content catalogs"));
     fireEvent.change(screen.getByLabelText("Stream delivery"), { target: { value: "direct" } });
 
     await waitFor(() =>
@@ -1027,7 +1037,7 @@ describe("App", () => {
     fireEvent.change(screen.getByLabelText("Host"), { target: { value: "ftp.example.test" } });
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
-    fireEvent.click(screen.getByLabelText("Show catalogs in Stremio"));
+    fireEvent.click(screen.getByLabelText("Show content catalogs"));
     fireEvent.change(screen.getByLabelText("TMDB API key"), { target: { value: "profile-tmdb-key" } });
     fireEvent.change(screen.getByLabelText("Stream delivery"), { target: { value: "direct" } });
     await waitFor(() => expect(saveCustomizationMock).toHaveBeenCalled());

@@ -141,61 +141,39 @@ export function ServerAccordion({
                   <div className="library-settings server-section">
                     <div className="library-settings-header">
                       <h3>Library settings</h3>
+                      <h4 className="catalog-options-title">Catalogs</h4>
                     </div>
                     <div className="library-settings-grid">
                       <div className="library-select-column">
-                        {field(
-                          "Library layout",
-                          `libraryLayout-${server.id}`,
-                          <select
-                            id={`libraryLayout-${server.id}`}
-                            className={filledClass(server.libraryLayout)}
-                            value={server.libraryLayout}
-                            onChange={(event) => onServerChange(server.id, { libraryLayout: event.currentTarget.value as LibraryLayout })}
-                          >
-                            <option value="auto">Auto detect</option>
-                            <option value="folders">Organized by folders</option>
-                            <option value="flat">Single folder of files</option>
-                          </select>,
-                        )}
-                        {field(
-                          "Stream delivery",
-                          `streamDeliveryMode-${server.id}`,
-                          <select
-                            id={`streamDeliveryMode-${server.id}`}
-                            className={filledClass(server.streamDeliveryMode)}
-                            value={server.streamDeliveryMode}
-                            onChange={(event) => onServerChange(server.id, { streamDeliveryMode: event.currentTarget.value as StreamDeliveryMode })}
-                          >
-                            <option value="proxy">Proxy through addon</option>
-                            <option value="direct">Direct FTP URL</option>
-                          </select>,
-                        )}
-                        {server.streamDeliveryMode === "direct" ? (
-                          <p className="field-hint">Direct FTP sends FTP URLs to Stremio clients that can open them.</p>
-                        ) : null}
-                      </div>
-                      <div className="catalog-options-column" role="group" aria-label="Catalog settings">
-                        <label className="toggle-row catalog-toggle" htmlFor={`catalogEnabled-${server.id}`}>
-                          <input
-                            id={`catalogEnabled-${server.id}`}
-                            type="checkbox"
-                            checked={server.catalogEnabled}
-                            onChange={(event) => {
-                              const catalogEnabled = event.currentTarget.checked;
-                              onServerChange(
-                                server.id,
-                                catalogEnabled
-                                  ? { catalogEnabled }
-                                  : {
-                                      catalogEnabled,
-                                      catalogContentTypes: { ...server.catalogContentTypes, uncategorized: false },
-                                    },
-                              );
-                            }}
-                          />
-                          Show catalogs in Stremio
-                        </label>
+                        <div className="library-select-row">
+                          {field(
+                            "Library layout",
+                            `libraryLayout-${server.id}`,
+                            <select
+                              id={`libraryLayout-${server.id}`}
+                              className={filledClass(server.libraryLayout)}
+                              value={server.libraryLayout}
+                              onChange={(event) => onServerChange(server.id, { libraryLayout: event.currentTarget.value as LibraryLayout })}
+                            >
+                              <option value="auto">Auto detect</option>
+                              <option value="folders">Organized by folders</option>
+                              <option value="flat">Single folder of files</option>
+                            </select>,
+                          )}
+                          {field(
+                            "Stream delivery",
+                            `streamDeliveryMode-${server.id}`,
+                            <select
+                              id={`streamDeliveryMode-${server.id}`}
+                              className={filledClass(server.streamDeliveryMode)}
+                              value={server.streamDeliveryMode}
+                              onChange={(event) => onServerChange(server.id, { streamDeliveryMode: event.currentTarget.value as StreamDeliveryMode })}
+                            >
+                              <option value="proxy">Proxy through addon</option>
+                              <option value="direct">Direct FTP URL</option>
+                            </select>,
+                          )}
+                        </div>
                         <div className="content-type-options" role="group" aria-label="Server content types">
                           <span className="field-label">Server content</span>
                           <div className="server-content-toggles">
@@ -216,6 +194,31 @@ export function ServerAccordion({
                             ))}
                           </div>
                         </div>
+                        {server.streamDeliveryMode === "direct" ? (
+                          <p className="field-hint">Direct FTP sends FTP URLs to Stremio clients that can open them.</p>
+                        ) : null}
+                      </div>
+                      <div className="catalog-options-column" role="group" aria-label="Catalogs">
+                        <label className="toggle-row" htmlFor={`catalogEnabled-${server.id}`}>
+                          <input
+                            id={`catalogEnabled-${server.id}`}
+                            type="checkbox"
+                            checked={server.catalogEnabled}
+                            onChange={(event) => {
+                              const catalogEnabled = event.currentTarget.checked;
+                              onServerChange(
+                                server.id,
+                                catalogEnabled
+                                  ? { catalogEnabled }
+                                  : {
+                                      catalogEnabled,
+                                      catalogContentTypes: { ...server.catalogContentTypes, uncategorized: false },
+                                    },
+                              );
+                            }}
+                          />
+                          Show content catalogs
+                        </label>
                         <label className="toggle-row" htmlFor={`uncategorized-${server.id}`}>
                           <input
                             id={`uncategorized-${server.id}`}
@@ -228,7 +231,7 @@ export function ServerAccordion({
                               })
                             }
                           />
-                          Show uncategorized
+                          Show Uncategorized catalogs
                         </label>
                       </div>
                     </div>

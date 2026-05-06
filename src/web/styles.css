@@ -583,6 +583,7 @@ textarea:focus-visible,
   grid-template-columns: minmax(0, 65fr) minmax(300px, 35fr);
   gap: clamp(34px, 4.4vw, 64px);
   border-top: 1px solid rgba(255, 255, 255, 0.055);
+  padding-inline: clamp(22px, 3vw, 30px);
 }
 
 .server-detail-grid .server-section {
@@ -1088,6 +1089,10 @@ input:-webkit-autofill:active {
 }
 
 .library-settings-header {
+  display: grid;
+  grid-template-columns: minmax(0, 65fr) minmax(300px, 35fr);
+  align-items: end;
+  gap: clamp(34px, 4.4vw, 64px);
   margin-bottom: 18px;
 }
 
@@ -1101,16 +1106,11 @@ input:-webkit-autofill:active {
   line-height: 1.05;
 }
 
-.catalog-toggle {
-  margin-top: 0;
-  color: var(--accent);
-}
-
 .library-settings-grid {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(260px, 0.86fr);
+  grid-template-columns: minmax(0, 65fr) minmax(300px, 35fr);
   align-items: start;
-  gap: 18px;
+  gap: clamp(34px, 4.4vw, 64px);
 }
 
 .library-select-column,
@@ -1119,12 +1119,35 @@ input:-webkit-autofill:active {
   gap: 14px;
 }
 
+.library-select-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
 .catalog-options-column {
   align-content: start;
-  padding: 12px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  background: rgba(5, 7, 10, 0.22);
+  padding: 0 0 2px 30px;
+  border-left: 1px solid var(--line);
+}
+
+.catalog-options-title {
+  margin: 0;
+  color: var(--cream);
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.15;
+}
+
+.library-settings-header .catalog-options-title {
+  padding-left: 30px;
+  border-left: 1px solid var(--line);
+}
+
+.catalog-options-column .toggle-row {
+  margin-top: 0;
 }
 
 .content-type-options {
@@ -1439,6 +1462,8 @@ input:-webkit-autofill:active {
   .profile-grid,
   .ftp-field-grid,
   .library-settings-grid,
+  .library-settings-header,
+  .library-select-row,
   .server-detail-grid,
   .global-settings-row,
   .stream-formatter-grid {
@@ -1460,8 +1485,15 @@ input:-webkit-autofill:active {
     gap: 8px;
   }
 
-  .catalog-toggle {
-    white-space: normal;
+  .catalog-options-column {
+    padding: 18px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .library-settings-header .catalog-options-title {
+    padding-left: 0;
+    border-left: 0;
   }
 
   .install-action-row {
