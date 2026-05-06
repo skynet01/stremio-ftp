@@ -11,6 +11,18 @@ function sentenceCase(value: string) {
   return trimmed ? `${trimmed[0].toUpperCase()}${trimmed.slice(1)}` : trimmed;
 }
 
+function formatEntryDate(date: string | undefined) {
+  if (!date) return "Local";
+  const shortDate = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (shortDate) {
+    const [, year, month, day] = shortDate;
+    return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit" }).format(new Date(Number(year), Number(month) - 1, Number(day)));
+  }
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit" }).format(parsed);
+}
+
 export function ChangelogDrawer({
   appVersion,
   entries,
@@ -34,12 +46,14 @@ export function ChangelogDrawer({
         </div>
         {entries.length ? (
           <ol className="changelog-list">
-            {entries.map((commit) => {
+            {entries.slice(0, 15).map((commit) => {
               const entry = changelogParts(commit.subject);
               return (
                 <li key={`${commit.hash}-${commit.subject}`}>
-                  <code>{commit.hash}</code>
-                  <span className="changelog-tag">{entry.tag}</span>
+                  <time dateTime={commit.date} title={commit.hash}>
+                    {formatEntryDate(commit.date)}
+                  </time>
+                  <span className={`changelog-tag changelog-tag-${entry.tag}`}>{entry.tag}</span>
                   <span>{entry.subject}</span>
                 </li>
               );

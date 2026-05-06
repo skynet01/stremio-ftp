@@ -35,8 +35,15 @@ export function GlobalStatusPanel({
     function closeOnOutsidePointer(event: MouseEvent) {
       if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
     }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
     window.addEventListener("mousedown", closeOnOutsidePointer);
-    return () => window.removeEventListener("mousedown", closeOnOutsidePointer);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("mousedown", closeOnOutsidePointer);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
   }, [menuOpen]);
 
   return (
@@ -59,15 +66,17 @@ export function GlobalStatusPanel({
               aria-label="Rescan all options"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
+              aria-controls="global-rescan-menu"
               disabled={actionDisabled || !onForceReindexAll}
               onClick={() => setMenuOpen((open) => !open)}
             >
               <ChevronDown size={16} aria-hidden="true" />
             </button>
             {menuOpen && onForceReindexAll ? (
-              <div className="global-rescan-menu" role="menu">
+              <div className="global-rescan-menu" id="global-rescan-menu" role="menu">
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     setMenuOpen(false);
                     onForceReindexAll();
@@ -128,7 +137,7 @@ export function GlobalStatusPanel({
             aria-valuemax={100}
             aria-valuenow={scanProgress.progressPercent}
           >
-            <span style={{ width: `${scanProgress.progressPercent}%` }} />
+            <span style={{ transform: `scaleX(${Math.max(0, Math.min(100, scanProgress.progressPercent)) / 100})` }} />
           </div>
           {scanProgress.currentPath ? <p className="scan-current-path">{scanProgress.currentPath}</p> : null}
         </div>

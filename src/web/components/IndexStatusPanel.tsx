@@ -94,7 +94,7 @@ export function IndexStatusPanel({
             aria-valuemax={100}
             aria-valuenow={scanStatus.progressPercent}
           >
-            <span style={{ width: `${scanStatus.progressPercent}%` }} />
+            <span style={{ transform: `scaleX(${Math.max(0, Math.min(100, scanStatus.progressPercent)) / 100})` }} />
           </div>
           {scanStatus.currentPath ? <p className="scan-current-path">{scanStatus.currentPath}</p> : null}
         </div>

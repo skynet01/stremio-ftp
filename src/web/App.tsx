@@ -73,7 +73,7 @@ const EMPTY_GLOBAL_STATS: GlobalStats = {
 
 const GITHUB_URL = "https://github.com/skynet01/stremio-ftp";
 const APP_VERSION = __APP_VERSION__;
-const GITHUB_COMMITS_API = "https://api.github.com/repos/skynet01/stremio-ftp/commits?per_page=6";
+const GITHUB_COMMITS_API = "https://api.github.com/repos/skynet01/stremio-ftp/commits?per_page=15";
 const SERVER_LIBRARY_SETTING_KEYS = new Set<keyof ServerForm>([
   "catalogEnabled",
   "catalogContentTypes",
@@ -292,7 +292,8 @@ export function App() {
           .map((item): ChangelogEntry | null => {
             const sha = typeof item?.sha === "string" ? item.sha.slice(0, 7) : "";
             const message = typeof item?.commit?.message === "string" ? item.commit.message.split("\n")[0] : "";
-            return sha && message ? { hash: sha, subject: message } : null;
+            const date = typeof item?.commit?.committer?.date === "string" ? item.commit.committer.date : undefined;
+            return sha && message ? { date, hash: sha, subject: message } : null;
           })
           .filter((entry): entry is ChangelogEntry => Boolean(entry));
         if (commits.length) setChangelogEntries(commits);
@@ -675,6 +676,22 @@ export function App() {
     void saveAddonBranding(normalizedCustomization());
   }
 
+  const installPanel = showSetupTokenMessage ? null : (
+    <InstallPanel
+      profileReady={profileReady}
+      manifestUrl={manifestUrl}
+      stremioInstallUrl={stremioInstallUrl}
+      profileMessage={profileMessage}
+      profileState={profileState}
+      recoveryUid={recoveryUid}
+      passphrase={passphrase}
+      onRecoveryUidChange={updateRecoveryUid}
+      onPassphraseChange={setPassphrase}
+      onCreateProfile={() => void saveProfile()}
+      onUnlockProfile={() => void unlockExistingProfile()}
+    />
+  );
+
   return (
     <main className="app-shell">
       <Topbar
@@ -710,6 +727,7 @@ export function App() {
       {showSetupTokenMessage ? <SetupTokenPanel onSubmit={unlockConfiguration} /> : null}
       {showSetupTokenMessage ? null : (
         <div className="portal-stack">
+          {!profileReady ? installPanel : null}
           <GlobalStatusPanel
             stats={globalStats}
             scanProgress={globalScanProgress}
@@ -756,19 +774,7 @@ export function App() {
             onCancelServer={(serverId) => void haltServer(serverId)}
             onUpdateScanSchedule={(serverId, intervalMinutes) => void updateScanSchedule(serverId, intervalMinutes)}
           />
-          <InstallPanel
-            profileReady={profileReady}
-            manifestUrl={manifestUrl}
-            stremioInstallUrl={stremioInstallUrl}
-            profileMessage={profileMessage}
-            profileState={profileState}
-            recoveryUid={recoveryUid}
-            passphrase={passphrase}
-            onRecoveryUidChange={updateRecoveryUid}
-            onPassphraseChange={setPassphrase}
-            onCreateProfile={() => void saveProfile()}
-            onUnlockProfile={() => void unlockExistingProfile()}
-          />
+          {profileReady ? installPanel : null}
         </div>
       )}
       <Footer appVersion={APP_VERSION} currentYear={currentYear} githubUrl={GITHUB_URL} onOpenChangelog={() => setChangelogOpen(true)} />

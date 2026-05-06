@@ -1,1 +1,1 @@
-export type ChangelogEntry = { hash: string; subject: string };
+export type ChangelogEntry = { date?: string; hash: string; subject: string };

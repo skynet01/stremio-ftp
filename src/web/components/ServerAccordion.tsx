@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CircleStop, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, CircleStop, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type { AddonCustomization, ConnectionStatus, IndexStatus, ScanSchedule, ScanStatus } from "../api.js";
 import {
   field,
@@ -127,17 +127,26 @@ export function ServerAccordion({
           const expanded = expandedServerId === server.id;
           const active = scanIsActive(server.scanStatus);
           const badge = serverBadge(server);
+          const triggerId = `server-trigger-${server.id}`;
+          const bodyId = `server-panel-${server.id}`;
           return (
             <div className="server-accordion-item" key={server.id}>
-              <button type="button" className="server-accordion-trigger" onClick={() => onToggle(server.id)}>
-                {expanded ? <ChevronDown size={18} aria-hidden={true} /> : <ChevronRight size={18} aria-hidden={true} />}
+              <button
+                type="button"
+                className="server-accordion-trigger"
+                id={triggerId}
+                aria-expanded={expanded}
+                aria-controls={bodyId}
+                onClick={() => onToggle(server.id)}
+              >
+                <ChevronRight size={18} aria-hidden={true} />
                 <span className="server-title">{server.name || `Server ${index + 1}`}</span>
                 <span className="server-subtitle">{server.host || "No host configured"}</span>
                 <span className="server-metrics">{serverSummary(server)}</span>
                 <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
               </button>
               {expanded ? (
-                <div className="server-accordion-body">
+                <div className="server-accordion-body" id={bodyId} role="region" aria-labelledby={triggerId}>
                   <div className="library-settings server-section">
                     <div className="library-settings-header">
                       <h3>Library settings</h3>
@@ -388,7 +397,7 @@ export function ServerAccordion({
                             <span>{active ? formatEta(server.scanStatus.estimatedSecondsRemaining) : `${server.scanStatus.progressPercent}%`}</span>
                           </div>
                           <div className="scan-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={server.scanStatus.progressPercent}>
-                            <span style={{ width: `${server.scanStatus.progressPercent}%` }} />
+                            <span style={{ transform: `scaleX(${Math.max(0, Math.min(100, server.scanStatus.progressPercent)) / 100})` }} />
                           </div>
                           {server.scanStatus.currentPath ? <p className="scan-current-path">{server.scanStatus.currentPath}</p> : null}
                         </div>

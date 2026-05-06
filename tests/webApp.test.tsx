@@ -218,9 +218,11 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Changelog" }));
 
     expect(screen.getByRole("dialog", { name: "Latest changes" })).toBeTruthy();
+    expect(screen.getAllByText("May 05").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("feat").length).toBeGreaterThan(0);
     expect(screen.getAllByText("fix").length).toBeGreaterThan(0);
-    expect(screen.getByText("Save library settings with ftp settings")).toBeTruthy();
-    expect(screen.queryByText("fix: save library settings with ftp settings")).toBeNull();
+    expect(screen.getByText("Persist searchable FTP catalogs")).toBeTruthy();
+    expect(screen.queryByText("feat: persist searchable FTP catalogs")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Latest changes" })).toBeNull();
   });
@@ -792,7 +794,7 @@ describe("App", () => {
 
     await screen.findByRole("link", { name: "Install in Stremio" });
     fireEvent.click(screen.getByRole("button", { name: "Rescan all options" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Force reindex all" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Force reindex all" }));
 
     expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("clear incremental scan snapshots"));
     await waitFor(() =>
