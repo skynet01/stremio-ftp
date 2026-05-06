@@ -2035,3 +2035,7 @@ git commit -m "docs: add docker deployment guide"
 - Scope control: v1 excludes catalogs, transcoding, archive extraction, WebDAV, cloud accounts, and full-file media caching, matching the design doc.
 - Test coverage: each behavior area starts with failing tests and ends with targeted verification commands.
 - Type consistency: profile IDs are numeric database IDs; install tokens are raw URL tokens externally and SHA-256 hashes in storage; Stremio IDs stay raw IMDb/Cinemeta IDs.
+
+## Related Learnings
+
+- [TVA-inspired configuration portal polish](../../solutions/design-patterns/tva-inspired-config-portal-polish-2026-05-06.md) documents the later portal refinements that supersede parts of the initial UI plan: setup-first sequencing, TVA visual language, accessible accordions/menus, transform-based progress animation, custom checkbox states, and a scannable changelog drawer.

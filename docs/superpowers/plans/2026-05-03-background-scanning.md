@@ -75,3 +75,7 @@
 - [ ] Run `npm test`, `npm run build`, `git diff --check`.
 - [ ] Commit and push.
 - [ ] Deploy with `./deploy-stremio-ftp.sh`.
+
+## Related Learnings
+
+- [TVA-inspired configuration portal polish](../../solutions/design-patterns/tva-inspired-config-portal-polish-2026-05-06.md) documents the later progress-bar refinement: keep visible scan progress animation, but drive the fill with `transform: scaleX(...)` instead of layout-affecting `width` animation.

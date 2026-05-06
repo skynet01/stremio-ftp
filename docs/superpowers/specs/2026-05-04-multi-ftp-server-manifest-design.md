@@ -52,3 +52,7 @@ A single profile and manifest URL can aggregate multiple FTP servers. Each serve
 - Bump package version to `0.3.0`.
 - Existing manifest URLs continue to work after migration.
 - Deployment rebuilds only the `stremio-ftp` service and keeps the existing SQLite volume.
+
+## Related Learnings
+
+- [TVA-inspired configuration portal polish](../../solutions/design-patterns/tva-inspired-config-portal-polish-2026-05-06.md) documents the later portal refinements for line-separated server accordions, global status motion, accessible disclosure/menu behavior, non-white unchecked checkbox states, and TVA-style changelog scanability.

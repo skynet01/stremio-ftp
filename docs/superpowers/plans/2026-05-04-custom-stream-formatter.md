@@ -68,3 +68,7 @@
 - [ ] Run `npm test`.
 - [ ] Run `npm run build`.
 - [ ] Commit, push, deploy, and verify the live health endpoint.
+
+## Related Learnings
+
+- [TVA-inspired configuration portal polish](../../solutions/design-patterns/tva-inspired-config-portal-polish-2026-05-06.md) captures later visual-system refinements that should carry into any collapsed formatter settings UI: compact TVA-inspired surfaces, restrained animation, accessible disclosure behavior, and scan-friendly status details.

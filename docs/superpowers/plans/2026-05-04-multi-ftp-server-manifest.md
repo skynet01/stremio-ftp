@@ -92,3 +92,7 @@
 - [ ] Document multi-server manifests, debounce scanning, and `FTP_MAX_CONNECTIONS`.
 - [ ] Run `npm test`, `npm run typecheck`, and `npm run build`.
 - [ ] Commit, push, sync to `/opt/stremio-ftp`, rebuild/restart `stremio-ftp`, and verify live health/config.
+
+## Related Learnings
+
+- [TVA-inspired configuration portal polish](../../solutions/design-patterns/tva-inspired-config-portal-polish-2026-05-06.md) records follow-up UI decisions from this multi-server portal work: accessible server accordions, a global status menu with keyboard behavior, transform-driven progress fill, custom checkbox states, and denser TVA-inspired surfaces.

@@ -317,3 +317,7 @@ Manual verification should include:
 - Archive extraction.
 - Radarr/Sonarr integration.
 - WebDAV support.
+
+## Related Learnings
+
+- [TVA-inspired configuration portal polish](../../solutions/design-patterns/tva-inspired-config-portal-polish-2026-05-06.md) captures the later portal design-system refinements for setup-first ordering, accessible disclosure/menu semantics, transform-based progress motion, custom checkboxes, and changelog scanability.
