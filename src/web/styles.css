@@ -1697,6 +1697,19 @@ input:-webkit-autofill:active {
     flex-direction: column;
   }
 
+  .global-status-panel .panel-header {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .global-status-state {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 12px;
+  }
+
   .portal-grid,
   .portal-stack,
   .field-grid,
@@ -1714,6 +1727,39 @@ input:-webkit-autofill:active {
   .global-status-list,
   .server-accordion-trigger {
     grid-template-columns: 1fr;
+  }
+
+  .server-accordion-trigger {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 8px 10px;
+    align-items: center;
+  }
+
+  .server-accordion-trigger svg {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .server-title {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .server-accordion-trigger .badge {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+    width: max-content;
+  }
+
+  .server-subtitle {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+
+  .server-metrics {
+    grid-column: 2 / -1;
+    grid-row: 3;
   }
 
   .changelog-list li {

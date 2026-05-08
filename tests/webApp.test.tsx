@@ -15,9 +15,12 @@ import {
   saveFtpSettings,
   saveScanSchedule,
   saveSetupToken,
+  markSetupTokenValidated,
   setupTokenAvailable,
+  setupTokenNeedsValidation,
   testFtpSettings,
   unlockProfile,
+  validateSetupToken,
 } from "../src/web/api";
 
 vi.mock("../src/web/api", () => ({
@@ -32,9 +35,12 @@ vi.mock("../src/web/api", () => ({
   saveFtpSettings: vi.fn(),
   saveScanSchedule: vi.fn(),
   saveSetupToken: vi.fn(),
+  markSetupTokenValidated: vi.fn(),
   setupTokenAvailable: vi.fn(),
+  setupTokenNeedsValidation: vi.fn(),
   testFtpSettings: vi.fn(),
   unlockProfile: vi.fn(),
+  validateSetupToken: vi.fn(),
 }));
 
 const cancelScanMock = vi.mocked(cancelScan);
@@ -48,9 +54,12 @@ const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
 const saveScanScheduleMock = vi.mocked(saveScanSchedule);
 const saveSetupTokenMock = vi.mocked(saveSetupToken);
+const markSetupTokenValidatedMock = vi.mocked(markSetupTokenValidated);
 const setupTokenAvailableMock = vi.mocked(setupTokenAvailable);
+const setupTokenNeedsValidationMock = vi.mocked(setupTokenNeedsValidation);
 const testFtpSettingsMock = vi.mocked(testFtpSettings);
 const unlockProfileMock = vi.mocked(unlockProfile);
+const validateSetupTokenMock = vi.mocked(validateSetupToken);
 const defaultCatalogOptions = {
   catalogTmdbApiKey: "",
   catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
@@ -97,10 +106,15 @@ describe("App", () => {
     saveFtpSettingsMock.mockReset();
     saveScanScheduleMock.mockReset();
     saveSetupTokenMock.mockReset();
+    markSetupTokenValidatedMock.mockReset();
     setupTokenAvailableMock.mockReset();
     setupTokenAvailableMock.mockReturnValue(true);
+    setupTokenNeedsValidationMock.mockReset();
+    setupTokenNeedsValidationMock.mockReturnValue(false);
     testFtpSettingsMock.mockReset();
     unlockProfileMock.mockReset();
+    validateSetupTokenMock.mockReset();
+    validateSetupTokenMock.mockResolvedValue({ ok: true });
   });
 
   it("renders the FTP configuration portal", () => {
@@ -548,8 +562,38 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Unlock configuration" }));
 
     await waitFor(() => expect(saveSetupTokenMock).toHaveBeenCalledWith("setup-secret-123"));
+    expect(markSetupTokenValidatedMock).toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Setup token required" })).toBeNull());
     expect(screen.getByLabelText("Host")).toBeTruthy();
+  });
+
+  it("keeps settings locked when an entered setup token is rejected", async () => {
+    setupTokenAvailableMock.mockReturnValue(false);
+    validateSetupTokenMock.mockRejectedValue(new Error("Invalid setup token"));
+    window.history.pushState({}, "", "/configure");
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Setup token"), { target: { value: "wrong-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "Unlock configuration" }));
+
+    await waitFor(() => expect(validateSetupTokenMock).toHaveBeenCalled());
+    expect(screen.getByRole("heading", { name: "Setup token required" })).toBeTruthy();
+    expect(screen.getByText("Invalid setup token")).toBeTruthy();
+    expect(screen.queryByLabelText("Host")).toBeNull();
+  });
+
+  it("keeps settings locked when an existing setup token session is rejected", async () => {
+    setupTokenAvailableMock.mockReturnValue(true);
+    setupTokenNeedsValidationMock.mockReturnValue(true);
+    validateSetupTokenMock.mockRejectedValue(new Error("Invalid setup token"));
+    window.history.pushState({}, "", "/configure");
+    render(<App />);
+
+    await waitFor(() => expect(validateSetupTokenMock).toHaveBeenCalled());
+    expect(saveSetupTokenMock).toHaveBeenCalledWith("");
+    expect(screen.getByRole("heading", { name: "Setup token required" })).toBeTruthy();
+    expect(screen.getByText("Invalid setup token")).toBeTruthy();
+    expect(screen.queryByLabelText("Host")).toBeNull();
   });
 
   it("uses an existing setup token session on /configure", async () => {

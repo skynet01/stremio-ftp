@@ -121,4 +121,32 @@ describe("app health", () => {
     expect(missingToken.text).toContain("configure app");
     expect(withToken.text).toContain("configure app");
   });
+
+  it("validates setup tokens before unlocking configuration APIs", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const config: AppConfig = {
+      baseUrl: "https://addon.example.test",
+      configDir: "/tmp",
+      sqlitePath: ":memory:",
+      encryptionKey: "0123456789abcdef0123456789abcdef",
+      setupToken: "setup-secret-123",
+      allowPublicProfileApi: false,
+      port: 7000,
+      logLevel: "error",
+      crawlerConcurrency: 2,
+      ftpTimeoutMs: 15000,
+      ftpMaxConnections: 4,
+      maxOnDemandSearchMs: 4500,
+      profileRateLimitWindowMs: 600000,
+      profileRateLimitMax: 30,
+      tmdbApiKey: null,
+    };
+    const app = createApp(config, db);
+
+    await request(app).get("/api/setup/validate").set("x-setup-token", "wrong-token").expect(403);
+    const response = await request(app).get("/api/setup/validate").set("x-setup-token", "setup-secret-123").expect(200);
+
+    expect(response.body).toEqual({ ok: true });
+  });
 });

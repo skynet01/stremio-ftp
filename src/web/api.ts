@@ -95,18 +95,29 @@ export type FtpServerSettings = {
 };
 
 const SETUP_TOKEN_STORAGE_KEY = "stremio-ftp-setup-token";
+const SETUP_TOKEN_VALIDATED_STORAGE_KEY = "stremio-ftp-setup-token-validated";
 let setupToken = loadSetupToken();
 
 export function setupTokenAvailable() {
   return Boolean(setupToken);
 }
 
+export function setupTokenNeedsValidation() {
+  return Boolean(setupToken && window.sessionStorage.getItem(SETUP_TOKEN_VALIDATED_STORAGE_KEY) !== setupToken);
+}
+
+export function markSetupTokenValidated() {
+  if (setupToken) window.sessionStorage.setItem(SETUP_TOKEN_VALIDATED_STORAGE_KEY, setupToken);
+}
+
 export function saveSetupToken(token: string) {
   setupToken = token.trim();
   if (setupToken) {
     window.sessionStorage.setItem(SETUP_TOKEN_STORAGE_KEY, setupToken);
+    window.sessionStorage.removeItem(SETUP_TOKEN_VALIDATED_STORAGE_KEY);
   } else {
     window.sessionStorage.removeItem(SETUP_TOKEN_STORAGE_KEY);
+    window.sessionStorage.removeItem(SETUP_TOKEN_VALIDATED_STORAGE_KEY);
   }
 }
 
@@ -122,6 +133,7 @@ function loadSetupToken() {
   const queryToken = params.get("setup")?.trim() || "";
   if (queryToken) {
     window.sessionStorage.setItem(SETUP_TOKEN_STORAGE_KEY, queryToken);
+    window.sessionStorage.removeItem(SETUP_TOKEN_VALIDATED_STORAGE_KEY);
     params.delete("setup");
     const query = params.toString();
     const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
@@ -231,6 +243,11 @@ export async function unlockProfile(request: CreateProfileRequest): Promise<Unlo
 export async function loadSetupStatus(): Promise<SetupStatusResponse> {
   const response = await fetch("/api/setup", { headers: authHeaders() });
   return readJson<SetupStatusResponse>(response);
+}
+
+export async function validateSetupToken(): Promise<{ ok: true }> {
+  const response = await fetch("/api/setup/validate", { headers: authHeaders() });
+  return readJson<{ ok: true }>(response);
 }
 
 export async function testFtpSettings(request: AuthenticatedFtpRequest): Promise<{ ok: true; connectionStatus: ConnectionStatus }> {

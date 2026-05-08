@@ -1,5 +1,6 @@
 /* @vitest-environment jsdom */
 import "@testing-library/jest-dom/vitest";
+import { readFileSync } from "node:fs";
 import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GlobalStatusPanel } from "../src/web/components/GlobalStatusPanel";
@@ -42,5 +43,12 @@ describe("GlobalStatusPanel", () => {
 
     expect(screen.getByText("11")).toHaveClass("stat-value-pulse");
     vi.useRealTimers();
+  });
+
+  it("stacks the global index header controls on mobile", () => {
+    const css = readFileSync("src/web/styles.css", "utf8");
+
+    expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.global-status-panel\s+\.panel-header\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*1fr;/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.global-status-state\s*{[^}]*width:\s*100%;[^}]*justify-content:\s*space-between;/);
   });
 });

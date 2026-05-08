@@ -1,7 +1,15 @@
 import { useState } from "react";
 import { Notice } from "./ui.js";
 
-export function SetupTokenPanel({ onSubmit }: { onSubmit: (setupToken: string) => void }) {
+export function SetupTokenPanel({
+  error,
+  validating,
+  onSubmit,
+}: {
+  error?: string | null;
+  validating?: boolean;
+  onSubmit: (setupToken: string) => void;
+}) {
   const [setupToken, setSetupToken] = useState("");
 
   return (
@@ -26,10 +34,11 @@ export function SetupTokenPanel({ onSubmit }: { onSubmit: (setupToken: string) =
           autoComplete="current-password"
           onChange={(event) => setSetupToken(event.currentTarget.value)}
         />
-        <button type="submit" className="primary-button" disabled={!setupToken.trim()}>
-          Unlock configuration
+        <button type="submit" className="primary-button" disabled={validating || !setupToken.trim()}>
+          {validating ? "Checking..." : "Unlock configuration"}
         </button>
       </form>
+      {error ? <Notice>{error}</Notice> : null}
     </section>
   );
 }

@@ -15,10 +15,13 @@ import {
   saveFtpServer,
   saveScanSchedule,
   saveSetupToken,
+  markSetupTokenValidated,
   setupTokenAvailable,
+  setupTokenNeedsValidation,
   testFtpSettings,
   testFtpServer,
   unlockProfile,
+  validateSetupToken,
 } from "./api.js";
 import { APP_CHANGELOG } from "./changelog.js";
 import { ChangelogDrawer } from "./components/ChangelogDrawer.js";
@@ -210,10 +213,13 @@ function hasCompleteFtpConfig(server: ServerForm) {
 
 export function App() {
   const [hasSetupToken, setHasSetupToken] = useState(() => setupTokenAvailable());
+  const [setupTokenTrusted, setSetupTokenTrusted] = useState(() => !setupTokenNeedsValidation());
   const needsSetupProbe = !hasSetupToken;
-  const [setupTokenRequired, setSetupTokenRequired] = useState<boolean | null>(() => (needsSetupProbe ? null : false));
-  const showSetupTokenMessage = !hasSetupToken && setupTokenRequired !== false;
-  const settingsUnlocked = !showSetupTokenMessage;
+  const [setupTokenRequired, setSetupTokenRequired] = useState<boolean | null>(() => (needsSetupProbe || !setupTokenTrusted ? null : false));
+  const [setupTokenError, setSetupTokenError] = useState<string | null>(null);
+  const [setupTokenValidating, setSetupTokenValidating] = useState(() => hasSetupToken && !setupTokenTrusted);
+  const settingsUnlocked = setupTokenRequired === false || (hasSetupToken && setupTokenTrusted);
+  const showSetupTokenMessage = !settingsUnlocked;
   const [recoveryUid, setRecoveryUid] = useState(() => {
     const stored = window.localStorage.getItem(STORAGE_KEYS.recoveryUid);
     if (stored) return stored;
@@ -266,6 +272,26 @@ export function App() {
       .then((status) => setSetupTokenRequired(status.setupTokenRequired))
       .catch(() => setSetupTokenRequired(true));
   }, []);
+
+  useEffect(() => {
+    if (!hasSetupToken || setupTokenTrusted) return;
+    setSetupTokenValidating(true);
+    void validateSetupToken()
+      .then(() => {
+        markSetupTokenValidated();
+        setSetupTokenTrusted(true);
+        setSetupTokenRequired(false);
+        setSetupTokenError(null);
+      })
+      .catch((error) => {
+        saveSetupToken("");
+        setHasSetupToken(false);
+        setSetupTokenTrusted(true);
+        setSetupTokenRequired(true);
+        setSetupTokenError(error instanceof Error ? error.message : "Invalid setup token");
+      })
+      .finally(() => setSetupTokenValidating(false));
+  }, [hasSetupToken, setupTokenTrusted]);
 
   useEffect(() => {
     if (showSetupTokenMessage || setupTokenRequired === null) return;
@@ -405,11 +431,27 @@ export function App() {
     window.localStorage.setItem(STORAGE_KEYS.recoveryUid, value);
   }
 
-  function unlockConfiguration(setupToken: string) {
+  async function unlockConfiguration(setupToken: string) {
     const trimmed = setupToken.trim();
+    if (!trimmed) return;
     saveSetupToken(trimmed);
-    setHasSetupToken(Boolean(trimmed));
-    setSetupTokenRequired(false);
+    setSetupTokenValidating(true);
+    setSetupTokenError(null);
+    try {
+      await validateSetupToken();
+      markSetupTokenValidated();
+      setHasSetupToken(true);
+      setSetupTokenTrusted(true);
+      setSetupTokenRequired(false);
+    } catch (error) {
+      saveSetupToken("");
+      setHasSetupToken(false);
+      setSetupTokenTrusted(true);
+      setSetupTokenRequired(true);
+      setSetupTokenError(error instanceof Error ? error.message : "Invalid setup token");
+    } finally {
+      setSetupTokenValidating(false);
+    }
   }
 
   function updateServer(serverId: number, patch: Partial<ServerForm>) {
@@ -724,7 +766,7 @@ export function App() {
         onCommitDescription={commitAddonDescription}
         onCommitLogo={commitAddonLogo}
       />
-      {showSetupTokenMessage ? <SetupTokenPanel onSubmit={unlockConfiguration} /> : null}
+      {showSetupTokenMessage ? <SetupTokenPanel error={setupTokenError} validating={setupTokenValidating} onSubmit={(token) => void unlockConfiguration(token)} /> : null}
       {showSetupTokenMessage ? null : (
         <div className="portal-stack">
           {!profileReady ? installPanel : null}

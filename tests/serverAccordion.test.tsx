@@ -154,4 +154,11 @@ describe("ServerAccordion", () => {
     expect(css).toMatch(/\.server-detail-grid\s*{[^}]*padding-inline:\s*clamp\(22px,\s*3vw,\s*30px\);/s);
     expect(css).toMatch(/\.catalog-options-column\s+\.toggle-row\s*{[^}]*margin-top:\s*0;/s);
   });
+
+  it("keeps the mobile server badge inline with the trigger title row", () => {
+    const css = readFileSync("src/web/styles.css", "utf8");
+
+    expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.server-accordion-trigger\s*{[^}]*grid-template-columns:\s*24px\s+minmax\(0,\s*1fr\)\s+auto;/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.server-accordion-trigger\s+\.badge\s*{[^}]*grid-column:\s*3;/);
+  });
 });
