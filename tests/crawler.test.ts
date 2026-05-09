@@ -83,6 +83,67 @@ describe("crawler", () => {
     expect(listings.get("/")).toBe(2);
     expect(listings.get("/Movies")).toBe(1);
     expect(repo.findMovie(profileId, "tt0000000", "matrix", 1999)).toHaveLength(1);
+    const snapshot = db.prepare("select fingerprint from scan_directory_snapshots where profile_id = ? and dir_path = '/' order by id desc limit 1").get(profileId) as {
+      fingerprint: string;
+    };
+    expect(snapshot.fingerprint).not.toMatch(/^parser-\d{4}/);
+  });
+
+  it("accepts legacy parser-versioned snapshots and rewrites them as stable directory fingerprints", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+    const listings = new Map<string, number>();
+    repo.upsertParsedFile(profileId, {
+      ftpPath: "/Movies/The.Matrix.1999.mkv",
+      filename: "The.Matrix.1999.mkv",
+      normalizedFilename: "the matrix 1999",
+      extension: "mkv",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "matrix",
+      parsedYear: 1999,
+      season: null,
+      episode: null,
+      imdbId: "tt0000000",
+      quality: null,
+      confidence: 100,
+      sizeBytes: 1000,
+      modifiedAt: null,
+      lastSeenAt: "2026-05-01T00:00:00.000Z",
+    });
+    repo.saveDirectorySnapshot(profileId, {
+      ftpServerId: null,
+      dirPath: "/",
+      entryCount: 1,
+      fingerprint: "parser-2026-05-04-3\ndirectory\tMovies\t/Movies\t\t2026-05-01T00:00:00.000Z",
+      modifiedAt: null,
+      lastSeenAt: "2026-05-01T00:00:00.000Z",
+    });
+    const factory: FtpClientFactory = async () => ({
+      list: async (path) => {
+        listings.set(path, (listings.get(path) ?? 0) + 1);
+        if (path === "/") {
+          return [{ name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" }];
+        }
+        throw new Error(`unexpected list ${path}`);
+      },
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
+      close: async () => undefined,
+    });
+
+    const result = await crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo });
+
+    expect(result.filesSeen).toBe(1);
+    expect(listings.get("/")).toBe(1);
+    expect(listings.has("/Movies")).toBe(false);
+    const snapshot = db.prepare("select fingerprint from scan_directory_snapshots where profile_id = ? and dir_path = '/' order by id desc limit 1").get(profileId) as {
+      fingerprint: string;
+    };
+    expect(snapshot.fingerprint).toBe("directory\tMovies\t/Movies\t\t2026-05-01T00:00:00.000Z");
   });
 
   it("skips invalid zero-numbered episodes without failing the crawl", async () => {

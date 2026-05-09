@@ -5,7 +5,7 @@ import type { FtpClientFactory, FtpEntry } from "./ftpTypes.js";
 
 const MAX_CRAWL_DEPTH = 64;
 const MAX_CRAWL_ENTRIES = 100000;
-const CRAWL_SNAPSHOT_VERSION = "parser-2026-05-04-3";
+const LEGACY_CRAWL_SNAPSHOT_PREFIXES = ["parser-2026-05-04-3"];
 
 export type CrawlProfileRootInput = {
   profileId: number;
@@ -63,7 +63,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     const fingerprint = fingerprintEntries(entries);
     if (
       canTrustDirectoryFingerprint(entries) &&
-      input.repo.directorySnapshotMatchesFingerprint(input.profileId, input.ftpServerId ?? null, normalizedPath, entries.length, fingerprint)
+      snapshotMatchesDirectoryFingerprint(input.repo, input.profileId, input.ftpServerId ?? null, normalizedPath, entries.length, fingerprint)
     ) {
       entriesSeen += entries.length;
       filesSeen += input.repo.markSeenUnderRoot(input.profileId, normalizedPath, crawlStartedAt, input.ftpServerId ?? null);
@@ -148,9 +148,22 @@ function canTrustDirectoryFingerprint(entries: FtpEntry[]) {
 }
 
 function fingerprintEntries(entries: FtpEntry[]) {
-  const entryFingerprint = entries
+  return entries
     .map((entry) => [entry.type, entry.name, normalizeFtpPath(entry.path), entry.size ?? "", entry.modifiedAt ?? ""].join("\t"))
     .sort()
     .join("\n");
-  return `${CRAWL_SNAPSHOT_VERSION}\n${entryFingerprint}`;
+}
+
+function snapshotMatchesDirectoryFingerprint(
+  repo: MediaRepository,
+  profileId: number,
+  ftpServerId: number | null,
+  dirPath: string,
+  entryCount: number,
+  fingerprint: string,
+) {
+  if (repo.directorySnapshotMatchesFingerprint(profileId, ftpServerId, dirPath, entryCount, fingerprint)) return true;
+  return LEGACY_CRAWL_SNAPSHOT_PREFIXES.some((prefix) =>
+    repo.directorySnapshotMatchesFingerprint(profileId, ftpServerId, dirPath, entryCount, `${prefix}\n${fingerprint}`),
+  );
 }
