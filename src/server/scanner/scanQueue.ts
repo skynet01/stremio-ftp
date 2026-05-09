@@ -13,6 +13,7 @@ const ENRICHMENT_BATCH_LIMIT = 5000;
 
 export type ScanTrigger = "manual" | "scheduled";
 export type ScanJobStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
+export type ScanMode = "full" | "incremental" | "force";
 export type EnqueueScanOptions = {
   force?: boolean;
 };
@@ -34,6 +35,7 @@ export type ProfileScanStatus = {
   finishedAt: string | null;
   mediaItems: number;
   mediaItemsAdded: number;
+  scanMode: ScanMode | null;
 };
 
 type ScanJobRow = {
@@ -43,6 +45,7 @@ type ScanJobRow = {
   status: Exclude<ScanJobStatus, "idle">;
   trigger: ScanTrigger;
   progress_percent: number;
+  scan_mode: ScanMode | null;
   entries_seen: number;
   files_seen: number;
   media_items_added: number;
@@ -94,17 +97,18 @@ export class ScanQueue {
       }
 
       if (trigger === "manual") this.profileService.clearPendingScan(profileId, ftpServerId);
+      const scanMode = this.scanModeForNextJob(profileId, ftpServerId, Boolean(options.force));
       if (options.force) this.mediaRepository.clearDirectorySnapshots(profileId, ftpServerId);
 
       const now = new Date().toISOString();
       const insert = this.db
         .prepare(
           `
-          insert into scan_jobs (profile_id, ftp_server_id, status, trigger, progress_percent, message, queued_at)
-          values (?, ?, 'queued', ?, 0, ?, ?)
+          insert into scan_jobs (profile_id, ftp_server_id, status, trigger, progress_percent, scan_mode, message, queued_at)
+          values (?, ?, 'queued', ?, 0, ?, ?, ?)
         `,
         )
-        .run(profileId, ftpServerId, trigger, options.force ? "Waiting for force reindex worker." : "Waiting for scan worker.", now);
+        .run(profileId, ftpServerId, trigger, scanMode, queuedScanMessage(scanMode), now);
       return Number(insert.lastInsertRowid);
     })();
 
@@ -140,6 +144,7 @@ export class ScanQueue {
         finishedAt: null,
         mediaItems: this.mediaRepository.countForServer(profileId, ftpServerId),
         mediaItemsAdded: 0,
+        scanMode: null,
       };
     }
     return this.rowToStatus(scanJob);
@@ -211,16 +216,16 @@ export class ScanQueue {
         update scan_jobs
         set status = 'running',
             started_at = ?,
-            message = 'Scanning FTP library.'
+            message = ?
         where id = ?
       `,
       )
-      .run(startedAt, row.id);
+      .run(startedAt, `${scanModeLabel(row.scan_mode ?? "full")} starting.`, row.id);
 
     const abortController = new AbortController();
     this.activeControllers.set(row.id, abortController);
 
-    void this.runJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), abortController.signal)
+    void this.runJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), row.scan_mode ?? "full", abortController.signal)
       .catch((error: unknown) => {
         if (isScanCancelledError(error)) {
           this.cancelJob(row.id);
@@ -237,7 +242,7 @@ export class ScanQueue {
       });
   }
 
-  private async runJob(jobId: number, profileId: number, ftpServerId: number, signal: AbortSignal) {
+  private async runJob(jobId: number, profileId: number, ftpServerId: number, scanMode: ScanMode, signal: AbortSignal) {
     const ftpConfig = this.profileService.getFtpServerConfig(profileId, ftpServerId);
     if (!ftpConfig) throw new Error("FTP settings are not configured");
     const customization = this.profileService.getFtpServerCustomization(profileId, ftpServerId);
@@ -259,7 +264,7 @@ export class ScanQueue {
           contentTypes: customization.catalogContentTypes,
           libraryLayout: customization.libraryLayout,
         },
-        onProgress: (progress) => this.saveProgress(jobId, startedAt, progress, progressBaselineItems),
+        onProgress: (progress) => this.saveProgress(jobId, startedAt, progress, progressBaselineItems, scanMode),
         signal,
       });
       filesSeen += result.filesSeen;
@@ -362,7 +367,7 @@ export class ScanQueue {
       .run(progressPercent, `Enriching TMDB metadata: ${processed}/${total}${title}.`, jobId);
   }
 
-  private saveProgress(jobId: number, startedAt: number, progress: CrawlProgress, baselineItems: number | null) {
+  private saveProgress(jobId: number, startedAt: number, progress: CrawlProgress, baselineItems: number | null, scanMode: ScanMode) {
     const elapsedSeconds = Math.max(1, (Date.now() - startedAt) / 1000);
     const progressItems = progress.entriesSeen + progress.directoriesSeen;
     const estimatedTotal = baselineItems ? Math.max(baselineItems, progressItems || 1) : Math.max(this.config.scanProgressAverageItems, progress.entriesSeen || 1);
@@ -394,7 +399,7 @@ export class ScanQueue {
         progress.directoriesSeen,
         progress.currentPath,
         estimatedSecondsRemaining,
-        scanProgressMessage(progress),
+        scanProgressMessage(progress, scanMode),
         jobId,
       );
   }
@@ -490,6 +495,11 @@ export class ScanQueue {
     return this.getJobStatus(Number(result.lastInsertRowid));
   }
 
+  private scanModeForNextJob(profileId: number, ftpServerId: number, force: boolean): ScanMode {
+    if (force) return "force";
+    return this.mediaRepository.countDirectorySnapshots(profileId, ftpServerId) > 0 ? "incremental" : "full";
+  }
+
   private activeJobForServer(profileId: number, ftpServerId: number) {
     const row = this.db
       .prepare(
@@ -524,6 +534,7 @@ export class ScanQueue {
       startedAt: row.started_at,
       finishedAt: row.finished_at,
       mediaItemsAdded: row.media_items_added,
+      scanMode: row.scan_mode,
       mediaItems:
         row.ftp_server_id === null
           ? this.mediaRepository.countForProfile(row.profile_id)
@@ -553,10 +564,26 @@ function countFromRow(row: unknown): number {
   return row.count;
 }
 
-function scanProgressMessage(progress: CrawlProgress) {
+function scanProgressMessage(progress: CrawlProgress, scanMode: ScanMode) {
   const fileLabel = `${progress.filesSeen} media file${progress.filesSeen === 1 ? "" : "s"}`;
   const entryLabel = `${progress.entriesSeen} entr${progress.entriesSeen === 1 ? "y" : "ies"}`;
-  return `Scanning FTP library: ${fileLabel}, ${entryLabel} seen.`;
+  return `${scanModeLabel(scanMode)}: ${fileLabel}, ${entryLabel} seen.`;
+}
+
+function queuedScanMessage(scanMode: ScanMode) {
+  return `Waiting for ${scanModeWorkerLabel(scanMode)} worker.`;
+}
+
+function scanModeLabel(scanMode: ScanMode) {
+  if (scanMode === "incremental") return "Difference update";
+  if (scanMode === "force") return "Force reindex";
+  return "Full scan";
+}
+
+function scanModeWorkerLabel(scanMode: ScanMode) {
+  if (scanMode === "incremental") return "difference update";
+  if (scanMode === "force") return "force reindex";
+  return "full scan";
 }
 
 function scanFinishedMessage(
@@ -611,6 +638,7 @@ function scanJobRow(row: unknown): ScanJobRow {
     status: persistedScanStatus(row.status),
     trigger: scanTrigger(row.trigger),
     progress_percent: numberField(row, "progress_percent"),
+    scan_mode: nullableScanMode(row.scan_mode),
     entries_seen: numberField(row, "entries_seen"),
     files_seen: numberField(row, "files_seen"),
     directories_seen: numberField(row, "directories_seen"),
@@ -651,6 +679,19 @@ function nullableStringField(row: Record<string, unknown>, key: keyof ScanJobRow
   const value = row[key];
   if (value === null || typeof value === "string") return value;
   throw new Error(`${SCAN_JOB_ROW_ERROR}: ${String(key)}`);
+}
+
+function nullableScanMode(value: unknown): ScanMode | null {
+  switch (value) {
+    case null:
+      return null;
+    case "full":
+    case "incremental":
+    case "force":
+      return value;
+    default:
+      throw new Error(`${SCAN_JOB_ROW_ERROR}: scan_mode`);
+  }
 }
 
 function persistedScanStatus(value: unknown): ScanJobRow["status"] {

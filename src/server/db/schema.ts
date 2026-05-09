@@ -7,6 +7,7 @@ const SCAN_JOBS_COLUMNS = `
       status text not null check (status in ('queued', 'running', 'succeeded', 'failed', 'skipped', 'cancelled')),
       trigger text not null check (trigger in ('manual', 'scheduled')),
       progress_percent integer not null default 0 check (progress_percent between 0 and 100),
+      scan_mode text check (scan_mode in ('full', 'incremental', 'force')),
       entries_seen integer not null default 0 check (entries_seen >= 0),
       files_seen integer not null default 0 check (files_seen >= 0),
       media_items_added integer not null default 0 check (media_items_added >= 0),
@@ -199,6 +200,7 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureMediaColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
   ensureFtpServerColumn(db, "catalog_content_uncategorized", "integer not null default 1");
   ensureScanJobColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
+  ensureScanJobColumn(db, "scan_mode", "text");
   ensureScanJobColumn(db, "media_items_added", "integer not null default 0");
   ensureMediaServerUnique(db);
   ensureScanJobsCancelledStatus(db);

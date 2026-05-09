@@ -219,11 +219,36 @@ describe("ScanQueue", () => {
 
     queue.enqueueProfileScan(profileId, "manual");
     await waitForStatus(queue, profileId, "succeeded");
-    queue.enqueueProfileScan(profileId, "manual");
+    const incremental = queue.enqueueProfileScan(profileId, "manual");
+    expect(incremental.scanMode).toBe("incremental");
     await waitForStatus(queue, profileId, "succeeded");
 
     expect(listings.get("/")).toBe(2);
     expect(listings.get("/Movies")).toBe(1);
+  });
+
+  it("labels first scans as full scans and repeated scans as difference updates", async () => {
+    const { profileService, queue } = createHarness(
+      async () => ({
+        list: async (path) =>
+          path === "/"
+            ? [{ name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" }]
+            : [{ name: "Movie.2020.mkv", path: "/Movies/Movie.2020.mkv", type: "file", size: 1000 }],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, scanCooldownMs: 0 },
+    );
+    const profileId = await createProfileWithFtp(profileService);
+
+    const first = queue.enqueueProfileScan(profileId, "manual");
+    expect(first.scanMode).toBe("full");
+    expect(first.message).toContain("Full scan");
+    await waitForStatus(queue, profileId, "succeeded");
+
+    const second = queue.enqueueProfileScan(profileId, "manual");
+    expect(second.scanMode).toBe("incremental");
+    expect(second.message).toContain("Difference update");
   });
 
   it("force manual scans clear snapshots and bypass cooldown", async () => {
@@ -243,6 +268,7 @@ describe("ScanQueue", () => {
     queue.enqueueProfileScan(profileId, "manual");
     await waitForStatus(queue, profileId, "succeeded");
     const forced = queue.enqueueProfileScan(profileId, "manual", profileService.defaultFtpServerId(profileId), { force: true });
+    expect(forced.scanMode).toBe("force");
     await waitForStatus(queue, profileId, "succeeded");
 
     expect(["queued", "running"]).toContain(forced.status);

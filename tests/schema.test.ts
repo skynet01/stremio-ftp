@@ -112,6 +112,8 @@ describe("schema", () => {
         "progress_percent",
         "entries_seen",
         "files_seen",
+        "scan_mode",
+        "media_items_added",
         "directories_seen",
         "current_path",
         "estimated_seconds_remaining",

@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../src/web/App";
+import { App, globalScanProgressForServers } from "../src/web/App";
 import {
   cancelScan,
   createProfile,
@@ -84,6 +84,8 @@ const idleScanStatus = {
   startedAt: null,
   finishedAt: null,
   mediaItems: 0,
+  mediaItemsAdded: 0,
+  scanMode: null,
 };
 const manualScanSchedule = {
   intervalMinutes: 0,
@@ -167,6 +169,36 @@ describe("App", () => {
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
       "https://github.com/skynet01/stremio-ftp",
     );
+  });
+
+  it("keeps completed servers in the current global scan progress batch", () => {
+    const progress = globalScanProgressForServers([
+      {
+        scanStatus: {
+          ...idleScanStatus,
+          id: 21,
+          status: "succeeded",
+          trigger: "manual",
+          progressPercent: 100,
+          queuedAt: "2026-05-09T00:00:00.000Z",
+          startedAt: "2026-05-09T00:00:00.000Z",
+          finishedAt: "2026-05-09T00:01:00.000Z",
+        },
+      },
+      {
+        scanStatus: {
+          ...idleScanStatus,
+          id: 22,
+          status: "running",
+          trigger: "manual",
+          progressPercent: 10,
+          queuedAt: "2026-05-09T00:00:00.001Z",
+          startedAt: "2026-05-09T00:01:00.000Z",
+        },
+      },
+    ]);
+
+    expect(progress?.progressPercent).toBe(55);
   });
 
   it("edits stream formatter templates with a live preview", async () => {

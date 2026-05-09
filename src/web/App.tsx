@@ -119,6 +119,7 @@ function emptyServerForm(id = 0): ServerForm {
       id: null,
       status: "idle",
       trigger: null,
+      scanMode: null,
       progressPercent: 0,
       entriesSeen: 0,
       filesSeen: 0,
@@ -131,6 +132,7 @@ function emptyServerForm(id = 0): ServerForm {
       startedAt: null,
       finishedAt: null,
       mediaItems: 0,
+      mediaItemsAdded: 0,
     },
     scanSchedule: { intervalMinutes: 0, nextScheduledScanAt: null },
     connectionStatus: { lastTestedAt: null, ok: null },
@@ -212,6 +214,39 @@ function hasCompleteFtpConfig(server: ServerForm) {
   return Boolean(ftpConfig.host && ftpConfig.username && ftpConfig.password && Number.isFinite(ftpConfig.port) && ftpConfig.roots.length > 0);
 }
 
+export function globalScanProgressForServers(servers: Array<Pick<ServerForm, "scanStatus">>): GlobalScanProgress | null {
+  const activeServers = servers.filter((server) => scanIsActive(server.scanStatus));
+  if (!activeServers.length) return null;
+
+  const batchStart = Math.min(...activeServers.map((server) => scanBatchTime(server.scanStatus)).filter(Number.isFinite));
+  const activeTriggers = new Set(activeServers.map((server) => server.scanStatus.trigger).filter(Boolean));
+  const batchWindowMs = 60_000;
+  const progressServers = Number.isFinite(batchStart)
+    ? servers.filter((server) => {
+        const batchTime = scanBatchTime(server.scanStatus);
+        return Number.isFinite(batchTime) && batchTime >= batchStart - batchWindowMs && (!server.scanStatus.trigger || activeTriggers.has(server.scanStatus.trigger));
+      })
+    : activeServers;
+  const measuredServers = progressServers.length ? progressServers : activeServers;
+  const queuedOnly = activeServers.every((server) => server.scanStatus.status === "queued");
+  const progressPercent = Math.round(
+    measuredServers.reduce((sum, server) => sum + Math.max(0, Math.min(100, server.scanStatus.progressPercent)), 0) / measuredServers.length,
+  );
+  const currentPath = activeServers.find((server) => server.scanStatus.currentPath)?.scanStatus.currentPath ?? null;
+  const activeMessage = activeServers.find((server) => server.scanStatus.message?.startsWith("Enriching TMDB metadata"))?.scanStatus.message;
+  return {
+    progressPercent,
+    label: activeMessage || `${activeServers.length} ${activeServers.length === 1 ? "server" : "servers"} ${queuedOnly ? "queued" : "indexing"}`,
+    currentPath,
+  };
+}
+
+function scanBatchTime(scanStatus: ScanStatus) {
+  const value = scanStatus.queuedAt ?? scanStatus.startedAt;
+  if (!value) return Number.NaN;
+  return new Date(value).getTime();
+}
+
 export function App() {
   const [hasSetupToken, setHasSetupToken] = useState(() => setupTokenAvailable());
   const [setupTokenTrusted, setSetupTokenTrusted] = useState(() => !setupTokenNeedsValidation());
@@ -251,21 +286,7 @@ export function App() {
   const profileReady = profileState === "created" || profileState === "unlocked";
   const currentYear = new Date().getFullYear();
   const anyScanActive = useMemo(() => servers.some((server) => scanIsActive(server.scanStatus)), [servers]);
-  const globalScanProgress = useMemo<GlobalScanProgress | null>(() => {
-    const activeServers = servers.filter((server) => scanIsActive(server.scanStatus));
-    if (!activeServers.length) return null;
-    const queuedOnly = activeServers.every((server) => server.scanStatus.status === "queued");
-    const progressPercent = Math.round(
-      activeServers.reduce((sum, server) => sum + Math.max(0, Math.min(100, server.scanStatus.progressPercent)), 0) / activeServers.length,
-    );
-    const currentPath = activeServers.find((server) => server.scanStatus.currentPath)?.scanStatus.currentPath ?? null;
-    const activeMessage = activeServers.find((server) => server.scanStatus.message?.startsWith("Enriching TMDB metadata"))?.scanStatus.message;
-    return {
-      progressPercent,
-      label: activeMessage || `${activeServers.length} ${activeServers.length === 1 ? "server" : "servers"} ${queuedOnly ? "queued" : "indexing"}`,
-      currentPath,
-    };
-  }, [servers]);
+  const globalScanProgress = useMemo<GlobalScanProgress | null>(() => globalScanProgressForServers(servers), [servers]);
 
   useEffect(() => {
     if (!needsSetupProbe) return;

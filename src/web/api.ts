@@ -45,6 +45,7 @@ export type ScanStatus = {
   id: number | null;
   status: "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
   trigger: "manual" | "scheduled" | null;
+  scanMode: "full" | "incremental" | "force" | null;
   progressPercent: number;
   entriesSeen: number;
   filesSeen: number;
@@ -57,6 +58,7 @@ export type ScanStatus = {
   startedAt: string | null;
   finishedAt: string | null;
   mediaItems: number;
+  mediaItemsAdded: number;
 };
 
 export type ScanSchedule = {

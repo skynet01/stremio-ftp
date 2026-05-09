@@ -45,7 +45,7 @@ function serverSummary(server: ServerForm) {
   if (server.scanStatus.status === "queued") return "Queued for indexing";
   if (server.scanStatus.status === "running") {
     const path = server.scanStatus.currentPath ? ` - ${server.scanStatus.currentPath}` : "";
-    return `${server.scanStatus.progressPercent}% scanning${path}`;
+    return `${server.scanStatus.progressPercent}% ${scanModeLabel(server.scanStatus).toLowerCase()}${path}`;
   }
   if (server.scanStatus.status === "failed") {
     const reason = server.scanStatus.error || server.scanStatus.message || "Scan failed";
@@ -79,7 +79,15 @@ function serverBadge(server: ServerForm): { tone: StatusTone; label: string } {
 function scanProgressLabel(scanStatus: ScanStatus) {
   if (scanStatus.status === "idle") return "No active scan";
   if (scanStatus.message?.startsWith("Enriching TMDB metadata")) return scanStatus.message;
+  if (scanStatus.status === "queued" || scanStatus.status === "running") return scanModeLabel(scanStatus);
   return scanStatus.status;
+}
+
+function scanModeLabel(scanStatus: ScanStatus) {
+  if (scanStatus.scanMode === "incremental") return "Difference update";
+  if (scanStatus.scanMode === "force") return "Force reindex";
+  if (scanStatus.scanMode === "full") return "Full scan";
+  return "Indexing";
 }
 
 export function ServerAccordion({

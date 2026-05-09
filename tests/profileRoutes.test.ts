@@ -629,6 +629,7 @@ describe("profile routes", () => {
         finishedAt: null,
         mediaItems: 0,
         mediaItemsAdded: 0,
+        scanMode: null,
       },
       scanSchedule: {
         intervalMinutes: 0,

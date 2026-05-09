@@ -471,6 +471,13 @@ export class MediaRepository {
       .run(profileId, ftpServerId ?? null, ftpServerId ?? null).changes;
   }
 
+  countDirectorySnapshots(profileId: number, ftpServerId?: number | null) {
+    const row = this.db
+      .prepare("select count(*) as count from scan_directory_snapshots where profile_id = ? and (? is null or ftp_server_id = ?)")
+      .get(profileId, ftpServerId ?? null, ftpServerId ?? null) as { count: number };
+    return row.count;
+  }
+
   markSeenUnderRoot(profileId: number, rootPath: string, seenAt: string, ftpServerId?: number | null) {
     const root = normalizeRootPath(rootPath);
     if (root === "/") {

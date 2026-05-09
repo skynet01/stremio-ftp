@@ -37,6 +37,8 @@ const failedServer: ServerForm = {
     startedAt: "2026-05-04T21:55:40.654Z",
     finishedAt: "2026-05-04T21:57:15.861Z",
     mediaItems: 549,
+    mediaItemsAdded: 0,
+    scanMode: "incremental",
   },
   scanSchedule: { intervalMinutes: 0, nextScheduledScanAt: null },
   connectionStatus: { lastTestedAt: null, ok: null },
@@ -105,6 +107,41 @@ describe("ServerAccordion", () => {
       catalogEnabled: false,
       catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: false },
     });
+  });
+
+  it("shows whether a server is running a full scan or difference update", () => {
+    render(
+      <ServerAccordion
+        servers={[
+          {
+            ...failedServer,
+            scanStatus: {
+              ...failedServer.scanStatus,
+              status: "running",
+              progressPercent: 42,
+              message: "Scanning FTP library.",
+              error: null,
+              scanMode: "incremental",
+            },
+            pendingScanAfter: null,
+          },
+        ]}
+        expandedServerId={failedServer.id}
+        profileReady={true}
+        onToggle={vi.fn()}
+        onAddServer={vi.fn()}
+        onDeleteServer={vi.fn()}
+        onServerChange={vi.fn()}
+        onSaveServer={vi.fn()}
+        onTestServer={vi.fn()}
+        onRefreshServer={vi.fn()}
+        onCancelServer={vi.fn()}
+        onUpdateScanSchedule={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Difference update")).toBeTruthy();
+    expect(screen.getByText(/42% difference update/)).toBeTruthy();
   });
 
   it("groups library selects and server content separately from catalog toggles", () => {
