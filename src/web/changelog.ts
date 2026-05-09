@@ -1,4 +1,7 @@
 export const APP_CHANGELOG = [
+  { date: "2026-05-09", hash: "9ce81ed", subject: "Stabilize crawler snapshot fingerprints" },
+  { date: "2026-05-09", hash: "22b29bf", subject: "Clarify scan mode and stabilize global progress" },
+  { date: "2026-05-09", hash: "f9b7987", subject: "Refine mobile controls and scan metadata" },
   { date: "2026-05-05", hash: "40f7f25", subject: "Refine library settings layout" },
   { date: "2026-05-05", hash: "b4e99fc", subject: "feat: persist searchable FTP catalogs" },
   { date: "2026-05-04", hash: "b082f79", subject: "fix: isolate configured Stremio installs" },
