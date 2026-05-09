@@ -71,6 +71,7 @@ const EMPTY_GLOBAL_STATS: GlobalStats = {
   activeScans: 0,
   pendingScans: 0,
   lastCompletedScanAt: null,
+  lastCompletedScanNewItems: null,
   status: "idle",
 };
 
@@ -393,6 +394,7 @@ export function App() {
         activeScans: scanIsActive(legacyFtp.scanStatus) ? 1 : 0,
         status: legacyFtp.scanStatus.status === "failed" ? "error" : legacyFtp.indexStatus.lastScanAt ? "ready" : "idle",
         lastCompletedScanAt: legacyFtp.indexStatus.lastScanAt,
+        lastCompletedScanNewItems: null,
       });
       setExpandedServerId(0);
       return true;

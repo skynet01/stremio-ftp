@@ -466,6 +466,7 @@ function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: n
     activeScans,
     pendingScans,
     lastCompletedScanAt,
+    lastCompletedScanNewItems: scanQueue.latestCompletedScanNewItems(profileId, lastCompletedScanAt),
     status: activeScans > 0 || pendingScans > 0 ? "working" : counts.total > 0 ? "ready" : "idle",
   };
 }

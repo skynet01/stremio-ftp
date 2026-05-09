@@ -9,6 +9,7 @@ const SCAN_JOBS_COLUMNS = `
       progress_percent integer not null default 0 check (progress_percent between 0 and 100),
       entries_seen integer not null default 0 check (entries_seen >= 0),
       files_seen integer not null default 0 check (files_seen >= 0),
+      media_items_added integer not null default 0 check (media_items_added >= 0),
       directories_seen integer not null default 0 check (directories_seen >= 0),
       current_path text,
       estimated_seconds_remaining integer check (estimated_seconds_remaining is null or estimated_seconds_remaining >= 0),
@@ -198,6 +199,7 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureMediaColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
   ensureFtpServerColumn(db, "catalog_content_uncategorized", "integer not null default 1");
   ensureScanJobColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
+  ensureScanJobColumn(db, "media_items_added", "integer not null default 0");
   ensureMediaServerUnique(db);
   ensureScanJobsCancelledStatus(db);
   ensureDefaultFtpServers(db);

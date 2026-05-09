@@ -29,6 +29,10 @@ export function GlobalStatusPanel({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const actionDisabled = !profileReady || scanActive;
+  const lastScanTitle =
+    typeof stats.lastCompletedScanNewItems === "number"
+      ? `${stats.lastCompletedScanNewItems} new ${stats.lastCompletedScanNewItems === 1 ? "item was" : "items were"} pulled during the last update.`
+      : undefined;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -55,7 +59,7 @@ export function GlobalStatusPanel({
           <p>Combined library state across every FTP server in this manifest.</p>
         </div>
         <div className="global-status-state">
-          <span>Last scan {formatScanTime(stats.lastCompletedScanAt)}</span>
+          <span title={lastScanTitle}>Last scan {formatScanTime(stats.lastCompletedScanAt)}</span>
           <div className="global-rescan-actions" ref={menuRef}>
             <button type="button" className="secondary-button global-rescan-button" disabled={actionDisabled} onClick={onRescanAll}>
               Rescan All

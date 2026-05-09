@@ -146,6 +146,42 @@ describe("ServerAccordion", () => {
     expect(within(catalogsGroup).queryByLabelText("Anime")).toBeNull();
   });
 
+  it("confirms before deleting a server", () => {
+    const onDeleteServer = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm");
+    confirmSpy.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    render(
+      <ServerAccordion
+        servers={[failedServer, { ...failedServer, id: 13, name: "Endeavour" }]}
+        expandedServerId={failedServer.id}
+        profileReady={true}
+        onToggle={vi.fn()}
+        onAddServer={vi.fn()}
+        onDeleteServer={onDeleteServer}
+        onServerChange={vi.fn()}
+        onSaveServer={vi.fn()}
+        onTestServer={vi.fn()}
+        onRefreshServer={vi.fn()}
+        onCancelServer={vi.fn()}
+        onUpdateScanSchedule={vi.fn()}
+      />,
+    );
+
+    const deleteButton = screen.getByRole("button", { name: "Delete server" });
+    fireEvent.click(deleteButton);
+    expect(onDeleteServer).not.toHaveBeenCalled();
+
+    fireEvent.click(deleteButton);
+    expect(onDeleteServer).toHaveBeenCalledWith(failedServer.id);
+  });
+
+  it("keeps primary server actions in one mobile row", () => {
+    const css = readFileSync("src/web/styles.css", "utf8");
+
+    expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.server-button-row\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*44px\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\);/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.server-button-row\s+\.save-server-button\s*{[^}]*grid-column:\s*1\s*\/\s*-1;/);
+  });
+
   it("keeps library columns aligned with server details in the stylesheet", () => {
     const css = readFileSync("src/web/styles.css", "utf8");
 

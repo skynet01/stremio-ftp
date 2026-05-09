@@ -34,9 +34,8 @@ body {
   background:
     linear-gradient(90deg, rgba(168, 224, 99, 0.035) 1px, transparent 1px),
     linear-gradient(180deg, rgba(168, 224, 99, 0.028) 1px, transparent 1px),
-    radial-gradient(circle at 28% 0%, oklch(23% 0.04 94 / 0.46), transparent 38%),
     linear-gradient(180deg, oklch(18% 0.02 92) 0%, var(--ink) 100%);
-  background-size: 44px 44px, 44px 44px, 100% 72%, auto;
+  background-size: 44px 44px, 44px 44px, auto;
   animation: tva-grid-drift 22s linear infinite;
 }
 
@@ -153,6 +152,19 @@ textarea:focus-visible,
   min-height: 100vh;
   margin: 0 auto;
   padding: clamp(28px, 4vw, 54px) 0 42px;
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  top: -80px;
+  left: 50%;
+  z-index: -1;
+  width: 100vw;
+  height: min(720px, 80vh);
+  pointer-events: none;
+  background: radial-gradient(circle at 28% 0%, oklch(23% 0.04 94 / 0.46), transparent 38%);
+  transform: translateX(-50%);
 }
 
 .topbar {
@@ -1471,12 +1483,18 @@ input:-webkit-autofill:active {
 
 .changelog-list li {
   display: grid;
-  grid-template-columns: 76px minmax(58px, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(134px, auto) minmax(0, 1fr);
   align-items: baseline;
   gap: 14px;
   border-bottom: 1px solid var(--line-soft);
   padding-bottom: 12px;
   color: var(--cream-dim);
+}
+
+.changelog-entry-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 14px;
 }
 
 .changelog-list time {
@@ -1611,10 +1629,10 @@ input:-webkit-autofill:active {
 
 @keyframes tva-grid-drift {
   from {
-    background-position: 0 0, 0 0, center top, center top;
+    background-position: 0 0, 0 0, center top;
   }
   to {
-    background-position: 44px 44px, -44px 44px, center top, center top;
+    background-position: 44px 44px, -44px 44px, center top;
   }
 }
 
@@ -1767,6 +1785,31 @@ input:-webkit-autofill:active {
     gap: 8px;
   }
 
+  .changelog-entry-meta {
+    display: flex;
+  }
+
+  .server-button-row {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .server-button-row .delete-server-button {
+    width: 44px;
+    min-width: 44px;
+  }
+
+  .server-button-row .secondary-button,
+  .server-button-row .server-scan-action {
+    min-width: 0;
+    margin-left: 0;
+  }
+
+  .server-button-row .save-server-button {
+    grid-column: 1 / -1;
+  }
+
   .server-content-row {
     grid-template-columns: 1fr;
     gap: 8px;
@@ -1829,5 +1872,9 @@ input:-webkit-autofill:active {
   .button-grid > *,
   .install-action-row > * {
     flex: 1 1 100%;
+  }
+
+  .server-button-row > * {
+    flex: initial;
   }
 }

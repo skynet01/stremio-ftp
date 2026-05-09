@@ -50,10 +50,12 @@ export function ChangelogDrawer({
               const entry = changelogParts(commit.subject);
               return (
                 <li key={`${commit.hash}-${commit.subject}`}>
-                  <time dateTime={commit.date} title={commit.hash}>
-                    {formatEntryDate(commit.date)}
-                  </time>
-                  <span className={`changelog-tag changelog-tag-${entry.tag}`}>{entry.tag}</span>
+                  <span className="changelog-entry-meta">
+                    <time dateTime={commit.date} title={commit.hash}>
+                      {formatEntryDate(commit.date)}
+                    </time>
+                    <span className={`changelog-tag changelog-tag-${entry.tag}`}>{entry.tag}</span>
+                  </span>
                   <span>{entry.subject}</span>
                 </li>
               );

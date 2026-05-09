@@ -413,7 +413,9 @@ export function ServerAccordion({
                       aria-label="Delete server"
                       title="Delete server"
                       disabled={!profileReady || servers.length <= 1}
-                      onClick={() => onDeleteServer(server.id)}
+                      onClick={() => {
+                        if (window.confirm(`Delete ${server.name || `Server ${index + 1}`}?`)) onDeleteServer(server.id);
+                      }}
                     >
                       <Trash2 size={17} aria-hidden={true} />
                     </button>

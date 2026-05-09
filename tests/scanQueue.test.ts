@@ -325,6 +325,7 @@ describe("ScanQueue", () => {
     expect(finished.progressPercent).toBe(100);
     expect(finished.filesSeen).toBe(2);
     expect(finished.mediaItems).toBe(2);
+    expect(finished.mediaItemsAdded).toBe(2);
     expect(finished.finishedAt).toEqual(expect.any(String));
     expect(profileService.getIndexStatus(profileId).mediaItems).toBe(2);
   });

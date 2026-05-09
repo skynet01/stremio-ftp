@@ -33,6 +33,7 @@ export type ProfileScanStatus = {
   startedAt: string | null;
   finishedAt: string | null;
   mediaItems: number;
+  mediaItemsAdded: number;
 };
 
 type ScanJobRow = {
@@ -44,6 +45,7 @@ type ScanJobRow = {
   progress_percent: number;
   entries_seen: number;
   files_seen: number;
+  media_items_added: number;
   directories_seen: number;
   current_path: string | null;
   estimated_seconds_remaining: number | null;
@@ -137,6 +139,7 @@ export class ScanQueue {
         startedAt: null,
         finishedAt: null,
         mediaItems: this.mediaRepository.countForServer(profileId, ftpServerId),
+        mediaItemsAdded: 0,
       };
     }
     return this.rowToStatus(scanJob);
@@ -239,6 +242,7 @@ export class ScanQueue {
     if (!ftpConfig) throw new Error("FTP settings are not configured");
     const customization = this.profileService.getFtpServerCustomization(profileId, ftpServerId);
     const progressBaselineItems = this.lastSuccessfulProgressItems(profileId, ftpServerId);
+    const initialMediaItems = this.mediaRepository.countForServer(profileId, ftpServerId);
 
     let filesSeen = 0;
     const startedAt = Date.now();
@@ -264,6 +268,7 @@ export class ScanQueue {
     throwIfScanCancelled(signal);
     const lastScanAt = new Date().toISOString();
     const mediaItems = this.mediaRepository.countForServer(profileId, ftpServerId);
+    const mediaItemsAdded = Math.max(0, mediaItems - initialMediaItems);
     this.profileService.saveFtpServerIndexStatus(profileId, ftpServerId, { lastScanAt, mediaItems });
     const enrichment = await this.enrichCatalogMetadata(jobId, profileId, ftpServerId, lastScanAt, signal);
     this.db
@@ -273,13 +278,30 @@ export class ScanQueue {
         set status = 'succeeded',
             progress_percent = 100,
             files_seen = ?,
+            media_items_added = ?,
             estimated_seconds_remaining = 0,
             message = ?,
             finished_at = ?
         where id = ?
       `,
       )
-      .run(filesSeen, scanFinishedMessage(filesSeen, enrichment), lastScanAt, jobId);
+      .run(filesSeen, mediaItemsAdded, scanFinishedMessage(filesSeen, enrichment), lastScanAt, jobId);
+  }
+
+  latestCompletedScanNewItems(profileId: number, finishedAt: string | null) {
+    if (!finishedAt) return null;
+    const row = this.db
+      .prepare(
+        `
+        select sum(media_items_added) as mediaItemsAdded
+        from scan_jobs
+        where profile_id = ?
+          and status = 'succeeded'
+          and finished_at = ?
+      `,
+      )
+      .get(profileId, finishedAt) as { mediaItemsAdded: number | null } | undefined;
+    return row?.mediaItemsAdded ?? null;
   }
 
   private async enrichCatalogMetadata(jobId: number, profileId: number, ftpServerId: number, seenAt: string, signal: AbortSignal) {
@@ -501,6 +523,7 @@ export class ScanQueue {
       queuedAt: row.queued_at,
       startedAt: row.started_at,
       finishedAt: row.finished_at,
+      mediaItemsAdded: row.media_items_added,
       mediaItems:
         row.ftp_server_id === null
           ? this.mediaRepository.countForProfile(row.profile_id)
@@ -591,6 +614,7 @@ function scanJobRow(row: unknown): ScanJobRow {
     entries_seen: numberField(row, "entries_seen"),
     files_seen: numberField(row, "files_seen"),
     directories_seen: numberField(row, "directories_seen"),
+    media_items_added: numberField(row, "media_items_added"),
     current_path: nullableStringField(row, "current_path"),
     estimated_seconds_remaining: nullableNumberField(row, "estimated_seconds_remaining"),
     message: nullableStringField(row, "message"),

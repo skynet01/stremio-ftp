@@ -79,6 +79,7 @@ export type GlobalStats = {
   activeScans: number;
   pendingScans: number;
   lastCompletedScanAt: string | null;
+  lastCompletedScanNewItems: number | null;
   status: "idle" | "working" | "ready" | "error";
 };
 

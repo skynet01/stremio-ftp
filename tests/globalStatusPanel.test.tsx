@@ -15,6 +15,7 @@ const baseStats = {
   activeScans: 0,
   pendingScans: 0,
   lastCompletedScanAt: "2026-05-04T07:28:50.793Z",
+  lastCompletedScanNewItems: 4,
   status: "ready" as const,
 };
 
@@ -50,5 +51,19 @@ describe("GlobalStatusPanel", () => {
 
     expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.global-status-panel\s+\.panel-header\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*1fr;/);
     expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.global-status-state\s*{[^}]*width:\s*100%;[^}]*justify-content:\s*space-between;/);
+  });
+
+  it("shows newly indexed item count in the last scan tooltip", () => {
+    render(<GlobalStatusPanel stats={baseStats} scanProgress={null} profileReady={true} scanActive={false} onRescanAll={() => undefined} />);
+
+    expect(screen.getByText(/Last scan/)).toHaveAttribute("title", "4 new items were pulled during the last update.");
+  });
+
+  it("keeps changelog dates and tags on one mobile row without repeating the page glow", () => {
+    const css = readFileSync("src/web/styles.css", "utf8");
+
+    expect(css).toMatch(/body\s*{[^}]*background:[^}]*linear-gradient\(90deg,[\s\S]*?linear-gradient\(180deg,\s*oklch\(18% 0\.02 92\) 0%,\s*var\(--ink\) 100%\);/);
+    expect(css).toMatch(/\.app-shell::before\s*{[^}]*radial-gradient\(circle at 28% 0%,/s);
+    expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.changelog-entry-meta\s*{[^}]*display:\s*flex;/);
   });
 });
