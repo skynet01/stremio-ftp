@@ -21,7 +21,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const installToken = stringParam(req.params.installToken);
     const profileId = profiles.profileIdForInstallToken(installToken);
     res.setHeader("Cache-Control", "no-store");
-    res.json(profileId ? tokenManifest(manifestCustomization(profiles, profileId), installToken) : publicManifest());
+    res.json(profileId ? tokenManifest(manifestCustomization(profiles, profileId, config.proxyStreamsDisabled, config.adminBrowserUids), installToken) : publicManifest());
   });
 
   router.get("/u/:installToken/stream/:type/:id.json", async (req, res) => {
@@ -32,7 +32,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const profileId = installToken ? profiles.profileIdForInstallToken(installToken) : null;
     if (!type || !profileId) return res.json({ streams: [] });
 
-    const customization = manifestCustomization(profiles, profileId);
+    const customization = manifestCustomization(profiles, profileId, config.proxyStreamsDisabled, config.adminBrowserUids);
     const ftpConfigForServer = (serverId: number | null | undefined) =>
       serverId ? profiles.getFtpServerConfig(profileId, serverId) : profiles.getFtpConfig(profileId);
     const folderId = internalFolderId(id);
@@ -103,7 +103,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const installToken = stringParam(req.params.installToken);
     const catalogId = stringParam(req.params.catalogId);
     const profileId = installToken ? profiles.profileIdForInstallToken(installToken) : null;
-    const customization = profileId ? manifestCustomization(profiles, profileId) : null;
+    const customization = profileId ? manifestCustomization(profiles, profileId, config.proxyStreamsDisabled, config.adminBrowserUids) : null;
     if (!type || !profileId || !customization?.catalogEnabled || !isCatalogId(type, catalogId)) return res.json({ metas: [] });
 
     const extra = catalogExtraFrom(stringParam(req.params.extra));
@@ -126,7 +126,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const type = stremioType(stringParam(req.params.type));
     const id = stringParam(req.params.id);
     const profileId = profiles.profileIdForInstallToken(stringParam(req.params.installToken));
-    const customization = profileId ? manifestCustomization(profiles, profileId) : null;
+    const customization = profileId ? manifestCustomization(profiles, profileId, config.proxyStreamsDisabled, config.adminBrowserUids) : null;
     if (!type || !profileId || !customization?.catalogEnabled) return res.json({ meta: null });
 
     const folderId = internalFolderId(id) ?? internalFileId(id);
@@ -176,9 +176,17 @@ function effectiveTmdbApiKey(customization: AddonCustomization, config: AppConfi
   return customization.catalogTmdbApiKey?.trim() || config.tmdbApiKey;
 }
 
-function manifestCustomization(profiles: ProfileService, profileId: number): AddonCustomization {
+function manifestCustomization(
+  profiles: ProfileService,
+  profileId: number,
+  proxyStreamsDisabled = false,
+  adminBrowserUids: ReadonlySet<string> = new Set(),
+): AddonCustomization {
   const base = profiles.getAddonCustomization(profileId);
   const servers = profiles.listFtpServerCatalogSettings(profileId);
+  const profileOwnerUid = profiles.browserUidForProfile(profileId);
+  const ownerIsAdmin = profileOwnerUid ? adminBrowserUids.has(profileOwnerUid) : false;
+  const forceDirect = proxyStreamsDisabled && !ownerIsAdmin;
   const contentTypes = servers.reduce(
     (acc, server) => ({
       movies: acc.movies || Boolean(server.customization.catalogEnabled && server.customization.catalogContentTypes?.movies),
@@ -195,6 +203,7 @@ function manifestCustomization(profiles: ProfileService, profileId: number): Add
     catalogEnabled: servers.some((server) => server.customization.catalogEnabled && hasAnyEnabledCatalogType(server.customization)),
     catalogTmdbApiKey: base.catalogTmdbApiKey,
     catalogContentTypes: contentTypes,
+    streamDeliveryMode: forceDirect ? "direct" : base.streamDeliveryMode,
   };
 }
 

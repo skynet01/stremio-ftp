@@ -22,6 +22,9 @@ export type AppConfig = {
   scanSchedulerIntervalMs: number;
   scanProgressAverageItems: number;
   scanTransientRetryDelayMs: number;
+  maxFtpServersPerProfile: number;
+  proxyStreamsDisabled: boolean;
+  adminBrowserUids: ReadonlySet<string>;
 };
 
 const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
@@ -36,6 +39,13 @@ function numberValue(env: Record<string, string | undefined>, key: string, fallb
   const raw = env[key]?.trim();
   if (!raw) return fallback;
   if (!/^[1-9]\d*$/.test(raw)) throw new Error(`${key} must be a positive integer`);
+  return Number(raw);
+}
+
+function nonNegativeNumberValue(env: Record<string, string | undefined>, key: string, fallback: number): number {
+  const raw = env[key]?.trim();
+  if (!raw) return fallback;
+  if (!/^\d+$/.test(raw)) throw new Error(`${key} must be a non-negative integer`);
   return Number(raw);
 }
 
@@ -91,5 +101,13 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     scanSchedulerIntervalMs: numberValue(env, "SCAN_SCHEDULER_INTERVAL_MS", 60000),
     scanProgressAverageItems: numberValue(env, "SCAN_PROGRESS_AVERAGE_ITEMS", 2000),
     scanTransientRetryDelayMs: numberValue(env, "SCAN_TRANSIENT_RETRY_DELAY_MS", 300000),
+    maxFtpServersPerProfile: nonNegativeNumberValue(env, "MAX_FTP_SERVERS_PER_PROFILE", 0),
+    proxyStreamsDisabled: booleanValue(env, "DISABLE_PROXY_STREAMS", false),
+    adminBrowserUids: new Set(
+      (env.ADMIN_BROWSER_UIDS ?? "")
+        .split(/[,\s]+/)
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
   };
 }

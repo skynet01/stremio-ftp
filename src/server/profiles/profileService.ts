@@ -661,6 +661,13 @@ export class ProfileService {
     return { installUrlToken: token };
   }
 
+  browserUidForProfile(profileId: number): string | null {
+    const row = this.db.prepare("select browser_uid from profiles where id = ?").get(profileId) as
+      | { browser_uid: string }
+      | undefined;
+    return row?.browser_uid ?? null;
+  }
+
   profileIdForInstallToken(token: string): number | null {
     const tokenHash = hashToken(token);
     const profileRow = this.db.prepare("select id from profiles where install_token_hash = ?").get(tokenHash) as

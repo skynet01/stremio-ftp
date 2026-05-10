@@ -53,8 +53,15 @@ export function createApp(
   const scanScheduler = setInterval(() => scanQueue.enqueueDueScheduledScans(), config.scanSchedulerIntervalMs);
   scanScheduler.unref();
   app.use("/api/profile", requireSetupToken(config));
-  app.get("/api/setup", (_req, res) => {
-    res.json({ setupTokenRequired: Boolean(config.setupToken) || !config.allowPublicProfileApi });
+  app.get("/api/setup", (req, res) => {
+    const browserUid = (req.query.browserUid ?? "").toString();
+    const isAdmin = Boolean(browserUid) && config.adminBrowserUids.has(browserUid);
+    res.json({
+      setupTokenRequired: Boolean(config.setupToken) || !config.allowPublicProfileApi,
+      maxFtpServersPerProfile: isAdmin ? 0 : config.maxFtpServersPerProfile,
+      proxyStreamsDisabled: isAdmin ? false : config.proxyStreamsDisabled,
+      isAdmin,
+    });
   });
   app.get("/api/setup/validate", requireSetupToken(config), (_req, res) => {
     res.json({ ok: true });
@@ -74,6 +81,9 @@ export function createApp(
     });
     app.get("/configure", (_req, res) => {
       res.sendFile("index.html", { root: publicDir });
+    });
+    app.get("/u/:installToken/configure", (_req, res) => {
+      res.redirect(302, "/");
     });
   }
 

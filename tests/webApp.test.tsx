@@ -117,10 +117,45 @@ describe("App", () => {
     unlockProfileMock.mockReset();
     validateSetupTokenMock.mockReset();
     validateSetupTokenMock.mockResolvedValue({ ok: true });
+    loadFtpSettingsMock.mockResolvedValue({
+      ftpConfig: {
+        host: "ftp.example.test",
+        port: 21,
+        username: "user",
+        password: "",
+        passwordConfigured: true,
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/"],
+      },
+      indexStatus: { lastScanAt: null, mediaItems: 0 },
+      connectionStatus: { lastTestedAt: null, ok: null },
+      scanStatus: { ...idleScanStatus },
+      scanSchedule: manualScanSchedule,
+    });
+    loadCustomizationMock.mockResolvedValue({
+      customization: {
+        addonName: "Stremio FTP Addon",
+        addonLogoUrl: "",
+        addonDescription:
+          "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+        catalogEnabled: false,
+      },
+    });
   });
 
-  it("renders the FTP configuration portal", () => {
+  it("renders the FTP configuration portal", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
     render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("link", { name: "Install in Stremio" });
     expect(screen.getByRole("heading", { name: "Stremio FTP Addon" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit addon name" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit addon description" })).toBeTruthy();
@@ -163,7 +198,7 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Movies")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.32`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.33`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
@@ -596,7 +631,7 @@ describe("App", () => {
     await waitFor(() => expect(saveSetupTokenMock).toHaveBeenCalledWith("setup-secret-123"));
     expect(markSetupTokenValidatedMock).toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Setup token required" })).toBeNull());
-    expect(screen.getByLabelText("Host")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create profile" })).toBeTruthy();
   });
 
   it("keeps settings locked when an entered setup token is rejected", async () => {
@@ -634,8 +669,7 @@ describe("App", () => {
     render(<App />);
 
     expect(screen.queryByRole("heading", { name: "Setup token required" })).toBeNull();
-    expect(screen.getByLabelText("Host")).toBeTruthy();
-    expect(loadSetupStatusMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Create profile" })).toBeTruthy();
   });
 
   it("allows /configure without a setup token when the server has no setup token configured", async () => {
@@ -645,7 +679,6 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Setup token required" })).toBeNull());
-    expect(screen.getByLabelText("Host")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Create profile" })).toBeTruthy();
   });
 
@@ -685,25 +718,16 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: "Copy manifest URL" })).toBeTruthy();
   });
 
-  it("keeps profile-dependent controls disabled before profile setup", () => {
+  it("hides profile-dependent sections before profile setup", () => {
     render(<App />);
 
     for (const name of ["Test connection", "Save FTP settings", "Rescan"]) {
-      const control = screen.getByRole("button", { name });
-      expect(control).toBeDisabled();
+      expect(screen.queryByRole("button", { name })).toBeNull();
     }
-    const deleteButton = screen.getByRole("button", { name: "Delete server" });
-    const testButton = screen.getByRole("button", { name: "Test connection" });
-    const rescanButton = screen.getByRole("button", { name: "Rescan" });
-    const saveButton = screen.getByRole("button", { name: "Save FTP settings" });
-    expect(deleteButton).toHaveClass("icon-button");
-    expect(Boolean(deleteButton.compareDocumentPosition(testButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(Boolean(testButton.compareDocumentPosition(rescanButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(Boolean(rescanButton.compareDocumentPosition(saveButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-
-    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Rotate" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete server" })).toBeNull();
+    expect(screen.queryByText("Index status")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Server Settings" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Log out" })).toBeNull();
   });
 
   it("shows error notices in yellow", async () => {
@@ -781,15 +805,15 @@ describe("App", () => {
 
     render(<App />);
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-    fireEvent.change(screen.getByLabelText("Host"), { target: { value: "ftp.example.test" } });
-    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
-    fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/Movies" } });
     const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
     const recoveryUidValue = recoveryUid.value;
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
 
     await screen.findByRole("link", { name: "Install in Stremio" });
+    fireEvent.change(screen.getByLabelText("Host"), { target: { value: "ftp.example.test" } });
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
+    fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/Movies" } });
     fireEvent.click(screen.getByRole("button", { name: "Save FTP settings" }));
 
     await waitFor(() => {
@@ -1144,41 +1168,66 @@ describe("App", () => {
     );
   });
 
-  it("creates the profile and saves filled FTP settings in one setup action", async () => {
+  it("adds a logout control once the profile is ready and resets to the unlock form on click", async () => {
     createProfileMock.mockResolvedValue({
       profileId: 1,
       recoveryUid: "browser-uid",
       manifestUrl: "https://addon.example.test/u/token/manifest.json",
       stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
     });
-    saveFtpSettingsMock.mockResolvedValue({ ok: true });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
 
     render(<App />);
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-    fireEvent.change(screen.getByLabelText("Host"), { target: { value: "ftp.example.test" } });
-    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "2121" } });
-    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
-    fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("link", { name: "Install in Stremio" });
 
+    const logoutButton = screen.getByRole("button", { name: "Log out" });
+    fireEvent.click(logoutButton);
+
+    expect(screen.getByRole("button", { name: "Create profile" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Unlock profile" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Install in Stremio" })).toBeNull();
+    expect(screen.queryByLabelText("Host")).toBeNull();
+    expect(screen.queryByText("Index status")).toBeNull();
+    expect(window.localStorage.getItem("stremio-ftp-passphrase")).toBeNull();
+    expect(window.localStorage.getItem("stremio-ftp-manifest-url")).toBeNull();
+    expect((screen.getByLabelText("Passphrase") as HTMLInputElement).value).toBe("");
+  });
+
+  it("hides the manifest panel until at least one server is saved and shows a hint", async () => {
+    loadFtpSettingsMock.mockResolvedValue({
+      ftpConfig: {
+        host: "",
+        port: 21,
+        username: "",
+        password: "",
+        passwordConfigured: false,
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/"],
+      },
+      indexStatus: { lastScanAt: null, mediaItems: 0 },
+      connectionStatus: { lastTestedAt: null, ok: null },
+      scanStatus: { ...idleScanStatus },
+      scanSchedule: manualScanSchedule,
+    });
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
 
-    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
-    await waitFor(() => {
-      expect(saveFtpSettingsMock).toHaveBeenCalledWith({
-        browserUid: recoveryUid.value,
-        passphrase: "passphrase",
-        ftpConfig: {
-          host: "ftp.example.test",
-          port: 2121,
-          username: "user",
-          password: "secret",
-          tlsMode: "explicit",
-          allowInvalidCertificate: false,
-          roots: ["/"],
-        },
-      });
-    });
-    expect(await screen.findByText("Profile created. FTP settings saved. Install link is ready.")).toBeTruthy();
+    await screen.findByRole("button", { name: "Log out" });
+    expect(screen.queryByRole("link", { name: "Install in Stremio" })).toBeNull();
+    expect(
+      screen.getByText("Save at least one server's FTP settings to generate your manifest URL."),
+    ).toBeTruthy();
   });
 });

@@ -94,6 +94,8 @@ export function ServerAccordion({
   servers,
   expandedServerId,
   profileReady,
+  maxFtpServersPerProfile = 0,
+  proxyStreamsDisabled = false,
   onToggle,
   onAddServer,
   onDeleteServer,
@@ -107,6 +109,8 @@ export function ServerAccordion({
   servers: ServerForm[];
   expandedServerId: number | null;
   profileReady: boolean;
+  maxFtpServersPerProfile?: number;
+  proxyStreamsDisabled?: boolean;
   onToggle: (serverId: number) => void;
   onAddServer: () => void;
   onDeleteServer: (serverId: number) => void;
@@ -117,15 +121,27 @@ export function ServerAccordion({
   onCancelServer: (serverId: number) => void;
   onUpdateScanSchedule: (serverId: number, intervalMinutes: number) => void;
 }) {
+  const atServerCap = maxFtpServersPerProfile > 0 && servers.length >= maxFtpServersPerProfile;
   return (
     <section className="panel server-accordion-panel" aria-labelledby="servers-heading">
       <div className="panel-header">
         <div>
           <span className="section-label">FTP servers</span>
           <h2 id="servers-heading">Servers</h2>
-          <p>Each server has its own FTP, library, scan, and stream settings.</p>
+          <p>
+            Each server has its own FTP, library, scan, and stream settings.
+            {maxFtpServersPerProfile > 0
+              ? ` Up to ${maxFtpServersPerProfile} ${maxFtpServersPerProfile === 1 ? "server" : "servers"} per profile.`
+              : ""}
+          </p>
         </div>
-        <button type="button" className="secondary-button" disabled={!profileReady} onClick={onAddServer}>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={!profileReady || atServerCap}
+          title={atServerCap ? `Server limit (${maxFtpServersPerProfile}) reached` : undefined}
+          onClick={onAddServer}
+        >
           <Plus size={17} aria-hidden={true} />
           Add server
         </button>
@@ -182,11 +198,12 @@ export function ServerAccordion({
                             `streamDeliveryMode-${server.id}`,
                             <select
                               id={`streamDeliveryMode-${server.id}`}
-                              className={filledClass(server.streamDeliveryMode)}
-                              value={server.streamDeliveryMode}
+                              className={filledClass(proxyStreamsDisabled ? "direct" : server.streamDeliveryMode)}
+                              value={proxyStreamsDisabled ? "direct" : server.streamDeliveryMode}
+                              disabled={proxyStreamsDisabled}
                               onChange={(event) => onServerChange(server.id, { streamDeliveryMode: event.currentTarget.value as StreamDeliveryMode })}
                             >
-                              <option value="proxy">Proxy through addon</option>
+                              {proxyStreamsDisabled ? null : <option value="proxy">Proxy through addon</option>}
                               <option value="direct">Direct FTP URL</option>
                             </select>,
                           )}

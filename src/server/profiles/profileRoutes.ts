@@ -81,6 +81,9 @@ export function profileRoutes(
 ) {
   const router = Router();
   const rateLimitProfiles = profileRateLimiter(config.profileRateLimitWindowMs, config.profileRateLimitMax);
+  const isAdminBrowserUid = (browserUid: string) => config.adminBrowserUids.has(browserUid);
+  const enforceDeliveryModeFor = <T extends { streamDeliveryMode?: "proxy" | "direct" }>(browserUid: string, value: T): T =>
+    config.proxyStreamsDisabled && !isAdminBrowserUid(browserUid) ? { ...value, streamDeliveryMode: "direct" } : value;
 
   router.post("/profile", rateLimitProfiles, async (req, res) => {
     const parsed = createSchema.safeParse(req.body);
@@ -213,6 +216,14 @@ export function profileRoutes(
 
     try {
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      if (config.maxFtpServersPerProfile > 0 && !isAdminBrowserUid(parsed.data.browserUid)) {
+        const existing = service.listFtpServers(unlocked.profileId).length;
+        if (existing >= config.maxFtpServersPerProfile) {
+          return res.status(400).json({
+            error: `This server allows at most ${config.maxFtpServersPerProfile} FTP ${config.maxFtpServersPerProfile === 1 ? "server" : "servers"} per profile.`,
+          });
+        }
+      }
       const server = service.createFtpServer(unlocked.profileId);
       res.status(201).json({
         server: serverPayload(service, scanQueue, server),
@@ -235,7 +246,7 @@ export function profileRoutes(
       const server = service.saveFtpServer(unlocked.profileId, parsed.data.serverId, {
         name: parsed.data.name,
         ftpConfig,
-        customization: parsed.data.customization,
+        customization: enforceDeliveryModeFor(parsed.data.browserUid, parsed.data.customization),
       });
       res.json({
         server: serverPayload(service, scanQueue, server),
@@ -318,7 +329,7 @@ export function profileRoutes(
 
     try {
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      service.saveAddonCustomization(unlocked.profileId, parsed.data.customization);
+      service.saveAddonCustomization(unlocked.profileId, enforceDeliveryModeFor(parsed.data.browserUid, parsed.data.customization));
       res.json({ ok: true });
     } catch {
       res.status(401).json({ error: "Invalid passphrase" });

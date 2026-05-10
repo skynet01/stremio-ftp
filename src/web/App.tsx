@@ -34,7 +34,7 @@ import { SetupTokenPanel } from "./components/SetupTokenPanel.js";
 import { StreamFormatterPanel } from "./components/StreamFormatterPanel.js";
 import { Topbar } from "./components/Topbar.js";
 import { DEFAULT_STREAM_DESCRIPTION_TEMPLATE, DEFAULT_STREAM_NAME_TEMPLATE } from "../shared/streamFormatter.js";
-import { filledClass, scanIsActive } from "./components/ui.js";
+import { filledClass, Notice, scanIsActive } from "./components/ui.js";
 import type { AddonCustomization, FtpConfigRequest, FtpServerSettings, GlobalStats, ScanStatus } from "./api.js";
 import type { ChangelogEntry } from "./types.js";
 
@@ -209,11 +209,6 @@ function ftpConfigFromServer(server: ServerForm): FtpConfigRequest {
   };
 }
 
-function hasCompleteFtpConfig(server: ServerForm) {
-  const ftpConfig = ftpConfigFromServer(server);
-  return Boolean(ftpConfig.host && ftpConfig.username && ftpConfig.password && Number.isFinite(ftpConfig.port) && ftpConfig.roots.length > 0);
-}
-
 export function globalScanProgressForServers(servers: Array<Pick<ServerForm, "scanStatus">>): GlobalScanProgress | null {
   const activeServers = servers.filter((server) => scanIsActive(server.scanStatus));
   if (!activeServers.length) return null;
@@ -283,17 +278,28 @@ export function App() {
   const [globalStats, setGlobalStats] = useState<GlobalStats>(EMPTY_GLOBAL_STATS);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [changelogEntries, setChangelogEntries] = useState<ChangelogEntry[]>(APP_CHANGELOG);
+  const [maxFtpServersPerProfile, setMaxFtpServersPerProfile] = useState(0);
+  const [proxyStreamsDisabled, setProxyStreamsDisabled] = useState(false);
   const profileReady = profileState === "created" || profileState === "unlocked";
   const currentYear = new Date().getFullYear();
   const anyScanActive = useMemo(() => servers.some((server) => scanIsActive(server.scanStatus)), [servers]);
   const globalScanProgress = useMemo<GlobalScanProgress | null>(() => globalScanProgressForServers(servers), [servers]);
+  const hasSavedServer = useMemo(
+    () => servers.some((server) => Boolean(server.host) && server.passwordConfigured),
+    [servers],
+  );
 
   useEffect(() => {
-    if (!needsSetupProbe) return;
-    void loadSetupStatus()
-      .then((status) => setSetupTokenRequired(status.setupTokenRequired))
-      .catch(() => setSetupTokenRequired(true));
-  }, []);
+    void loadSetupStatus(recoveryUid)
+      .then((status) => {
+        if (typeof status.maxFtpServersPerProfile === "number") setMaxFtpServersPerProfile(status.maxFtpServersPerProfile);
+        if (typeof status.proxyStreamsDisabled === "boolean") setProxyStreamsDisabled(status.proxyStreamsDisabled);
+        if (needsSetupProbe) setSetupTokenRequired(status.setupTokenRequired);
+      })
+      .catch(() => {
+        if (needsSetupProbe) setSetupTokenRequired(true);
+      });
+  }, [recoveryUid]);
 
   useEffect(() => {
     if (!hasSetupToken || setupTokenTrusted) return;
@@ -501,16 +507,8 @@ export function App() {
       rememberSession(passphrase, created.manifestUrl, created.stremioInstallUrl);
       setProfileState("created");
       await saveCustomization({ browserUid: recoveryUid, passphrase, customization: normalizedCustomization() });
-      const firstServer = servers[0];
-      if (firstServer && hasCompleteFtpConfig(firstServer)) {
-        await saveFtpSettings({ browserUid: recoveryUid, passphrase, ftpConfig: ftpConfigFromServer(firstServer) }).catch(() => undefined);
-      }
       await loadServerState(passphrase).catch(() => undefined);
-      setProfileMessage(
-        firstServer && hasCompleteFtpConfig(firstServer)
-          ? "Profile created. FTP settings saved. Install link is ready."
-          : "Profile created. Install link is ready.",
-      );
+      setProfileMessage("Profile created. Save your FTP settings to generate the manifest URL.");
     } catch (error) {
       if (error instanceof Error && error.message === "Profile already exists") {
         await unlockExistingProfile();
@@ -726,6 +724,20 @@ export function App() {
     }
   }
 
+  function logout() {
+    setProfileState("new");
+    setProfileMessage("Enter your passphrase to unlock this browser profile.");
+    setManifestUrl(null);
+    setStremioInstallUrl(null);
+    setPassphrase("");
+    setServers([emptyServerForm()]);
+    setExpandedServerId(0);
+    setGlobalStats(EMPTY_GLOBAL_STATS);
+    window.localStorage.removeItem(STORAGE_KEYS.passphrase);
+    window.localStorage.removeItem(STORAGE_KEYS.manifestUrl);
+    window.localStorage.removeItem(STORAGE_KEYS.stremioInstallUrl);
+  }
+
   function commitAddonName() {
     setEditingName(false);
     void saveAddonBranding(normalizedCustomization());
@@ -765,7 +777,9 @@ export function App() {
         editable={settingsUnlocked}
         profileReady={profileReady}
         profileState={profileState}
+        recoveryUid={recoveryUid}
         onEditLogo={() => setEditingLogo(true)}
+        onLogout={profileReady ? logout : undefined}
       />
       <HeroPanel
         addonName={addonName}
@@ -793,53 +807,65 @@ export function App() {
       {showSetupTokenMessage ? null : (
         <div className="portal-stack">
           {!profileReady ? installPanel : null}
-          <GlobalStatusPanel
-            stats={globalStats}
-            scanProgress={globalScanProgress}
-            profileReady={profileReady}
-            scanActive={anyScanActive}
-            onRescanAll={() => void refreshAllServers()}
-            onForceReindexAll={() => void refreshAllServers(true)}
-          >
-            <div className="global-settings-row">
-              <div className="field-stack global-tmdb-field">
-                <label htmlFor="globalCatalogTmdbApiKey">TMDB API key</label>
-                <input
-                  id="globalCatalogTmdbApiKey"
-                  className={filledClass(catalogTmdbApiKey)}
-                  value={catalogTmdbApiKey}
-                  placeholder="Use server default"
-                  onChange={(event) => setCatalogTmdbApiKey(event.currentTarget.value)}
-                  onBlur={(event) => void saveGlobalTmdbApiKey(event.currentTarget.value)}
+          {profileReady ? (
+            <>
+              <GlobalStatusPanel
+                stats={globalStats}
+                scanProgress={globalScanProgress}
+                profileReady={profileReady}
+                scanActive={anyScanActive}
+                onRescanAll={() => void refreshAllServers()}
+                onForceReindexAll={() => void refreshAllServers(true)}
+              >
+                <div className="global-settings-row">
+                  <div className="field-stack global-tmdb-field">
+                    <label htmlFor="globalCatalogTmdbApiKey">TMDB API key</label>
+                    <input
+                      id="globalCatalogTmdbApiKey"
+                      className={filledClass(catalogTmdbApiKey)}
+                      value={catalogTmdbApiKey}
+                      placeholder="Use server default"
+                      onChange={(event) => setCatalogTmdbApiKey(event.currentTarget.value)}
+                      onBlur={(event) => void saveGlobalTmdbApiKey(event.currentTarget.value)}
+                    />
+                  </div>
+                </div>
+                <StreamFormatterPanel
+                  addonName={addonName}
+                  streamNameTemplate={streamNameTemplate}
+                  streamDescriptionTemplate={streamDescriptionTemplate}
+                  profileReady={profileReady}
+                  message={customizationMessage}
+                  onStreamNameTemplateChange={setStreamNameTemplate}
+                  onStreamDescriptionTemplateChange={setStreamDescriptionTemplate}
+                  onSave={() => void saveStreamFormatter()}
                 />
-              </div>
-            </div>
-            <StreamFormatterPanel
-              addonName={addonName}
-              streamNameTemplate={streamNameTemplate}
-              streamDescriptionTemplate={streamDescriptionTemplate}
-              profileReady={profileReady}
-              message={customizationMessage}
-              onStreamNameTemplateChange={setStreamNameTemplate}
-              onStreamDescriptionTemplateChange={setStreamDescriptionTemplate}
-              onSave={() => void saveStreamFormatter()}
-            />
-          </GlobalStatusPanel>
-          <ServerAccordion
-            servers={servers}
-            expandedServerId={expandedServerId}
-            profileReady={profileReady}
-            onToggle={(serverId) => setExpandedServerId(expandedServerId === serverId ? null : serverId)}
-            onAddServer={() => void addServer()}
-            onDeleteServer={(serverId) => void removeServer(serverId)}
-            onServerChange={updateServer}
-            onSaveServer={(serverId) => void saveServer(serverId)}
-            onTestServer={(serverId) => void testServer(serverId)}
-            onRefreshServer={(serverId) => void refreshServer(serverId)}
-            onCancelServer={(serverId) => void haltServer(serverId)}
-            onUpdateScanSchedule={(serverId, intervalMinutes) => void updateScanSchedule(serverId, intervalMinutes)}
-          />
-          {profileReady ? installPanel : null}
+              </GlobalStatusPanel>
+              <ServerAccordion
+                servers={servers}
+                expandedServerId={expandedServerId}
+                profileReady={profileReady}
+                maxFtpServersPerProfile={maxFtpServersPerProfile}
+                proxyStreamsDisabled={proxyStreamsDisabled}
+                onToggle={(serverId) => setExpandedServerId(expandedServerId === serverId ? null : serverId)}
+                onAddServer={() => void addServer()}
+                onDeleteServer={(serverId) => void removeServer(serverId)}
+                onServerChange={updateServer}
+                onSaveServer={(serverId) => void saveServer(serverId)}
+                onTestServer={(serverId) => void testServer(serverId)}
+                onRefreshServer={(serverId) => void refreshServer(serverId)}
+                onCancelServer={(serverId) => void haltServer(serverId)}
+                onUpdateScanSchedule={(serverId, intervalMinutes) => void updateScanSchedule(serverId, intervalMinutes)}
+              />
+              {hasSavedServer ? (
+                installPanel
+              ) : (
+                <Notice className="manifest-pending-notice">
+                  Save at least one server's FTP settings to generate your manifest URL.
+                </Notice>
+              )}
+            </>
+          ) : null}
         </div>
       )}
       <Footer appVersion={APP_VERSION} currentYear={currentYear} githubUrl={GITHUB_URL} onOpenChangelog={() => setChangelogOpen(true)} />

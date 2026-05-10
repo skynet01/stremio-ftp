@@ -203,6 +203,9 @@ export type SaveScanScheduleRequest = CreateProfileRequest & {
 
 export type SetupStatusResponse = {
   setupTokenRequired: boolean;
+  maxFtpServersPerProfile?: number;
+  proxyStreamsDisabled?: boolean;
+  isAdmin?: boolean;
 };
 
 async function readJson<T extends object>(response: Response): Promise<T> {
@@ -243,8 +246,9 @@ export async function unlockProfile(request: CreateProfileRequest): Promise<Unlo
   return readJson<UnlockProfileResponse>(response);
 }
 
-export async function loadSetupStatus(): Promise<SetupStatusResponse> {
-  const response = await fetch("/api/setup", { headers: authHeaders() });
+export async function loadSetupStatus(browserUid?: string): Promise<SetupStatusResponse> {
+  const url = browserUid ? `/api/setup?browserUid=${encodeURIComponent(browserUid)}` : "/api/setup";
+  const response = await fetch(url, { headers: authHeaders() });
   return readJson<SetupStatusResponse>(response);
 }
 
