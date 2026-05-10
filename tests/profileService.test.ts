@@ -98,4 +98,34 @@ describe("ProfileService", () => {
     expect(service.dueScheduledScanProfileIds("2026-05-03T05:59:59.000Z")).toEqual([]);
     expect(service.dueScheduledScanProfileIds("2026-05-03T06:00:00.000Z")).toEqual([created.profileId]);
   });
+
+  it("removes only profiles with no FTP-configured server older than the cutoff", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, key);
+    const empty = await service.createProfile("empty-uid", "passphrase");
+    const recent = await service.createProfile("recent-uid", "passphrase");
+    const configured = await service.createProfile("configured-uid", "passphrase");
+    service.saveFtpConfig(configured.profileId, {
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "explicit",
+      allowInvalidCertificate: true,
+      roots: ["/"],
+    });
+
+    db.prepare("update profiles set created_at = ? where id in (?, ?)").run(
+      "2026-01-01T00:00:00.000Z",
+      empty.profileId,
+      configured.profileId,
+    );
+
+    const removed = service.deleteEmptyProfilesOlderThan("2026-04-01T00:00:00.000Z");
+    expect(removed).toBe(1);
+    expect(db.prepare("select id from profiles where id = ?").get(empty.profileId)).toBeUndefined();
+    expect(db.prepare("select id from profiles where id = ?").get(recent.profileId)).toBeDefined();
+    expect(db.prepare("select id from profiles where id = ?").get(configured.profileId)).toBeDefined();
+  });
 });

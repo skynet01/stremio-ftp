@@ -402,7 +402,11 @@ export function App() {
       const forms = loaded.servers.map(serverFormFromPayload);
       setServers(forms);
       setGlobalStats(loaded.globalStats);
-      setExpandedServerId((current) => current && forms.some((server) => server.id === current) ? current : forms[0]?.id ?? null);
+      setExpandedServerId((current) => {
+        if (current && forms.some((server) => server.id === current)) return current;
+        if (forms.length > 2) return null;
+        return forms[0]?.id ?? null;
+      });
       return forms.length > 0;
     } catch (error) {
       const [legacyFtp, legacyCustomization] = await Promise.all([

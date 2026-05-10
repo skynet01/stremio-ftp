@@ -25,6 +25,8 @@ export type AppConfig = {
   maxFtpServersPerProfile: number;
   proxyStreamsDisabled: boolean;
   adminBrowserUids: ReadonlySet<string>;
+  emptyProfileCleanupDays: number;
+  emptyProfileCleanupIntervalMs: number;
 };
 
 const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
@@ -109,5 +111,7 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
         .map((value) => value.trim())
         .filter(Boolean),
     ),
+    emptyProfileCleanupDays: nonNegativeNumberValue(env, "EMPTY_PROFILE_CLEANUP_DAYS", 7),
+    emptyProfileCleanupIntervalMs: numberValue(env, "EMPTY_PROFILE_CLEANUP_INTERVAL_MS", 7 * 24 * 60 * 60 * 1000),
   };
 }

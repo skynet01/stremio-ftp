@@ -661,6 +661,30 @@ export class ProfileService {
     return { installUrlToken: token };
   }
 
+  deleteEmptyProfilesOlderThan(cutoffIso: string): number {
+    const rows = this.db
+      .prepare(
+        `
+        select p.id
+        from profiles p
+        where p.created_at < ?
+          and p.encrypted_ftp_config is null
+          and not exists (
+            select 1 from profile_ftp_servers s
+            where s.profile_id = p.id and s.encrypted_ftp_config is not null
+          )
+      `,
+      )
+      .all(cutoffIso) as Array<{ id: number }>;
+    if (!rows.length) return 0;
+    const stmt = this.db.prepare("delete from profiles where id = ?");
+    const removeAll = this.db.transaction((ids: number[]) => {
+      for (const id of ids) stmt.run(id);
+    });
+    removeAll(rows.map((row) => row.id));
+    return rows.length;
+  }
+
   browserUidForProfile(profileId: number): string | null {
     const row = this.db.prepare("select browser_uid from profiles where id = ?").get(profileId) as
       | { browser_uid: string }

@@ -52,6 +52,21 @@ export function createApp(
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
   const scanScheduler = setInterval(() => scanQueue.enqueueDueScheduledScans(), config.scanSchedulerIntervalMs);
   scanScheduler.unref();
+  if (config.emptyProfileCleanupDays > 0) {
+    const ageMs = config.emptyProfileCleanupDays * 24 * 60 * 60 * 1000;
+    const runCleanup = () => {
+      try {
+        const cutoff = new Date(Date.now() - ageMs).toISOString();
+        const removed = profileService.deleteEmptyProfilesOlderThan(cutoff);
+        if (removed > 0) console.log(`[cleanup] Removed ${removed} empty profile(s) older than ${config.emptyProfileCleanupDays} day(s).`);
+      } catch (error) {
+        console.error("[cleanup] Failed to remove empty profiles:", error);
+      }
+    };
+    runCleanup();
+    const cleanupTimer = setInterval(runCleanup, config.emptyProfileCleanupIntervalMs);
+    cleanupTimer.unref();
+  }
   app.use("/api/profile", requireSetupToken(config));
   app.get("/api/setup", (req, res) => {
     const browserUid = (req.query.browserUid ?? "").toString();
