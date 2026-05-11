@@ -1184,6 +1184,57 @@ input:-webkit-autofill:active {
   background: rgba(255, 255, 255, 0.015);
 }
 
+.settings-import-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.74rem;
+}
+
+.settings-import-row .text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: 0.04em;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.settings-import-row .text-link:hover {
+  color: var(--cream);
+}
+
+.settings-import-status {
+  color: var(--cream-dim);
+}
+
+.settings-export-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.settings-export-strip {
+  margin: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.74rem;
+  color: var(--cream-dim);
+}
+
 .notification {
   width: fit-content;
   max-width: 100%;
@@ -1507,9 +1558,6 @@ input:-webkit-autofill:active {
 }
 
 .changelog-header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1520,7 +1568,6 @@ input:-webkit-autofill:active {
   background:
     linear-gradient(180deg, rgba(168, 224, 99, 0.055), rgba(168, 224, 99, 0.012)),
     color-mix(in oklch, var(--panel) 94%, var(--ink));
-  box-shadow: 0 18px 36px -34px rgba(0, 0, 0, 0.85);
 }
 
 .changelog-header h2 {

@@ -1,4 +1,5 @@
-import { Copy } from "lucide-react";
+import { Copy, Download, Upload, X } from "lucide-react";
+import { useRef } from "react";
 import { field, filledClass, Notice } from "./ui.js";
 
 type ProfileState = "new" | "creating" | "created" | "unlocked" | "error";
@@ -11,10 +12,17 @@ export function InstallPanel({
   profileState,
   recoveryUid,
   passphrase,
+  importStatusMessage,
+  importLoaded,
+  exportStripCredentials,
   onRecoveryUidChange,
   onPassphraseChange,
   onCreateProfile,
   onUnlockProfile,
+  onImportSettings,
+  onClearImportedSettings,
+  onExportSettings,
+  onExportStripCredentialsChange,
 }: {
   profileReady: boolean;
   manifestUrl: string | null;
@@ -23,11 +31,24 @@ export function InstallPanel({
   profileState: ProfileState;
   recoveryUid: string;
   passphrase: string;
+  importStatusMessage?: string | null;
+  importLoaded?: boolean;
+  exportStripCredentials?: boolean;
   onRecoveryUidChange: (value: string) => void;
   onPassphraseChange: (value: string) => void;
   onCreateProfile: () => void;
   onUnlockProfile: () => void;
+  onImportSettings?: (file: File) => void;
+  onClearImportedSettings?: () => void;
+  onExportSettings?: () => void;
+  onExportStripCredentialsChange?: (value: boolean) => void;
 }) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    if (file && onImportSettings) onImportSettings(file);
+    event.currentTarget.value = "";
+  };
   return (
     <section className="panel install-panel" aria-labelledby="install-heading">
       <div className="panel-header">
@@ -67,6 +88,23 @@ export function InstallPanel({
               </a>
             ) : null}
           </div>
+          {onExportSettings ? (
+            <div className="settings-export-row">
+              <button type="button" className="secondary-button" onClick={onExportSettings}>
+                <Download size={16} aria-hidden={true} />
+                Export settings
+              </button>
+              <label className="toggle-row settings-export-strip" htmlFor="exportStripCreds">
+                <input
+                  id="exportStripCreds"
+                  type="checkbox"
+                  checked={Boolean(exportStripCredentials)}
+                  onChange={(event) => onExportStripCredentialsChange?.(event.currentTarget.checked)}
+                />
+                Strip username &amp; password
+              </label>
+            </div>
+          ) : null}
         </>
       ) : (
         <>
@@ -120,12 +158,36 @@ export function InstallPanel({
               type="button"
               className="secondary-button"
               aria-label="Unlock profile"
-              disabled={profileState === "creating"}
+              disabled={profileState === "creating" || Boolean(importLoaded)}
+              title={importLoaded ? "Unlock is unavailable while imported settings are staged" : undefined}
               onClick={onUnlockProfile}
             >
               Unlock profile
             </button>
           </div>
+          {onImportSettings ? (
+            <div className="settings-import-row">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="visually-hidden"
+                onChange={handleImportFile}
+              />
+              {importLoaded ? (
+                <button type="button" className="text-link" onClick={onClearImportedSettings}>
+                  <X size={14} aria-hidden={true} />
+                  Clear imported settings
+                </button>
+              ) : (
+                <button type="button" className="text-link" onClick={() => fileInputRef.current?.click()}>
+                  <Upload size={14} aria-hidden={true} />
+                  Import settings
+                </button>
+              )}
+              {importStatusMessage ? <span className="settings-import-status">{importStatusMessage}</span> : null}
+            </div>
+          ) : null}
         </>
       )}
     </section>

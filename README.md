@@ -26,6 +26,7 @@ By default this is a stream-source addon: open a movie or episode from another S
 - Global TMDB API key, plus per-server content type toggles, folder-layout hint, and proxy/direct FTP stream delivery mode
 - Private per-profile manifest URLs for Stremio
 - HTTP range proxy streaming from FTP to Stremio
+- JSON import/export of profile settings, including a credential-stripped sharing mode and automatic downgrades for server-side limits
 - Docker and Docker Compose deployment
 - SQLite persistence in `CONFIG_DIR`
 
@@ -89,6 +90,11 @@ SCAN_JOB_TIMEOUT_MS=1800000
 SCAN_SCHEDULER_INTERVAL_MS=60000
 SCAN_PROGRESS_AVERAGE_ITEMS=2000
 SCAN_TRANSIENT_RETRY_DELAY_MS=300000
+MAX_FTP_SERVERS_PER_PROFILE=0
+DISABLE_PROXY_STREAMS=false
+ADMIN_BROWSER_UIDS=
+EMPTY_PROFILE_CLEANUP_DAYS=7
+EMPTY_PROFILE_CLEANUP_INTERVAL_MS=604800000
 ```
 
 Notes:
@@ -110,6 +116,10 @@ Notes:
 - `SCAN_SCHEDULER_INTERVAL_MS` controls how often the server checks for due scheduled scans. Default `60000` or 1 minute.
 - `SCAN_PROGRESS_AVERAGE_ITEMS` is the denominator used for the first-pass progress estimate until the crawler has seen more entries. Default `2000`.
 - `SCAN_TRANSIENT_RETRY_DELAY_MS` controls delayed retries after transient FTP disconnects such as FIN/reset/timeout errors. Default `300000` or 5 minutes. Set `0` to disable these retries.
+- `MAX_FTP_SERVERS_PER_PROFILE` caps how many FTP servers each profile may keep. Default `0` removes the cap. Imported settings beyond the cap are dropped automatically.
+- `DISABLE_PROXY_STREAMS=true` forces every profile to deliver streams as direct FTP URLs. Saved customizations and imported settings are coerced to `direct`. Set per profile cannot opt back in.
+- `ADMIN_BROWSER_UIDS` is a comma-separated allowlist of browser UIDs that bypass `MAX_FTP_SERVERS_PER_PROFILE` and `DISABLE_PROXY_STREAMS`. Useful for the operator's own profile.
+- `EMPTY_PROFILE_CLEANUP_DAYS` deletes profiles older than this many days that have no FTP server configured. Default `7`. Set `0` to disable. Cleanup runs at startup and again every `EMPTY_PROFILE_CLEANUP_INTERVAL_MS` milliseconds (default `604800000`, one week).
 
 ## Docker Compose
 
@@ -169,9 +179,9 @@ If `SETUP_TOKEN` is set, enter it in the portal unlock form. Older `?setup=...` 
 
 ## Portal Workflow
 
-1. Fill in FTP settings for `Server 1`: host, port, username, password, TLS mode, certificate setting, and root paths.
-2. Enter a passphrase in Profile setup.
-3. Click `Create profile`. If the FTP form is complete, the portal creates the profile and saves FTP settings in one action.
+1. Enter a passphrase in Profile setup. Optionally click `Import settings` to load a previously exported JSON file before creating the profile. When settings are staged for import, only `Create profile` is available; `Unlock profile` is disabled until the staged import is cleared.
+2. Click `Create profile`. The portal creates the profile, applies any imported customization, and persists imported servers that already include credentials. Servers imported without credentials appear pre-filled so you can supply username and password, then click `Save FTP settings` per server.
+3. Fill in FTP settings for `Server 1` (or any imported server still missing credentials): host, port, username, password, TLS mode, certificate setting, and root paths.
 4. Click `Test connection`.
 5. Click `Rescan`. The scan runs in the background; you can leave and come back to see the latest persisted status. If needed, click `Halt scan` while it is active.
 6. Optionally enable `Show catalogs in Stremio`.
@@ -182,6 +192,7 @@ If `SETUP_TOKEN` is set, enter it in the portal unlock form. Older `?setup=...` 
 11. Choose an optional rescan frequency: manual only, every 6 hours, every 12 hours, daily, or weekly.
 12. Add more FTP servers if needed. They are scanned sequentially, and duplicate movie/episode matches appear as multiple stream options in Stremio.
 13. Install the generated Stremio manifest URL.
+14. The manifest panel includes `Export settings` to download the current profile (customization + servers) as a JSON file. Leave `Strip username & password` checked when sharing the file with someone else; uncheck it to keep a private backup that can restore credentials on a future import.
 
 For an existing browser profile:
 

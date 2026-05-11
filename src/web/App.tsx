@@ -37,6 +37,15 @@ import { DEFAULT_STREAM_DESCRIPTION_TEMPLATE, DEFAULT_STREAM_NAME_TEMPLATE } fro
 import { filledClass, Notice, scanIsActive } from "./components/ui.js";
 import type { AddonCustomization, FtpConfigRequest, FtpServerSettings, GlobalStats, ScanStatus } from "./api.js";
 import type { ChangelogEntry } from "./types.js";
+import {
+  applyImportLimits,
+  downloadSettingsFile,
+  hasCompleteFtpCreds,
+  parsePortableSettings,
+  serializePortableSettings,
+  type ImportSummary,
+  type PortableServer,
+} from "./portableSettings.js";
 
 type ProfileState = "new" | "creating" | "created" | "unlocked" | "error";
 
@@ -194,6 +203,54 @@ function serverFormFromLegacyPayload(
   };
 }
 
+function portableServerToForm(portable: PortableServer, index: number, id: number): ServerForm {
+  const base = emptyServerForm(id);
+  return {
+    ...base,
+    id,
+    name: portable.name?.trim() || `Server ${index + 1}`,
+    host: portable.host ?? "",
+    port: String(portable.port ?? 21),
+    username: portable.username ?? "",
+    password: portable.password ?? "",
+    passwordConfigured: false,
+    tlsMode: portable.tlsMode ?? base.tlsMode,
+    allowInvalidCertificate: portable.allowInvalidCertificate ?? false,
+    rootPaths: (portable.rootPaths && portable.rootPaths.length ? portable.rootPaths : ["/"]).join("\n"),
+    catalogEnabled: portable.catalogEnabled ?? false,
+    catalogContentTypes: portable.catalogContentTypes
+      ? {
+          movies: portable.catalogContentTypes.movies ?? true,
+          series: portable.catalogContentTypes.series ?? true,
+          anime: portable.catalogContentTypes.anime ?? false,
+          uncategorized: portable.catalogContentTypes.uncategorized ?? true,
+        }
+      : base.catalogContentTypes,
+    libraryLayout: portable.libraryLayout ?? base.libraryLayout,
+    streamDeliveryMode: portable.streamDeliveryMode ?? base.streamDeliveryMode,
+    scanSchedule: {
+      intervalMinutes: portable.scanIntervalMinutes ?? 0,
+      nextScheduledScanAt: null,
+    },
+    message: hasCompleteFtpCreds(portable)
+      ? "Imported. Will save automatically when you create the profile."
+      : "Imported. Fill in credentials and click Save FTP settings.",
+  };
+}
+
+function portableServerToFtpRequest(portable: PortableServer): FtpConfigRequest | null {
+  if (!portable.host || !portable.username || !portable.password || !portable.rootPaths?.length) return null;
+  return {
+    host: portable.host.trim(),
+    port: portable.port && Number.isFinite(portable.port) ? portable.port : 21,
+    username: portable.username,
+    password: portable.password,
+    tlsMode: portable.tlsMode ?? "explicit",
+    allowInvalidCertificate: portable.allowInvalidCertificate ?? false,
+    roots: portable.rootPaths.map((root) => root.trim()).filter(Boolean),
+  };
+}
+
 function ftpConfigFromServer(server: ServerForm): FtpConfigRequest {
   return {
     host: server.host.trim(),
@@ -280,6 +337,9 @@ export function App() {
   const [changelogEntries, setChangelogEntries] = useState<ChangelogEntry[]>(APP_CHANGELOG);
   const [maxFtpServersPerProfile, setMaxFtpServersPerProfile] = useState(0);
   const [proxyStreamsDisabled, setProxyStreamsDisabled] = useState(false);
+  const [importedSettings, setImportedSettings] = useState<ImportSummary | null>(null);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [exportStripCredentials, setExportStripCredentials] = useState(true);
   const profileReady = profileState === "created" || profileState === "unlocked";
   const currentYear = new Date().getFullYear();
   const anyScanActive = useMemo(() => servers.some((server) => scanIsActive(server.scanStatus)), [servers]);
@@ -511,8 +571,22 @@ export function App() {
       rememberSession(passphrase, created.manifestUrl, created.stremioInstallUrl);
       setProfileState("created");
       await saveCustomization({ browserUid: recoveryUid, passphrase, customization: normalizedCustomization() });
+      if (importedSettings) {
+        await persistImportedServers(importedSettings, recoveryUid, passphrase);
+      }
       await loadServerState(passphrase).catch(() => undefined);
-      setProfileMessage("Profile created. Save your FTP settings to generate the manifest URL.");
+      const pendingCount = importedSettings
+        ? importedSettings.servers.filter((server) => !hasCompleteFtpCreds(server)).length
+        : 0;
+      setProfileMessage(
+        importedSettings
+          ? pendingCount > 0
+            ? `Profile created. ${pendingCount} imported server${pendingCount === 1 ? "" : "s"} need credentials before they can scan.`
+            : "Profile created. Imported settings applied."
+          : "Profile created. Save your FTP settings to generate the manifest URL.",
+      );
+      setImportedSettings(null);
+      setImportMessage(null);
     } catch (error) {
       if (error instanceof Error && error.message === "Profile already exists") {
         await unlockExistingProfile();
@@ -728,6 +802,146 @@ export function App() {
     }
   }
 
+  function handleImportSettingsFile(file: File) {
+    const reader = new FileReader();
+    reader.onerror = () => setImportMessage("Could not read the selected file.");
+    reader.onload = () => {
+      try {
+        const text = typeof reader.result === "string" ? reader.result : "";
+        const parsed = parsePortableSettings(JSON.parse(text));
+        const summary = applyImportLimits(parsed, { maxFtpServersPerProfile, proxyStreamsDisabled });
+        applyImportedSettingsToForm(summary);
+        setImportedSettings(summary);
+        const notes: string[] = [];
+        notes.push(`${summary.servers.length} server${summary.servers.length === 1 ? "" : "s"} loaded`);
+        if (summary.droppedServerCount > 0) notes.push(`${summary.droppedServerCount} dropped (server cap)`);
+        if (summary.proxyDowngradedCount > 0) notes.push(`${summary.proxyDowngradedCount} downgraded to direct`);
+        setImportMessage(notes.join(" - "));
+      } catch (error) {
+        setImportedSettings(null);
+        setImportMessage(error instanceof Error ? error.message : "Settings file is invalid.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function applyImportedSettingsToForm(summary: ImportSummary) {
+    const customization = summary.customization;
+    if (customization.addonName) setAddonName(customization.addonName);
+    if (customization.addonLogoUrl) setAddonLogoUrl(customization.addonLogoUrl);
+    if (customization.addonDescription) setAddonDescription(customization.addonDescription);
+    if (typeof customization.catalogTmdbApiKey === "string") setCatalogTmdbApiKey(customization.catalogTmdbApiKey);
+    if (customization.streamNameTemplate) setStreamNameTemplate(customization.streamNameTemplate);
+    if (customization.streamDescriptionTemplate) setStreamDescriptionTemplate(customization.streamDescriptionTemplate);
+
+    const forms = summary.servers.length
+      ? summary.servers.map((server, index) => portableServerToForm(server, index, index === 0 ? 0 : -1 - index))
+      : [emptyServerForm()];
+    setServers(forms);
+    setExpandedServerId(forms.length > 2 ? null : forms[0]?.id ?? null);
+  }
+
+  function clearImportedSettings() {
+    setImportedSettings(null);
+    setImportMessage(null);
+    setServers([emptyServerForm()]);
+    setExpandedServerId(0);
+    setAddonName(DEFAULT_CUSTOMIZATION.addonName);
+    setAddonLogoUrl(DEFAULT_CUSTOMIZATION.addonLogoUrl);
+    setAddonDescription(DEFAULT_CUSTOMIZATION.addonDescription);
+    setCatalogTmdbApiKey(DEFAULT_CUSTOMIZATION.catalogTmdbApiKey ?? "");
+    setStreamNameTemplate(DEFAULT_STREAM_NAME_TEMPLATE);
+    setStreamDescriptionTemplate(DEFAULT_STREAM_DESCRIPTION_TEMPLATE);
+  }
+
+  function handleExportSettings() {
+    const payload = serializePortableSettings(
+      {
+        addonName,
+        addonLogoUrl,
+        addonDescription,
+        catalogTmdbApiKey,
+        streamNameTemplate,
+        streamDescriptionTemplate,
+        servers,
+      },
+      exportStripCredentials,
+    );
+    downloadSettingsFile(payload);
+  }
+
+  async function persistImportedServers(summary: ImportSummary, browserUidForApi: string, passphraseForApi: string) {
+    if (!summary.servers.length) return;
+    let firstServerId: number | null = null;
+    try {
+      const initial = await loadServers({ browserUid: browserUidForApi, passphrase: passphraseForApi });
+      firstServerId = initial.servers[0]?.id ?? null;
+    } catch {
+      firstServerId = null;
+    }
+
+    const persistedForms: ServerForm[] = [];
+    for (let index = 0; index < summary.servers.length; index += 1) {
+      const portable = summary.servers[index];
+      const ftpConfig = portableServerToFtpRequest(portable);
+      const customizationPatch = {
+        catalogEnabled: portable.catalogEnabled ?? false,
+        catalogContentTypes: portable.catalogContentTypes
+          ? {
+              movies: portable.catalogContentTypes.movies ?? true,
+              series: portable.catalogContentTypes.series ?? true,
+              anime: portable.catalogContentTypes.anime ?? false,
+              uncategorized: portable.catalogContentTypes.uncategorized ?? true,
+            }
+          : DEFAULT_CUSTOMIZATION.catalogContentTypes!,
+        libraryLayout: portable.libraryLayout ?? "auto",
+        streamDeliveryMode: portable.streamDeliveryMode ?? "proxy",
+      };
+      let serverId: number;
+      if (index === 0 && firstServerId !== null) {
+        serverId = firstServerId;
+      } else {
+        try {
+          const created = await createFtpServer({ browserUid: browserUidForApi, passphrase: passphraseForApi });
+          serverId = created.server.id;
+        } catch {
+          continue;
+        }
+      }
+
+      if (hasCompleteFtpCreds(portable) && ftpConfig) {
+        try {
+          const saved = await saveFtpServer({
+            browserUid: browserUidForApi,
+            passphrase: passphraseForApi,
+            serverId,
+            name: portable.name?.trim() || `Server ${index + 1}`,
+            ftpConfig,
+            customization: customizationPatch,
+          });
+          persistedForms.push(serverFormFromPayload(saved.server));
+          if (portable.scanIntervalMinutes && portable.scanIntervalMinutes > 0) {
+            await saveScanSchedule({
+              browserUid: browserUidForApi,
+              passphrase: passphraseForApi,
+              serverId,
+              intervalMinutes: portable.scanIntervalMinutes,
+            }).catch(() => undefined);
+          }
+        } catch {
+          /* leave for user to fix manually */
+        }
+      }
+    }
+    if (persistedForms.length) {
+      try {
+        await loadServerState(passphraseForApi);
+      } catch {
+        /* loadServerState handles its own errors */
+      }
+    }
+  }
+
   function logout() {
     setProfileState("new");
     setProfileMessage("Enter your passphrase to unlock this browser profile.");
@@ -766,10 +980,17 @@ export function App() {
       profileState={profileState}
       recoveryUid={recoveryUid}
       passphrase={passphrase}
+      importStatusMessage={importMessage}
+      importLoaded={Boolean(importedSettings)}
+      exportStripCredentials={exportStripCredentials}
       onRecoveryUidChange={updateRecoveryUid}
       onPassphraseChange={setPassphrase}
       onCreateProfile={() => void saveProfile()}
       onUnlockProfile={() => void unlockExistingProfile()}
+      onImportSettings={profileReady ? undefined : handleImportSettingsFile}
+      onClearImportedSettings={profileReady ? undefined : clearImportedSettings}
+      onExportSettings={profileReady ? handleExportSettings : undefined}
+      onExportStripCredentialsChange={profileReady ? setExportStripCredentials : undefined}
     />
   );
 
