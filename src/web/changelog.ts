@@ -1,4 +1,11 @@
 export const APP_CHANGELOG = [
+  { date: "2026-05-11", hash: "41cf1f5", subject: "feat: settings export decrypts passwords; Save & Generate; delete profile; manifest-gated Ready badge" },
+  { date: "2026-05-11", hash: "c1d8adf", subject: "feat: persisted draft servers ignored during scans; align strip-creds toggle" },
+  { date: "2026-05-11", hash: "9a98c81", subject: "fix: preserve imported host/port for partial-credential servers" },
+  { date: "2026-05-11", hash: "2a4e527", subject: "Inline import link with profile buttons; center strip-creds toggle" },
+  { date: "2026-05-11", hash: "218e6d7", subject: "feat: JSON import/export of profile settings; changelog header no longer sticky" },
+  { date: "2026-05-10", hash: "2663e12", subject: "feat: collapse multi-server accordion; weekly empty-profile cleanup" },
+  { date: "2026-05-10", hash: "477ba11", subject: "feat: profile-gated UI, logout + UID chip, server cap, proxy disable, admin UIDs" },
   { date: "2026-05-09", hash: "9ce81ed", subject: "Stabilize crawler snapshot fingerprints" },
   { date: "2026-05-09", hash: "22b29bf", subject: "Clarify scan mode and stabilize global progress" },
   { date: "2026-05-09", hash: "f9b7987", subject: "Refine mobile controls and scan metadata" },
