@@ -27,10 +27,15 @@
   box-sizing: border-box;
 }
 
+html {
+  overflow-x: clip;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: clip;
   background:
     linear-gradient(90deg, rgba(168, 224, 99, 0.035) 1px, transparent 1px),
     linear-gradient(180deg, rgba(168, 224, 99, 0.028) 1px, transparent 1px),
