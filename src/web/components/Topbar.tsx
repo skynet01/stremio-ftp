@@ -1,4 +1,4 @@
-import { Copy } from "lucide-react";
+import { Copy, Trash2 } from "lucide-react";
 import { StatusBadge } from "./ui.js";
 
 type ProfileState = "new" | "creating" | "created" | "unlocked" | "error";
@@ -8,20 +8,24 @@ export function Topbar({
   addonLogoUrl,
   editable,
   profileReady,
-  profileState,
   recoveryUid,
+  manifestReady,
   onEditLogo,
   onLogout,
+  onDeleteProfile,
 }: {
   addonName: string;
   addonLogoUrl: string;
   editable: boolean;
   profileReady: boolean;
-  profileState: ProfileState;
+  profileState?: ProfileState;
   recoveryUid?: string;
+  manifestReady?: boolean;
   onEditLogo: () => void;
   onLogout?: () => void;
+  onDeleteProfile?: () => void;
 }) {
+  const badge = badgeFor(profileReady, Boolean(manifestReady));
   return (
     <header className="topbar">
       <div className="brand-lockup">
@@ -46,9 +50,12 @@ export function Topbar({
         </div>
       </div>
       <div className="topbar-actions">
-        <StatusBadge tone={profileReady ? "green" : "gray"}>
-          {profileState === "created" ? "Ready to install" : profileState === "unlocked" ? "Unlocked" : "Not installed"}
-        </StatusBadge>
+        <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
+        {profileReady && onDeleteProfile ? (
+          <button type="button" className="icon-button topbar-delete" aria-label="Delete profile" title="Delete profile" onClick={onDeleteProfile}>
+            <Trash2 size={16} aria-hidden={true} />
+          </button>
+        ) : null}
         {profileReady && recoveryUid ? (
           <span className="topbar-uid" title={recoveryUid}>
             <span className="topbar-uid-label">UID</span>
@@ -71,6 +78,12 @@ export function Topbar({
       </div>
     </header>
   );
+}
+
+function badgeFor(profileReady: boolean, manifestReady: boolean): { tone: "green" | "gray"; label: string } {
+  if (profileReady && manifestReady) return { tone: "green", label: "Ready to install" };
+  if (profileReady) return { tone: "gray", label: "Unlocked" };
+  return { tone: "gray", label: "Not installed" };
 }
 
 function shortUid(uid: string) {

@@ -326,6 +326,33 @@ export async function createFtpServer(request: CreateProfileRequest): Promise<{
   return readJson<{ server: FtpServerSettings; globalStats: GlobalStats }>(response);
 }
 
+export async function loadSettingsExport(request: CreateProfileRequest): Promise<{
+  customization: AddonCustomization;
+  servers: Array<{
+    id: number;
+    name: string;
+    ftpConfig: (LoadedFtpConfig & { password: string }) | null;
+    customization: AddonCustomization;
+    scanSchedule: ScanSchedule;
+  }>;
+}> {
+  const response = await fetch("/api/profile/settings/export", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson(response);
+}
+
+export async function deleteProfile(request: CreateProfileRequest): Promise<{ ok: true }> {
+  const response = await fetch("/api/profile/delete", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<{ ok: true }>(response);
+}
+
 export async function saveFtpServer(request: SaveServerRequest): Promise<{
   server: FtpServerSettings;
   globalStats: GlobalStats;

@@ -686,6 +686,11 @@ export class ProfileService {
     return rows.length;
   }
 
+  deleteProfile(profileId: number): boolean {
+    const result = this.db.prepare("delete from profiles where id = ?").run(profileId);
+    return result.changes > 0;
+  }
+
   browserUidForProfile(profileId: number): string | null {
     const row = this.db.prepare("select browser_uid from profiles where id = ?").get(profileId) as
       | { browser_uid: string }

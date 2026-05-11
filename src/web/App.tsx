@@ -4,10 +4,12 @@ import {
   createFtpServer,
   createProfile,
   deleteFtpServer,
+  deleteProfile,
   loadCustomization,
   loadFtpSettings,
   loadScanStatus,
   loadServers,
+  loadSettingsExport,
   loadSetupStatus,
   rescanIndex,
   saveCustomization,
@@ -898,7 +900,33 @@ export function App() {
     setStreamDescriptionTemplate(DEFAULT_STREAM_DESCRIPTION_TEMPLATE);
   }
 
-  function handleExportSettings() {
+  async function handleExportSettings() {
+    let serversForExport: ServerForm[] = servers;
+    if (!exportStripCredentials) {
+      try {
+        const fetched = await loadSettingsExport({ browserUid: recoveryUid, passphrase });
+        const formsById = new Map(servers.map((server) => [server.id, server]));
+        serversForExport = fetched.servers.map((server) => {
+          const existing = formsById.get(server.id) ?? emptyServerForm(server.id);
+          return {
+            ...existing,
+            id: server.id,
+            name: server.name,
+            host: server.ftpConfig?.host ?? existing.host,
+            port: String(server.ftpConfig?.port ?? existing.port),
+            username: server.ftpConfig?.username ?? existing.username,
+            password: server.ftpConfig?.password ?? "",
+            tlsMode: server.ftpConfig?.tlsMode ?? existing.tlsMode,
+            allowInvalidCertificate: server.ftpConfig?.allowInvalidCertificate ?? existing.allowInvalidCertificate,
+            rootPaths: server.ftpConfig?.roots?.join("\n") ?? existing.rootPaths,
+            scanSchedule: server.scanSchedule ?? existing.scanSchedule,
+          };
+        });
+      } catch (error) {
+        setCustomizationMessage(error instanceof Error ? error.message : "Unable to fetch credentials for export.");
+        return;
+      }
+    }
     const payload = serializePortableSettings(
       {
         addonName,
@@ -907,11 +935,47 @@ export function App() {
         catalogTmdbApiKey,
         streamNameTemplate,
         streamDescriptionTemplate,
-        servers,
+        servers: serversForExport,
       },
       exportStripCredentials,
     );
     downloadSettingsFile(payload);
+  }
+
+  async function handleDeleteProfile() {
+    const confirmed = window.confirm("Delete this profile? This permanently removes its FTP servers, indexed files, and manifest token. This cannot be undone.");
+    if (!confirmed) return;
+    try {
+      await deleteProfile({ browserUid: recoveryUid, passphrase });
+    } catch (error) {
+      setCustomizationMessage(error instanceof Error ? error.message : "Unable to delete profile.");
+      return;
+    }
+    logout();
+    setProfileMessage("Profile deleted. Create a new one or unlock a different profile.");
+  }
+
+  async function saveAllDraftServers() {
+    setCustomizationMessage("Saving all servers...");
+    let saved = 0;
+    let failed = 0;
+    for (const candidate of servers) {
+      const server = servers.find((entry) => entry.id === candidate.id) ?? candidate;
+      const hasFreshPassword = Boolean(server.password);
+      const hasReadyCreds = hasFreshPassword || server.passwordConfigured;
+      if (!server.host.trim() || !server.username.trim() || !hasReadyCreds) continue;
+      try {
+        await saveServer(server.id);
+        saved += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setCustomizationMessage(
+      saved > 0
+        ? `${saved} server${saved === 1 ? "" : "s"} saved${failed ? `, ${failed} failed` : ""}. Manifest URL is ready.`
+        : "No server has complete FTP credentials yet. Fill in host, username, and password.",
+    );
   }
 
   async function persistImportedServers(summary: ImportSummary, browserUidForApi: string, passphraseForApi: string) {
@@ -1061,8 +1125,10 @@ export function App() {
         profileReady={profileReady}
         profileState={profileState}
         recoveryUid={recoveryUid}
+        manifestReady={Boolean(manifestUrl)}
         onEditLogo={() => setEditingLogo(true)}
         onLogout={profileReady ? logout : undefined}
+        onDeleteProfile={profileReady ? () => void handleDeleteProfile() : undefined}
       />
       <HeroPanel
         addonName={addonName}
@@ -1143,9 +1209,18 @@ export function App() {
               {hasSavedServer ? (
                 installPanel
               ) : (
-                <Notice className="manifest-pending-notice">
-                  Save at least one server's FTP settings to generate your manifest URL.
-                </Notice>
+                <div className="manifest-pending-row">
+                  <Notice className="manifest-pending-notice">
+                    Save at least one server's FTP settings to generate your manifest URL.
+                  </Notice>
+                  <button
+                    type="button"
+                    className="primary-button manifest-pending-action"
+                    onClick={() => void saveAllDraftServers()}
+                  >
+                    Save & Generate
+                  </button>
+                </div>
               )}
             </>
           ) : null}

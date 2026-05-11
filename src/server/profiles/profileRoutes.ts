@@ -313,6 +313,37 @@ export function profileRoutes(
     }
   });
 
+  router.post("/profile/settings/export", async (req, res) => {
+    const parsed = authenticatedSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid export request" });
+    try {
+      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      const customization = service.getAddonCustomization(unlocked.profileId);
+      const servers = service.listFtpServers(unlocked.profileId).map((server) => ({
+        id: server.id,
+        name: server.name,
+        ftpConfig: server.ftpConfig,
+        customization: server.customization,
+        scanSchedule: server.scanSchedule,
+      }));
+      res.json({ customization, servers });
+    } catch {
+      res.status(401).json({ error: "Invalid passphrase" });
+    }
+  });
+
+  router.post("/profile/delete", rateLimitProfiles, async (req, res) => {
+    const parsed = authenticatedSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid delete request" });
+    try {
+      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      service.deleteProfile(unlocked.profileId);
+      res.json({ ok: true });
+    } catch {
+      res.status(401).json({ error: "Invalid passphrase" });
+    }
+  });
+
   router.post("/profile/customization/load", async (req, res) => {
     const parsed = authenticatedSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid customization request" });

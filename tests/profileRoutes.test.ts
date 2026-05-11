@@ -1120,6 +1120,71 @@ describe("profile routes", () => {
     expect(response.body).toEqual({ error: "Invalid setup token" });
   });
 
+  it("returns decrypted FTP credentials on /profile/settings/export", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    await request(app)
+      .post("/api/profile/ftp")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp.example.test",
+          port: 21,
+          username: "user",
+          password: "supersecret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: false,
+          roots: ["/Media"],
+        },
+      })
+      .expect(200);
+
+    const response = await request(app)
+      .post("/api/profile/settings/export")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(response.body.servers[0].ftpConfig).toMatchObject({
+      host: "ftp.example.test",
+      username: "user",
+      password: "supersecret",
+    });
+  });
+
+  it("deletes a profile via /profile/delete", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    await request(app)
+      .post("/api/profile/delete")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    await request(app)
+      .post("/api/profile/unlock")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(401);
+  });
+
   it("accepts a draft FTP save without credentials but refuses to scan it", async () => {
     const db = new Database(":memory:");
     migrate(db);

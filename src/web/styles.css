@@ -1172,7 +1172,15 @@ input:-webkit-autofill:active {
   line-height: 1.55;
 }
 
+.manifest-pending-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
 .manifest-pending-notice {
+  flex: 1 1 280px;
   border: 1px dashed var(--line);
   border-radius: 12px;
   padding: 18px 22px;
@@ -1182,6 +1190,26 @@ input:-webkit-autofill:active {
   letter-spacing: 0.04em;
   color: var(--cream-dim);
   background: rgba(255, 255, 255, 0.015);
+  margin: 0;
+}
+
+.manifest-pending-action {
+  flex: 0 0 auto;
+}
+
+.topbar-delete {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cream-dim);
+}
+
+.topbar-delete:hover {
+  color: oklch(72% 0.18 25);
 }
 
 .install-button-row {
