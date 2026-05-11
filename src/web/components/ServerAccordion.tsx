@@ -40,7 +40,16 @@ export type ServerForm = {
   pendingScanAfter: string | null;
   message: string;
   pendingCreate?: boolean;
+  draft?: boolean;
 };
+
+export function isServerDraft(server: ServerForm): boolean {
+  if (server.draft) return true;
+  if (server.pendingCreate) return true;
+  if (!server.username.trim()) return true;
+  if (!server.passwordConfigured && !server.password) return true;
+  return false;
+}
 
 function serverSummary(server: ServerForm) {
   if (server.scanStatus.status === "queued") return "Queued for indexing";
@@ -74,6 +83,7 @@ function serverBadge(server: ServerForm): { tone: StatusTone; label: string } {
   if (server.pendingScanAfter) return { tone: "amber", label: "Pending" };
   if (server.scanStatus.status === "failed") return { tone: "red", label: "Needs attention" };
   if (server.indexStatus.lastScanAt) return { tone: "green", label: "Ready" };
+  if (isServerDraft(server)) return { tone: "gray", label: "Draft" };
   return { tone: "gray", label: "Idle" };
 }
 

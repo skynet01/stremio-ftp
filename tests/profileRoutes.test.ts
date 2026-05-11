@@ -1119,4 +1119,50 @@ describe("profile routes", () => {
 
     expect(response.body).toEqual({ error: "Invalid setup token" });
   });
+
+  it("accepts a draft FTP save without credentials but refuses to scan it", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    const draftSave = await request(app)
+      .post("/api/profile/ftp")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        ftpConfig: {
+          host: "ftp.example.test",
+          port: 21,
+          username: "",
+          password: "",
+          tlsMode: "explicit",
+          allowInvalidCertificate: false,
+          roots: ["/"],
+        },
+      })
+      .expect(200);
+    expect(draftSave.body).toMatchObject({ ok: true, draft: true });
+
+    const rescan = await request(app)
+      .post("/api/profile/index/rescan")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(400);
+    expect(rescan.body.error).toMatch(/username and password/i);
+
+    const load = await request(app)
+      .post("/api/profile/servers/load")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(load.body.servers[0]).toMatchObject({ draft: true });
+    expect(load.body.servers[0].ftpConfig).toMatchObject({ host: "ftp.example.test", passwordConfigured: false });
+  });
 });

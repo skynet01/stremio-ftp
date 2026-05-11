@@ -155,6 +155,7 @@ function serverFormFromPayload(server: FtpServerSettings): ServerForm {
     ...emptyServerForm(server.id),
     id: server.id,
     name: server.name,
+    draft: Boolean(server.draft),
     host: server.ftpConfig?.host ?? "",
     port: String(server.ftpConfig?.port ?? 21),
     username: server.ftpConfig?.username ?? "",
@@ -239,12 +240,12 @@ function portableServerToForm(portable: PortableServer, index: number, id: numbe
 }
 
 function portableServerToFtpRequest(portable: PortableServer): FtpConfigRequest | null {
-  if (!portable.host || !portable.username || !portable.password || !portable.rootPaths?.length) return null;
+  if (!portable.host || !portable.rootPaths?.length) return null;
   return {
     host: portable.host.trim(),
     port: portable.port && Number.isFinite(portable.port) ? portable.port : 21,
-    username: portable.username,
-    password: portable.password,
+    username: portable.username ?? "",
+    password: portable.password ?? "",
     tlsMode: portable.tlsMode ?? "explicit",
     allowInvalidCertificate: portable.allowInvalidCertificate ?? false,
     roots: portable.rootPaths.map((root) => root.trim()).filter(Boolean),
@@ -946,43 +947,42 @@ export function App() {
       const fallbackId = index === 0 ? defaultServerId ?? 0 : -1 - index;
       const localForm = portableServerToForm(portable, index, fallbackId);
       const ftpConfig = portableServerToFtpRequest(portable);
-      const complete = hasCompleteFtpCreds(portable) && Boolean(ftpConfig);
+      const hasHostAndRoots = Boolean(portable.host?.trim() && (portable.rootPaths?.length ?? 0) > 0);
 
-      if (complete && ftpConfig) {
-        let targetServerId: number | null = null;
-        if (index === 0) {
-          targetServerId = defaultServerId;
-        } else {
-          try {
-            const created = await createFtpServer({ browserUid: browserUidForApi, passphrase: passphraseForApi });
-            targetServerId = created.server.id;
-          } catch {
-            targetServerId = null;
-          }
+      let targetServerId: number | null = null;
+      if (index === 0) {
+        targetServerId = defaultServerId;
+      } else if (hasHostAndRoots) {
+        try {
+          const created = await createFtpServer({ browserUid: browserUidForApi, passphrase: passphraseForApi });
+          targetServerId = created.server.id;
+        } catch {
+          targetServerId = null;
         }
-        if (targetServerId !== null) {
-          try {
-            const saved = await saveFtpServer({
+      }
+
+      if (targetServerId !== null && hasHostAndRoots && ftpConfig) {
+        try {
+          const saved = await saveFtpServer({
+            browserUid: browserUidForApi,
+            passphrase: passphraseForApi,
+            serverId: targetServerId,
+            name: portable.name?.trim() || `Server ${index + 1}`,
+            ftpConfig,
+            customization: customizationPatchFor(portable),
+          });
+          finalForms.push({ ...serverFormFromPayload(saved.server), pendingCreate: false });
+          if (hasCompleteFtpCreds(portable) && portable.scanIntervalMinutes && portable.scanIntervalMinutes > 0) {
+            await saveScanSchedule({
               browserUid: browserUidForApi,
               passphrase: passphraseForApi,
               serverId: targetServerId,
-              name: portable.name?.trim() || `Server ${index + 1}`,
-              ftpConfig,
-              customization: customizationPatchFor(portable),
-            });
-            finalForms.push({ ...serverFormFromPayload(saved.server), pendingCreate: false });
-            if (portable.scanIntervalMinutes && portable.scanIntervalMinutes > 0) {
-              await saveScanSchedule({
-                browserUid: browserUidForApi,
-                passphrase: passphraseForApi,
-                serverId: targetServerId,
-                intervalMinutes: portable.scanIntervalMinutes,
-              }).catch(() => undefined);
-            }
-            continue;
-          } catch {
-            /* fall through to keep local form so user can retry */
+              intervalMinutes: portable.scanIntervalMinutes,
+            }).catch(() => undefined);
           }
+          continue;
+        } catch {
+          /* fall through and keep local form for retry */
         }
       }
 
@@ -991,8 +991,8 @@ export function App() {
         pendingCreate: index !== 0 || defaultServerId === null,
         message:
           index === 0
-            ? "Imported. Fill in credentials and click Save FTP settings."
-            : "Imported (not yet persisted). Fill in credentials and click Save FTP settings.",
+            ? "Imported. Fill in remaining fields and click Save FTP settings."
+            : "Imported (not yet persisted). Fill in remaining fields and click Save FTP settings.",
       });
     }
 

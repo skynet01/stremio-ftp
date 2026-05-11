@@ -14,12 +14,16 @@ const createSchema = z.object({
 const ftpConfigSchema = z.object({
   host: z.string().trim().min(1),
   port: z.number().int().min(1).max(65535),
-  username: z.string().min(1),
+  username: z.string(),
   password: z.string(),
   tlsMode: z.enum(["none", "explicit", "implicit"]),
   allowInvalidCertificate: z.boolean(),
   roots: z.array(z.string().trim().min(1)).min(1),
 });
+
+function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: string | null }) {
+  return !ftpConfig.username?.trim() || !ftpConfig.password;
+}
 
 const authenticatedSchema = createSchema;
 const saveFtpSchema = createSchema.extend({ ftpConfig: ftpConfigSchema });
@@ -129,7 +133,7 @@ export function profileRoutes(
 
     const existingConfig = service.getFtpConfig(unlocked.profileId);
     const ftpConfig = ftpConfigWithStoredPassword(parsed.data.ftpConfig, existingConfig);
-    if (!ftpConfig.password) return res.status(400).json({ error: "FTP password is required" });
+    if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "FTP username and password are required to test" });
 
     try {
       const client = await ftpClientFactory(ftpConfig);
@@ -157,9 +161,8 @@ export function profileRoutes(
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
       const existingConfig = service.getFtpConfig(unlocked.profileId);
       const ftpConfig = ftpConfigWithStoredPassword(parsed.data.ftpConfig, existingConfig);
-      if (!ftpConfig.password) return res.status(400).json({ error: "FTP password is required" });
       service.saveFtpConfig(unlocked.profileId, ftpConfig);
-      res.json({ ok: true });
+      res.json({ ok: true, draft: isDraftFtpConfig(ftpConfig) });
     } catch {
       res.status(401).json({ error: "Invalid passphrase" });
     }
@@ -242,7 +245,6 @@ export function profileRoutes(
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
       const existingConfig = service.getFtpServerConfig(unlocked.profileId, parsed.data.serverId);
       const ftpConfig = ftpConfigWithStoredPassword(parsed.data.ftpConfig, existingConfig);
-      if (!ftpConfig.password) return res.status(400).json({ error: "FTP password is required" });
       const server = service.saveFtpServer(unlocked.profileId, parsed.data.serverId, {
         name: parsed.data.name,
         ftpConfig,
@@ -290,7 +292,7 @@ export function profileRoutes(
 
     const existingConfig = service.getFtpServerConfig(unlocked.profileId, parsed.data.serverId);
     const ftpConfig = ftpConfigWithStoredPassword(parsed.data.ftpConfig, existingConfig);
-    if (!ftpConfig.password) return res.status(400).json({ error: "FTP password is required" });
+    if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "FTP username and password are required to test" });
 
     try {
       const client = await ftpClientFactory(ftpConfig);
@@ -346,7 +348,9 @@ export function profileRoutes(
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
       const scanOptions = parsed.data.force ? { force: true } : undefined;
       if (parsed.data.all) {
-        const servers = service.listFtpServers(unlocked.profileId).filter((server) => server.ftpConfig);
+        const servers = service
+          .listFtpServers(unlocked.profileId)
+          .filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig));
         if (!servers.length) return res.status(400).json({ error: "FTP settings are not configured" });
         const scanStatuses = servers.map((server) => scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id, scanOptions));
         return res.json({
@@ -359,6 +363,7 @@ export function profileRoutes(
       const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
       const ftpConfig = service.getFtpServerConfig(unlocked.profileId, serverId);
       if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
+      if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "Fill in username and password before scanning this server." });
       res.json({ scanStatus: scanQueue.enqueueProfileScan(unlocked.profileId, "manual", serverId, scanOptions) });
     } catch (error) {
       res.status(400).json({ error: ftpErrorMessage(error, "Unable to refresh FTP index") });
@@ -430,9 +435,11 @@ function serverPayloads(service: ProfileService, scanQueue: ScanQueue, profileId
 
 function serverPayload(_service: ProfileService, scanQueue: ScanQueue, server: FtpServer) {
   const ftpConfig = server.ftpConfig;
+  const draft = ftpConfig ? isDraftFtpConfig(ftpConfig) : false;
   return {
     id: server.id,
     name: server.name,
+    draft,
     ftpConfig: ftpConfig
       ? {
           host: ftpConfig.host,

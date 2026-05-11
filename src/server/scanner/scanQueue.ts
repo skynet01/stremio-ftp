@@ -184,6 +184,11 @@ export class ScanQueue {
 
   enqueueDueScheduledScans(nowIso = new Date().toISOString()) {
     for (const { profileId, serverId } of this.profileService.dueScheduledScanServerIds(nowIso)) {
+      const ftpConfig = this.profileService.getFtpServerConfig(profileId, serverId);
+      if (!ftpConfig || !ftpConfig.username?.trim() || !ftpConfig.password) {
+        this.profileService.clearPendingScan(profileId, serverId);
+        continue;
+      }
       const schedule = this.profileService.getFtpServerScanSchedule(profileId, serverId);
       this.profileService.clearPendingScan(profileId, serverId);
       this.profileService.saveFtpServerScanSchedule(profileId, serverId, {
@@ -245,6 +250,7 @@ export class ScanQueue {
   private async runJob(jobId: number, profileId: number, ftpServerId: number, scanMode: ScanMode, signal: AbortSignal) {
     const ftpConfig = this.profileService.getFtpServerConfig(profileId, ftpServerId);
     if (!ftpConfig) throw new Error("FTP settings are not configured");
+    if (!ftpConfig.username?.trim() || !ftpConfig.password) throw new Error("FTP username and password are required");
     const customization = this.profileService.getFtpServerCustomization(profileId, ftpServerId);
     const progressBaselineItems = this.lastSuccessfulProgressItems(profileId, ftpServerId);
     const initialMediaItems = this.mediaRepository.countForServer(profileId, ftpServerId);

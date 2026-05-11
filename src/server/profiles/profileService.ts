@@ -594,12 +594,13 @@ export class ProfileService {
 
   saveFtpServerConfig(profileId: number, serverId: number, config: FtpConfig, debounceScan = true) {
     const now = new Date().toISOString();
-    const pendingScanAfter = debounceScan ? new Date(Date.now() + 5 * 60_000).toISOString() : null;
+    const draft = !config.username?.trim() || !config.password;
+    const pendingScanAfter = !draft && debounceScan ? new Date(Date.now() + 5 * 60_000).toISOString() : null;
     const result = this.db
       .prepare(
         `
         update profile_ftp_servers
-        set encrypted_ftp_config = ?, pending_scan_after = coalesce(?, pending_scan_after), updated_at = ?
+        set encrypted_ftp_config = ?, pending_scan_after = ?, updated_at = ?
         where profile_id = ? and id = ?
       `,
       )

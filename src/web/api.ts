@@ -88,6 +88,7 @@ export type GlobalStats = {
 export type FtpServerSettings = {
   id: number;
   name: string;
+  draft?: boolean;
   ftpConfig: LoadedFtpConfig | null;
   customization: AddonCustomization;
   indexStatus: IndexStatus;

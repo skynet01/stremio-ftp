@@ -1241,13 +1241,19 @@ input:-webkit-autofill:active {
   border-top: 1px solid var(--line-soft);
 }
 
+.settings-export-row > * {
+  align-self: center;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
 .settings-export-row .secondary-button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
-.settings-export-strip {
+.settings-export-row .settings-export-strip {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -1259,7 +1265,7 @@ input:-webkit-autofill:active {
   color: var(--cream-dim);
 }
 
-.settings-export-strip input {
+.settings-export-row .settings-export-strip input {
   margin: 0;
 }
 
