@@ -126,7 +126,7 @@ function parseServer(value: unknown): PortableServer {
   return {
     name: stringOrUndefined(s.name),
     host: stringOrUndefined(s.host),
-    port: typeof s.port === "number" && Number.isFinite(s.port) ? s.port : undefined,
+    port: parsePortValue(s.port),
     username: stringOrUndefined(s.username),
     password: stringOrUndefined(s.password),
     tlsMode: s.tlsMode === "none" || s.tlsMode === "explicit" || s.tlsMode === "implicit" ? s.tlsMode : undefined,
@@ -155,6 +155,18 @@ function parseContentTypes(value: unknown): PortableServer["catalogContentTypes"
   if (typeof c.anime === "boolean") out.anime = c.anime;
   if (typeof c.uncategorized === "boolean") out.uncategorized = c.uncategorized;
   return Object.keys(out).length ? out : undefined;
+}
+
+function parsePortValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.floor(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const parsed = Number(trimmed);
+      if (Number.isFinite(parsed) && parsed > 0 && parsed <= 65535) return parsed;
+    }
+  }
+  return undefined;
 }
 
 function stringOrUndefined(value: unknown): string | undefined {

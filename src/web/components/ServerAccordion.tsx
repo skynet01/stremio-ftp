@@ -39,6 +39,7 @@ export type ServerForm = {
   connectionStatus: ConnectionStatus;
   pendingScanAfter: string | null;
   message: string;
+  pendingCreate?: boolean;
 };
 
 function serverSummary(server: ServerForm) {

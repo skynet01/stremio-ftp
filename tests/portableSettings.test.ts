@@ -115,6 +115,15 @@ describe("portableSettings", () => {
     expect(summary.servers.map((s) => s.name)).toEqual(["Server 1", "Server 2"]);
   });
 
+  it("accepts string port values for forward compatibility", () => {
+    const parsed = parsePortableSettings({
+      schemaVersion: 1,
+      exportedAt: "2026-05-11T00:00:00.000Z",
+      servers: [{ host: "ftp.example.test", port: "2121", rootPaths: ["/"] }],
+    });
+    expect(parsed.servers?.[0].port).toBe(2121);
+  });
+
   it("flags partial servers as missing credentials", () => {
     const stripped = serializePortableSettings(baseExportContext, true);
     const summary = applyImportLimits(parsePortableSettings(stripped), {

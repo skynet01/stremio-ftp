@@ -459,7 +459,8 @@ export function App() {
     try {
       const loaded = await loadServers({ browserUid: recoveryUid, passphrase: nextPassphrase });
       applyCustomization(loaded.customization);
-      const forms = loaded.servers.map(serverFormFromPayload);
+      const loadedForms = loaded.servers.map(serverFormFromPayload);
+      const forms = mergePendingServersInto(loadedForms);
       setServers(forms);
       setGlobalStats(loaded.globalStats);
       setExpandedServerId((current) => {
@@ -570,13 +571,25 @@ export function App() {
       const created = await createProfile({ browserUid: recoveryUid, passphrase });
       rememberSession(passphrase, created.manifestUrl, created.stremioInstallUrl);
       setProfileState("created");
-      await saveCustomization({ browserUid: recoveryUid, passphrase, customization: normalizedCustomization() });
-      if (importedSettings) {
-        await persistImportedServers(importedSettings, recoveryUid, passphrase);
+      const importToApply = importedSettings;
+      const customizationToSave = importToApply?.customization
+        ? normalizedCustomization(servers[0], {
+            addonName: importToApply.customization.addonName ?? addonName,
+            addonLogoUrl: importToApply.customization.addonLogoUrl ?? addonLogoUrl,
+            addonDescription: importToApply.customization.addonDescription ?? addonDescription,
+            catalogTmdbApiKey: importToApply.customization.catalogTmdbApiKey ?? catalogTmdbApiKey,
+            streamNameTemplate: importToApply.customization.streamNameTemplate ?? streamNameTemplate,
+            streamDescriptionTemplate: importToApply.customization.streamDescriptionTemplate ?? streamDescriptionTemplate,
+          })
+        : normalizedCustomization();
+      await saveCustomization({ browserUid: recoveryUid, passphrase, customization: customizationToSave });
+      if (importToApply) {
+        await persistImportedServers(importToApply, recoveryUid, passphrase);
+      } else {
+        await loadServerState(passphrase).catch(() => undefined);
       }
-      await loadServerState(passphrase).catch(() => undefined);
-      const pendingCount = importedSettings
-        ? importedSettings.servers.filter((server) => !hasCompleteFtpCreds(server)).length
+      const pendingCount = importToApply
+        ? importToApply.servers.filter((server) => !hasCompleteFtpCreds(server)).length
         : 0;
       setProfileMessage(
         importedSettings
@@ -666,16 +679,24 @@ export function App() {
     const server = serverById(serverId);
     updateServer(serverId, { message: "Saving server settings..." });
     try {
-      if (serverId === 0) {
+      let targetServerId = serverId;
+      if (server.pendingCreate) {
+        const created = await createFtpServer({ browserUid: recoveryUid, passphrase });
+        targetServerId = created.server.id;
+        setServers((current) =>
+          current.map((candidate) => (candidate.id === serverId ? { ...candidate, id: targetServerId, pendingCreate: false } : candidate)),
+        );
+      }
+      if (targetServerId === 0) {
         await saveFtpSettings({ browserUid: recoveryUid, passphrase, ftpConfig: ftpConfigFromServer(server) });
         await saveCustomization({ browserUid: recoveryUid, passphrase, customization: normalizedCustomization(server) });
-        updateServer(serverId, { message: "FTP and library settings saved. Refresh the index to find files." });
+        updateServer(targetServerId, { message: "FTP and library settings saved. Refresh the index to find files." });
         return;
       }
       const result = await saveFtpServer({
         browserUid: recoveryUid,
         passphrase,
-        serverId,
+        serverId: targetServerId,
         name: server.name,
         ftpConfig: ftpConfigFromServer(server),
         customization: {
@@ -687,8 +708,8 @@ export function App() {
       });
       setServers((current) =>
         current.map((candidate) =>
-          candidate.id === serverId
-            ? { ...serverFormFromPayload(result.server), message: "Settings saved. Auto-scan will start in about 5 minutes." }
+          candidate.id === targetServerId
+            ? { ...serverFormFromPayload(result.server), pendingCreate: false, message: "Settings saved. Auto-scan will start in about 5 minutes." }
             : candidate,
         ),
       );
@@ -700,6 +721,10 @@ export function App() {
 
   async function testServer(serverId: number) {
     const server = serverById(serverId);
+    if (server.pendingCreate) {
+      updateServer(serverId, { message: "Click Save FTP settings first to test this server." });
+      return;
+    }
     updateServer(serverId, { message: "Testing FTP connection..." });
     try {
       if (serverId === 0) {
@@ -715,6 +740,11 @@ export function App() {
   }
 
   async function refreshServer(serverId: number) {
+    const target = servers.find((server) => server.id === serverId);
+    if (target?.pendingCreate) {
+      updateServer(serverId, { message: "Click Save FTP settings first to scan this server." });
+      return;
+    }
     updateServer(serverId, { message: "Queueing FTP index refresh..." });
     try {
       const result = await rescanIndex({ browserUid: recoveryUid, passphrase, ...(serverId === 0 ? {} : { serverId }) });
@@ -733,12 +763,18 @@ export function App() {
     }
     try {
       const result = await rescanIndex({ browserUid: recoveryUid, passphrase, all: true, ...(force ? { force: true } : {}) });
-      if (result.servers) setServers(result.servers.map(serverFormFromPayload));
+      if (result.servers) setServers(mergePendingServersInto(result.servers.map(serverFormFromPayload)));
       if (result.globalStats) setGlobalStats(result.globalStats);
       if (!result.servers) await refreshScanStatus();
     } catch (error) {
       setCustomizationMessage(error instanceof Error ? error.message : "Unable to refresh all indexes.");
     }
+  }
+
+  function mergePendingServersInto(loadedForms: ServerForm[]): ServerForm[] {
+    const pending = servers.filter((server) => server.pendingCreate);
+    if (!pending.length) return loadedForms;
+    return [...loadedForms, ...pending];
   }
 
   async function haltServer(serverId: number) {
@@ -752,6 +788,12 @@ export function App() {
   }
 
   async function removeServer(serverId: number) {
+    const target = servers.find((server) => server.id === serverId);
+    if (target?.pendingCreate) {
+      setServers((current) => current.filter((server) => server.id !== serverId));
+      setExpandedServerId((current) => (current === serverId ? null : current));
+      return;
+    }
     try {
       const result = await deleteFtpServer({ browserUid: recoveryUid, passphrase, serverId });
       const forms = result.servers.map(serverFormFromPayload);
@@ -765,7 +807,7 @@ export function App() {
 
   async function refreshScanStatus() {
     const result = await loadScanStatus({ browserUid: recoveryUid, passphrase });
-    if (result.servers) setServers(result.servers.map(serverFormFromPayload));
+    if (result.servers) setServers(mergePendingServersInto(result.servers.map(serverFormFromPayload)));
     if (!result.servers) {
       setServers((current) =>
         current.map((server) =>
@@ -841,6 +883,7 @@ export function App() {
     setExpandedServerId(forms.length > 2 ? null : forms[0]?.id ?? null);
   }
 
+
   function clearImportedSettings() {
     setImportedSettings(null);
     setImportMessage(null);
@@ -872,74 +915,89 @@ export function App() {
 
   async function persistImportedServers(summary: ImportSummary, browserUidForApi: string, passphraseForApi: string) {
     if (!summary.servers.length) return;
-    let firstServerId: number | null = null;
+
+    let defaultServerId: number | null = null;
     try {
       const initial = await loadServers({ browserUid: browserUidForApi, passphrase: passphraseForApi });
-      firstServerId = initial.servers[0]?.id ?? null;
+      defaultServerId = initial.servers[0]?.id ?? null;
+      applyCustomization(initial.customization);
+      setGlobalStats(initial.globalStats);
     } catch {
-      firstServerId = null;
+      defaultServerId = null;
     }
 
-    const persistedForms: ServerForm[] = [];
+    const customizationPatchFor = (portable: PortableServer) => ({
+      catalogEnabled: portable.catalogEnabled ?? false,
+      catalogContentTypes: portable.catalogContentTypes
+        ? {
+            movies: portable.catalogContentTypes.movies ?? true,
+            series: portable.catalogContentTypes.series ?? true,
+            anime: portable.catalogContentTypes.anime ?? false,
+            uncategorized: portable.catalogContentTypes.uncategorized ?? true,
+          }
+        : DEFAULT_CUSTOMIZATION.catalogContentTypes!,
+      libraryLayout: portable.libraryLayout ?? "auto",
+      streamDeliveryMode: portable.streamDeliveryMode ?? "proxy",
+    });
+
+    const finalForms: ServerForm[] = [];
     for (let index = 0; index < summary.servers.length; index += 1) {
       const portable = summary.servers[index];
+      const fallbackId = index === 0 ? defaultServerId ?? 0 : -1 - index;
+      const localForm = portableServerToForm(portable, index, fallbackId);
       const ftpConfig = portableServerToFtpRequest(portable);
-      const customizationPatch = {
-        catalogEnabled: portable.catalogEnabled ?? false,
-        catalogContentTypes: portable.catalogContentTypes
-          ? {
-              movies: portable.catalogContentTypes.movies ?? true,
-              series: portable.catalogContentTypes.series ?? true,
-              anime: portable.catalogContentTypes.anime ?? false,
-              uncategorized: portable.catalogContentTypes.uncategorized ?? true,
+      const complete = hasCompleteFtpCreds(portable) && Boolean(ftpConfig);
+
+      if (complete && ftpConfig) {
+        let targetServerId: number | null = null;
+        if (index === 0) {
+          targetServerId = defaultServerId;
+        } else {
+          try {
+            const created = await createFtpServer({ browserUid: browserUidForApi, passphrase: passphraseForApi });
+            targetServerId = created.server.id;
+          } catch {
+            targetServerId = null;
+          }
+        }
+        if (targetServerId !== null) {
+          try {
+            const saved = await saveFtpServer({
+              browserUid: browserUidForApi,
+              passphrase: passphraseForApi,
+              serverId: targetServerId,
+              name: portable.name?.trim() || `Server ${index + 1}`,
+              ftpConfig,
+              customization: customizationPatchFor(portable),
+            });
+            finalForms.push({ ...serverFormFromPayload(saved.server), pendingCreate: false });
+            if (portable.scanIntervalMinutes && portable.scanIntervalMinutes > 0) {
+              await saveScanSchedule({
+                browserUid: browserUidForApi,
+                passphrase: passphraseForApi,
+                serverId: targetServerId,
+                intervalMinutes: portable.scanIntervalMinutes,
+              }).catch(() => undefined);
             }
-          : DEFAULT_CUSTOMIZATION.catalogContentTypes!,
-        libraryLayout: portable.libraryLayout ?? "auto",
-        streamDeliveryMode: portable.streamDeliveryMode ?? "proxy",
-      };
-      let serverId: number;
-      if (index === 0 && firstServerId !== null) {
-        serverId = firstServerId;
-      } else {
-        try {
-          const created = await createFtpServer({ browserUid: browserUidForApi, passphrase: passphraseForApi });
-          serverId = created.server.id;
-        } catch {
-          continue;
+            continue;
+          } catch {
+            /* fall through to keep local form so user can retry */
+          }
         }
       }
 
-      if (hasCompleteFtpCreds(portable) && ftpConfig) {
-        try {
-          const saved = await saveFtpServer({
-            browserUid: browserUidForApi,
-            passphrase: passphraseForApi,
-            serverId,
-            name: portable.name?.trim() || `Server ${index + 1}`,
-            ftpConfig,
-            customization: customizationPatch,
-          });
-          persistedForms.push(serverFormFromPayload(saved.server));
-          if (portable.scanIntervalMinutes && portable.scanIntervalMinutes > 0) {
-            await saveScanSchedule({
-              browserUid: browserUidForApi,
-              passphrase: passphraseForApi,
-              serverId,
-              intervalMinutes: portable.scanIntervalMinutes,
-            }).catch(() => undefined);
-          }
-        } catch {
-          /* leave for user to fix manually */
-        }
-      }
+      finalForms.push({
+        ...localForm,
+        pendingCreate: index !== 0 || defaultServerId === null,
+        message:
+          index === 0
+            ? "Imported. Fill in credentials and click Save FTP settings."
+            : "Imported (not yet persisted). Fill in credentials and click Save FTP settings.",
+      });
     }
-    if (persistedForms.length) {
-      try {
-        await loadServerState(passphraseForApi);
-      } catch {
-        /* loadServerState handles its own errors */
-      }
-    }
+
+    setServers(finalForms);
+    setExpandedServerId(finalForms.length > 2 ? null : finalForms[0]?.id ?? null);
   }
 
   function logout() {
