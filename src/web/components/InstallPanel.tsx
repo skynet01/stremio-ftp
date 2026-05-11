@@ -144,50 +144,54 @@ export function InstallPanel({
             )}
           </div>
           <Notice>{profileMessage}</Notice>
-          <div className="button-row">
-            <button
-              type="button"
-              className="primary-button"
-              aria-label="Create profile"
-              disabled={profileState === "creating"}
-              onClick={onCreateProfile}
-            >
-              {profileState === "creating" ? "Working..." : "Create profile"}
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              aria-label="Unlock profile"
-              disabled={profileState === "creating" || Boolean(importLoaded)}
-              title={importLoaded ? "Unlock is unavailable while imported settings are staged" : undefined}
-              onClick={onUnlockProfile}
-            >
-              Unlock profile
-            </button>
-          </div>
-          {onImportSettings ? (
-            <div className="settings-import-row">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/json,.json"
-                className="visually-hidden"
-                onChange={handleImportFile}
-              />
-              {importLoaded ? (
-                <button type="button" className="text-link" onClick={onClearImportedSettings}>
-                  <X size={14} aria-hidden={true} />
-                  Clear imported settings
-                </button>
-              ) : (
-                <button type="button" className="text-link" onClick={() => fileInputRef.current?.click()}>
-                  <Upload size={14} aria-hidden={true} />
-                  Import settings
-                </button>
-              )}
-              {importStatusMessage ? <span className="settings-import-status">{importStatusMessage}</span> : null}
+          <div className="button-row install-button-row">
+            {onImportSettings ? (
+              <div className="settings-import-cluster">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="visually-hidden"
+                  onChange={handleImportFile}
+                />
+                {importLoaded ? (
+                  <button type="button" className="text-link" onClick={onClearImportedSettings}>
+                    <X size={14} aria-hidden={true} />
+                    Clear imported settings
+                  </button>
+                ) : (
+                  <button type="button" className="text-link" onClick={() => fileInputRef.current?.click()}>
+                    <Upload size={14} aria-hidden={true} />
+                    Import settings
+                  </button>
+                )}
+                {importStatusMessage ? <span className="settings-import-status">{importStatusMessage}</span> : null}
+              </div>
+            ) : (
+              <span className="settings-import-cluster" aria-hidden="true" />
+            )}
+            <div className="install-button-group">
+              <button
+                type="button"
+                className="primary-button"
+                aria-label="Create profile"
+                disabled={profileState === "creating"}
+                onClick={onCreateProfile}
+              >
+                {profileState === "creating" ? "Working..." : "Create profile"}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                aria-label="Unlock profile"
+                disabled={profileState === "creating" || Boolean(importLoaded)}
+                title={importLoaded ? "Unlock is unavailable while imported settings are staged" : undefined}
+                onClick={onUnlockProfile}
+              >
+                Unlock profile
+              </button>
             </div>
-          ) : null}
+          </div>
         </>
       )}
     </section>

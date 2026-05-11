@@ -1184,17 +1184,30 @@ input:-webkit-autofill:active {
   background: rgba(255, 255, 255, 0.015);
 }
 
-.settings-import-row {
+.install-button-row {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.settings-import-cluster {
   display: inline-flex;
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
-  margin-top: 14px;
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.74rem;
 }
 
-.settings-import-row .text-link {
+.install-button-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.settings-import-cluster .text-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1210,7 +1223,7 @@ input:-webkit-autofill:active {
   text-underline-offset: 3px;
 }
 
-.settings-import-row .text-link:hover {
+.settings-import-cluster .text-link:hover {
   color: var(--cream);
 }
 
@@ -1219,7 +1232,7 @@ input:-webkit-autofill:active {
 }
 
 .settings-export-row {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
@@ -1228,11 +1241,26 @@ input:-webkit-autofill:active {
   border-top: 1px solid var(--line-soft);
 }
 
+.settings-export-row .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .settings-export-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
+  padding: 0;
+  line-height: 1;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.74rem;
   color: var(--cream-dim);
+}
+
+.settings-export-strip input {
+  margin: 0;
 }
 
 .notification {
