@@ -1481,6 +1481,20 @@ input:-webkit-autofill:active {
   text-transform: none;
 }
 
+.manifest-indexing-hint {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 196, 0, 0.08);
+  border: 1px solid rgba(255, 196, 0, 0.28);
+  color: var(--cream-dim);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.4;
+}
+
 .install-action-row {
   display: flex;
   align-items: center;
