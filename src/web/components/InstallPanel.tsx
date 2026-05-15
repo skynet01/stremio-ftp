@@ -15,6 +15,7 @@ export function InstallPanel({
   importStatusMessage,
   importLoaded,
   exportStripCredentials,
+  indexingPending,
   onRecoveryUidChange,
   onPassphraseChange,
   onCreateProfile,
@@ -34,6 +35,7 @@ export function InstallPanel({
   importStatusMessage?: string | null;
   importLoaded?: boolean;
   exportStripCredentials?: boolean;
+  indexingPending?: boolean;
   onRecoveryUidChange: (value: string) => void;
   onPassphraseChange: (value: string) => void;
   onCreateProfile: () => void;
@@ -78,6 +80,11 @@ export function InstallPanel({
                   <Copy size={18} aria-hidden={true} />
                 </button>
               </div>
+              {indexingPending ? (
+                <p className="manifest-indexing-hint" role="status">
+                  First scan in progress — Stremio will look empty until indexing finishes.
+                </p>
+              ) : null}
             </div>
           ) : null}
           <div className="install-action-row">

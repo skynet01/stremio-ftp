@@ -1044,6 +1044,13 @@ export function App() {
               intervalMinutes: portable.scanIntervalMinutes,
             }).catch(() => undefined);
           }
+          if (hasCompleteFtpCreds(portable)) {
+            await rescanIndex({
+              browserUid: browserUidForApi,
+              passphrase: passphraseForApi,
+              serverId: targetServerId,
+            }).catch(() => undefined);
+          }
           continue;
         } catch {
           /* fall through and keep local form for retry */
@@ -1093,6 +1100,12 @@ export function App() {
     void saveAddonBranding(normalizedCustomization());
   }
 
+  const indexingPending =
+    profileReady &&
+    servers.some(
+      (server) => !server.draft && !server.pendingCreate && !server.indexStatus.lastScanAt,
+    );
+
   const installPanel = showSetupTokenMessage ? null : (
     <InstallPanel
       profileReady={profileReady}
@@ -1105,6 +1118,7 @@ export function App() {
       importStatusMessage={importMessage}
       importLoaded={Boolean(importedSettings)}
       exportStripCredentials={exportStripCredentials}
+      indexingPending={indexingPending}
       onRecoveryUidChange={updateRecoveryUid}
       onPassphraseChange={setPassphrase}
       onCreateProfile={() => void saveProfile()}

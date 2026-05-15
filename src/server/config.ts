@@ -94,7 +94,7 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     ftpMaxConnections: numberValue(env, "FTP_MAX_CONNECTIONS", 4),
     maxOnDemandSearchMs: numberValue(env, "MAX_ON_DEMAND_SEARCH_MS", 4500),
     profileRateLimitWindowMs: numberValue(env, "PROFILE_RATE_LIMIT_WINDOW_MS", 600000),
-    profileRateLimitMax: numberValue(env, "PROFILE_RATE_LIMIT_MAX", 20),
+    profileRateLimitMax: numberValue(env, "PROFILE_RATE_LIMIT_MAX", 200),
     scanGlobalConcurrency: numberValue(env, "SCAN_GLOBAL_CONCURRENCY", 2),
     scanQueueMax: numberValue(env, "SCAN_QUEUE_MAX", 50),
     scanCooldownMs: numberValue(env, "SCAN_COOLDOWN_MS", 900000),
