@@ -709,10 +709,22 @@ export function App() {
           streamDeliveryMode: server.streamDeliveryMode,
         },
       });
+      const savedFormBase = { ...serverFormFromPayload(result.server), pendingCreate: false };
+      let savedScanStatus = savedFormBase.scanStatus;
+      let savedMessage = "Settings saved. Auto-scan will start in about 5 minutes.";
+      if (!result.server.draft) {
+        try {
+          const rescan = await rescanIndex({ browserUid: recoveryUid, passphrase, serverId: targetServerId });
+          savedScanStatus = rescan.scanStatus;
+          savedMessage = rescan.scanStatus.message || "Settings saved. Scanning FTP library now.";
+        } catch {
+          savedMessage = "Settings saved. Could not start scan automatically — click Rescan to retry.";
+        }
+      }
       setServers((current) =>
         current.map((candidate) =>
           candidate.id === targetServerId
-            ? { ...serverFormFromPayload(result.server), pendingCreate: false, message: "Settings saved. Auto-scan will start in about 5 minutes." }
+            ? { ...savedFormBase, scanStatus: savedScanStatus, message: savedMessage }
             : candidate,
         ),
       );
