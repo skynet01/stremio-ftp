@@ -51,6 +51,57 @@ describe("web API setup token handling", () => {
     );
     expect(window.location.search).toBe("");
   });
+
+  it("posts admin profile requests with setup token auth", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ summary: {}, profiles: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { loadAdminProfiles, saveSetupToken } = await import("../src/web/api");
+    saveSetupToken("setup-secret-123");
+    await loadAdminProfiles({ browserUid: "admin-uid", passphrase: "passphrase" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/profiles",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-setup-token": "setup-secret-123",
+        },
+        body: JSON.stringify({ browserUid: "admin-uid", passphrase: "passphrase" }),
+      }),
+    );
+  });
+
+  it("posts admin manifest and delete actions without leaking profile id into the body", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ profileId: 7, manifestUrl: "https://addon.example.test/u/token/manifest.json", stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { deleteAdminProfile, issueAdminManifestToken, saveSetupToken } = await import("../src/web/api");
+    saveSetupToken("setup-secret-123");
+    await issueAdminManifestToken({ browserUid: "admin-uid", passphrase: "passphrase", profileId: 7 });
+    await deleteAdminProfile({ browserUid: "admin-uid", passphrase: "passphrase", profileId: 7 });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/admin/profiles/7/manifest-token",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ browserUid: "admin-uid", passphrase: "passphrase" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/admin/profiles/7/delete",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ browserUid: "admin-uid", passphrase: "passphrase" }),
+      }),
+    );
+  });
 });
 
 function jsonResponse(body: object, status = 200) {

@@ -209,6 +209,41 @@ export type SetupStatusResponse = {
   isAdmin?: boolean;
 };
 
+export type AdminProfileSummary = {
+  id: number;
+  browserUid: string;
+  createdAt: string;
+  updatedAt: string;
+  lastUnlockedAt: string | null;
+  ftpServers: number;
+  configuredFtpServers: number;
+  indexedItems: number;
+  lastScanAt: string | null;
+  activeScans: number;
+  pendingScans: number;
+  manifestUrl: string | null;
+  stremioInstallUrl: string | null;
+};
+
+export type AdminProfileListResponse = {
+  summary: {
+    profiles: number;
+    configuredProfiles: number;
+    ftpServers: number;
+    configuredFtpServers: number;
+    indexedItems: number;
+    activeScans: number;
+    pendingScans: number;
+  };
+  profiles: AdminProfileSummary[];
+};
+
+export type AdminManifestTokenResponse = {
+  profileId: number;
+  manifestUrl: string;
+  stremioInstallUrl: string;
+};
+
 async function readJson<T extends object>(response: Response): Promise<T> {
   const text = await response.text();
   let body: T | ApiError | undefined;
@@ -441,4 +476,31 @@ export async function saveScanSchedule(request: SaveScanScheduleRequest & { serv
     body: JSON.stringify(request),
   });
   return readJson<{ scanSchedule: ScanSchedule }>(response);
+}
+
+export async function loadAdminProfiles(request: CreateProfileRequest): Promise<AdminProfileListResponse> {
+  const response = await fetch("/api/admin/profiles", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<AdminProfileListResponse>(response);
+}
+
+export async function issueAdminManifestToken(request: CreateProfileRequest & { profileId: number }): Promise<AdminManifestTokenResponse> {
+  const response = await fetch(`/api/admin/profiles/${request.profileId}/manifest-token`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
+  });
+  return readJson<AdminManifestTokenResponse>(response);
+}
+
+export async function deleteAdminProfile(request: CreateProfileRequest & { profileId: number }): Promise<{ ok: true }> {
+  const response = await fetch(`/api/admin/profiles/${request.profileId}/delete`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
+  });
+  return readJson<{ ok: true }>(response);
 }
