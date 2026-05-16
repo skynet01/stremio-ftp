@@ -26,6 +26,7 @@ import {
   validateSetupToken,
 } from "./api.js";
 import { APP_CHANGELOG } from "./changelog.js";
+import { AdminDashboard } from "./components/AdminDashboard.js";
 import { ChangelogDrawer } from "./components/ChangelogDrawer.js";
 import { Footer } from "./components/Footer.js";
 import { GlobalStatusPanel, type GlobalScanProgress } from "./components/GlobalStatusPanel.js";
@@ -340,6 +341,7 @@ export function App() {
   const [changelogEntries, setChangelogEntries] = useState<ChangelogEntry[]>(APP_CHANGELOG);
   const [maxFtpServersPerProfile, setMaxFtpServersPerProfile] = useState(0);
   const [proxyStreamsDisabled, setProxyStreamsDisabled] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [importedSettings, setImportedSettings] = useState<ImportSummary | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [exportStripCredentials, setExportStripCredentials] = useState(true);
@@ -357,9 +359,11 @@ export function App() {
       .then((status) => {
         if (typeof status.maxFtpServersPerProfile === "number") setMaxFtpServersPerProfile(status.maxFtpServersPerProfile);
         if (typeof status.proxyStreamsDisabled === "boolean") setProxyStreamsDisabled(status.proxyStreamsDisabled);
+        setIsAdmin(Boolean(status.isAdmin));
         if (needsSetupProbe) setSetupTokenRequired(status.setupTokenRequired);
       })
       .catch(() => {
+        setIsAdmin(false);
         if (needsSetupProbe) setSetupTokenRequired(true);
       });
   }, [recoveryUid]);
@@ -1248,6 +1252,7 @@ export function App() {
                   </button>
                 </div>
               )}
+              {isAdmin ? <AdminDashboard browserUid={recoveryUid} passphrase={passphrase} /> : null}
             </>
           ) : null}
         </div>

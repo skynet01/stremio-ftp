@@ -6,6 +6,9 @@ import { App, globalScanProgressForServers } from "../src/web/App";
 import {
   cancelScan,
   createProfile,
+  deleteAdminProfile,
+  issueAdminManifestToken,
+  loadAdminProfiles,
   loadCustomization,
   loadFtpSettings,
   loadScanStatus,
@@ -26,6 +29,9 @@ import {
 vi.mock("../src/web/api", () => ({
   cancelScan: vi.fn(),
   createProfile: vi.fn(),
+  deleteAdminProfile: vi.fn(),
+  issueAdminManifestToken: vi.fn(),
+  loadAdminProfiles: vi.fn(),
   loadCustomization: vi.fn(),
   loadFtpSettings: vi.fn(),
   loadScanStatus: vi.fn(),
@@ -45,6 +51,9 @@ vi.mock("../src/web/api", () => ({
 
 const cancelScanMock = vi.mocked(cancelScan);
 const createProfileMock = vi.mocked(createProfile);
+const deleteAdminProfileMock = vi.mocked(deleteAdminProfile);
+const issueAdminManifestTokenMock = vi.mocked(issueAdminManifestToken);
+const loadAdminProfilesMock = vi.mocked(loadAdminProfiles);
 const loadCustomizationMock = vi.mocked(loadCustomization);
 const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
 const loadScanStatusMock = vi.mocked(loadScanStatus);
@@ -98,6 +107,21 @@ describe("App", () => {
     window.history.pushState({}, "", "/");
     cancelScanMock.mockReset();
     createProfileMock.mockReset();
+    deleteAdminProfileMock.mockReset();
+    issueAdminManifestTokenMock.mockReset();
+    loadAdminProfilesMock.mockReset();
+    loadAdminProfilesMock.mockResolvedValue({
+      summary: {
+        profiles: 0,
+        configuredProfiles: 0,
+        ftpServers: 0,
+        configuredFtpServers: 0,
+        indexedItems: 0,
+        activeScans: 0,
+        pendingScans: 0,
+      },
+      profiles: [],
+    });
     loadCustomizationMock.mockReset();
     loadFtpSettingsMock.mockReset();
     loadScanStatusMock.mockReset();
@@ -1229,5 +1253,72 @@ describe("App", () => {
     expect(
       screen.getByText("Save at least one server's FTP settings to generate your manifest URL."),
     ).toBeTruthy();
+  });
+
+  it("hides the admin dashboard for non-admin profiles", async () => {
+    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false });
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("button", { name: "Log out" });
+
+    expect(screen.queryByRole("heading", { name: "Admin dashboard" })).toBeNull();
+    expect(loadAdminProfilesMock).not.toHaveBeenCalled();
+  });
+
+  it("shows admin profile summaries for admin profiles", async () => {
+    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: true });
+    loadAdminProfilesMock.mockResolvedValue({
+      summary: {
+        profiles: 2,
+        configuredProfiles: 1,
+        ftpServers: 3,
+        configuredFtpServers: 2,
+        indexedItems: 44,
+        activeScans: 0,
+        pendingScans: 1,
+      },
+      profiles: [
+        {
+          id: 2,
+          browserUid: "user-uid",
+          createdAt: "2026-05-16T00:00:00.000Z",
+          updatedAt: "2026-05-16T00:00:00.000Z",
+          lastUnlockedAt: null,
+          ftpServers: 2,
+          configuredFtpServers: 1,
+          indexedItems: 44,
+          lastScanAt: null,
+          activeScans: 0,
+          pendingScans: 1,
+          manifestUrl: null,
+          stremioInstallUrl: null,
+        },
+      ],
+    });
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "admin-uid",
+      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    await screen.findByRole("heading", { name: "Admin dashboard" });
+    expect(await screen.findByText("user-uid")).toBeTruthy();
+    expect(screen.getAllByText("44").length).toBeGreaterThan(0);
+    expect(loadAdminProfilesMock).toHaveBeenCalledWith(expect.objectContaining({ passphrase: "passphrase" }));
   });
 });

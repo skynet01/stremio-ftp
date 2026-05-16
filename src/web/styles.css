@@ -1083,6 +1083,103 @@ input:-webkit-autofill:active {
   font-weight: 600;
 }
 
+.admin-dashboard-panel {
+  display: grid;
+  gap: 20px;
+}
+
+.admin-dashboard-header {
+  align-items: flex-start;
+}
+
+.admin-summary-list {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.admin-summary-list div {
+  display: grid;
+  justify-items: start;
+  align-content: space-between;
+  min-height: 78px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.admin-profile-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.admin-profile-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+}
+
+.admin-profile-table th,
+.admin-profile-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.admin-profile-table th {
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.admin-profile-table td {
+  color: var(--cream-dim);
+  font-size: 0.86rem;
+}
+
+.admin-profile-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-profile-table code {
+  display: block;
+  max-width: 320px;
+  overflow: hidden;
+  color: var(--cream);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-profile-table td span:not(.badge) {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted-2);
+  font-size: 0.72rem;
+}
+
+.admin-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.admin-manifest-copy {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 0.6rem;
+}
+
+.admin-empty-value {
+  color: var(--muted-2);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
 .stat-value {
   display: inline-block;
   min-width: 1ch;
@@ -1931,8 +2028,19 @@ input:-webkit-autofill:active {
   }
 
   .global-status-list,
+  .admin-summary-list,
   .server-accordion-trigger {
     grid-template-columns: 1fr;
+  }
+
+  .admin-dashboard-header {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .admin-profile-table {
+    min-width: 760px;
   }
 
   .server-accordion-trigger {
