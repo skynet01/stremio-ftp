@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from "express";
+import { isIP } from "node:net";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
@@ -540,7 +541,7 @@ function profileRateLimiter(windowMs: number, maxAttempts: number): RequestHandl
 
   return (req, res, next) => {
     const now = Date.now();
-    const key = req.ip || req.socket.remoteAddress || "unknown";
+    const key = profileRateLimitKey(req);
     const current = attempts.get(key);
     const bucket = current && current.resetAt > now ? current : { count: 0, resetAt: now + windowMs };
     bucket.count += 1;
@@ -553,4 +554,15 @@ function profileRateLimiter(windowMs: number, maxAttempts: number): RequestHandl
 
     next();
   };
+}
+
+function profileRateLimitKey(req: Parameters<RequestHandler>[0]) {
+  const cloudflareIp = firstHeaderValue(req.headers["cf-connecting-ip"]);
+  if (cloudflareIp && isIP(cloudflareIp)) return `ip:${cloudflareIp}`;
+
+  return `ip:${req.ip || req.socket.remoteAddress || "unknown"}`;
+}
+
+function firstHeaderValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }

@@ -32,7 +32,7 @@ export function createApp(
   const publicDir = options.publicDir ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
   const indexHtml = path.join(publicDir, "index.html");
   app.disable("x-powered-by");
-  app.set("trust proxy", "loopback");
+  app.set("trust proxy", "loopback, linklocal, uniquelocal");
   app.use(
     helmet({
       contentSecurityPolicy: {

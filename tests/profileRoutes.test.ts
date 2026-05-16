@@ -183,6 +183,70 @@ describe("profile routes", () => {
     expect(response.body).toEqual({ error: "Too many profile attempts" });
   });
 
+  it("keeps Cloudflare client IPs in separate profile rate-limit buckets", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), profileRateLimitMax: 2 }, db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .set("cf-connecting-ip", "203.0.113.10")
+      .send({ browserUid: "browser-uid-1", passphrase: "passphrase" })
+      .expect(201);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .set("cf-connecting-ip", "203.0.113.10")
+      .send({ browserUid: "browser-uid-2", passphrase: "passphrase" })
+      .expect(201);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .set("cf-connecting-ip", "203.0.113.10")
+      .send({ browserUid: "browser-uid-3", passphrase: "passphrase" })
+      .expect(429);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .set("cf-connecting-ip", "203.0.113.11")
+      .send({ browserUid: "browser-uid-4", passphrase: "passphrase" })
+      .expect(201);
+  });
+
+  it("keeps forwarded client IPs in separate profile rate-limit buckets behind a private proxy", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), profileRateLimitMax: 2 }, db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .set("x-forwarded-for", "203.0.113.20")
+      .send({ browserUid: "browser-uid-1", passphrase: "passphrase" })
+      .expect(201);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .set("x-forwarded-for", "203.0.113.20")
+      .send({ browserUid: "browser-uid-2", passphrase: "passphrase" })
+      .expect(201);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .set("x-forwarded-for", "203.0.113.20")
+      .send({ browserUid: "browser-uid-3", passphrase: "passphrase" })
+      .expect(429);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .set("x-forwarded-for", "203.0.113.21")
+      .send({ browserUid: "browser-uid-4", passphrase: "passphrase" })
+      .expect(201);
+  });
+
   it("rate limits authenticated settings updates after profile creation", async () => {
     const db = new Database(":memory:");
     migrate(db);
