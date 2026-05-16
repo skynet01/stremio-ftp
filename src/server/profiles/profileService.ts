@@ -69,6 +69,31 @@ export type FtpServer = {
   pendingScanAfter: string | null;
 };
 
+export type AdminProfileSummary = {
+  id: number;
+  browserUid: string;
+  createdAt: string;
+  updatedAt: string;
+  lastUnlockedAt: string | null;
+  ftpServers: number;
+  configuredFtpServers: number;
+  indexedItems: number;
+  lastScanAt: string | null;
+  pendingScans: number;
+};
+
+export type AdminProfileList = {
+  summary: {
+    profiles: number;
+    configuredProfiles: number;
+    ftpServers: number;
+    configuredFtpServers: number;
+    indexedItems: number;
+    pendingScans: number;
+  };
+  profiles: AdminProfileSummary[];
+};
+
 export type FtpServerCatalogSettings = {
   id: number;
   name: string;
@@ -500,6 +525,66 @@ export class ProfileService {
       )
       .run(status.lastTestedAt, status.ok === null ? null : status.ok ? 1 : 0, new Date().toISOString(), profileId, serverId);
     if (result.changes === 0 || serverResult.changes === 0) throw new ProfileNotFoundError();
+  }
+
+  listAdminProfileSummaries(): AdminProfileList {
+    const rows = this.db
+      .prepare(
+        `
+        select
+          p.id,
+          p.browser_uid,
+          p.created_at,
+          p.updated_at,
+          p.last_unlocked_at,
+          count(s.id) as ftp_servers,
+          coalesce(sum(case when s.encrypted_ftp_config is not null then 1 else 0 end), 0) as configured_ftp_servers,
+          coalesce(sum(s.indexed_media_count), 0) as indexed_items,
+          max(s.last_indexed_at) as last_scan_at,
+          coalesce(sum(case when s.pending_scan_after is not null then 1 else 0 end), 0) as pending_scans
+        from profiles p
+        left join profile_ftp_servers s on s.profile_id = p.id
+        group by p.id
+        order by p.created_at desc, p.id desc
+      `,
+      )
+      .all() as Array<{
+      id: number;
+      browser_uid: string;
+      created_at: string;
+      updated_at: string;
+      last_unlocked_at: string | null;
+      ftp_servers: number;
+      configured_ftp_servers: number;
+      indexed_items: number;
+      last_scan_at: string | null;
+      pending_scans: number;
+    }>;
+
+    const profiles = rows.map((row) => ({
+      id: row.id,
+      browserUid: row.browser_uid,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      lastUnlockedAt: row.last_unlocked_at,
+      ftpServers: row.ftp_servers,
+      configuredFtpServers: row.configured_ftp_servers,
+      indexedItems: row.indexed_items,
+      lastScanAt: row.last_scan_at,
+      pendingScans: row.pending_scans,
+    }));
+
+    return {
+      summary: {
+        profiles: profiles.length,
+        configuredProfiles: profiles.filter((profile) => profile.configuredFtpServers > 0).length,
+        ftpServers: profiles.reduce((sum, profile) => sum + profile.ftpServers, 0),
+        configuredFtpServers: profiles.reduce((sum, profile) => sum + profile.configuredFtpServers, 0),
+        indexedItems: profiles.reduce((sum, profile) => sum + profile.indexedItems, 0),
+        pendingScans: profiles.reduce((sum, profile) => sum + profile.pendingScans, 0),
+      },
+      profiles,
+    };
   }
 
   listFtpServers(profileId: number): FtpServer[] {

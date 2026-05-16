@@ -5,6 +5,7 @@ import { timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import helmet from "helmet";
+import { adminRoutes } from "./admin/adminRoutes.js";
 import type { AppConfig } from "./config.js";
 import { openDatabase } from "./db/database.js";
 import { createBasicFtpClientFactory } from "./ftp/basicFtpClient.js";
@@ -68,6 +69,7 @@ export function createApp(
     cleanupTimer.unref();
   }
   app.use("/api/profile", requireSetupToken(config));
+  app.use("/api/admin", requireSetupToken(config));
   app.get("/api/setup", (req, res) => {
     const browserUid = (req.query.browserUid ?? "").toString();
     const isAdmin = Boolean(browserUid) && config.adminBrowserUids.has(browserUid);
@@ -82,6 +84,7 @@ export function createApp(
     res.json({ ok: true });
   });
   app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue));
+  app.use("/api/admin", adminRoutes(config, profileService, scanQueue));
   app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 
