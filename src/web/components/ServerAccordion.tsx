@@ -38,6 +38,7 @@ export type ServerForm = {
   scanSchedule: ScanSchedule;
   connectionStatus: ConnectionStatus;
   pendingScanAfter: string | null;
+  sharedIndexKey?: string;
   message: string;
   pendingCreate?: boolean;
   draft?: boolean;

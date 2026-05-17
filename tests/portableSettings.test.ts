@@ -77,6 +77,37 @@ describe("portableSettings", () => {
     expect(server.scanIntervalMinutes).toBe(60);
   });
 
+  it("parses schema v2 shared index keys without requiring credentials", () => {
+    const parsed = parsePortableSettings({
+      schemaVersion: 2,
+      exportedAt: "2026-05-17T00:00:00.000Z",
+      servers: [
+        {
+          name: "Sputnik Main",
+          host: "sputnik.whatbox.ca",
+          port: 21,
+          rootPaths: ["/media"],
+          sharedIndexKey: "sk_live_sputnik_main",
+        },
+      ],
+    });
+    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.servers?.[0].sharedIndexKey).toBe("sk_live_sputnik_main");
+    expect(hasCompleteFtpCreds(parsed.servers![0])).toBe(false);
+  });
+
+  it("does not include shared index keys in normal user exports", () => {
+    const payload = serializePortableSettings(
+      {
+        ...baseExportContext,
+        servers: [{ ...baseExportContext.servers[0], sharedIndexKey: "sk_should_not_export" }],
+      },
+      false,
+    );
+    expect(payload.schemaVersion).toBe(1);
+    expect(payload.servers?.[0].sharedIndexKey).toBeUndefined();
+  });
+
   it("strips credentials when requested", () => {
     const payload = serializePortableSettings(baseExportContext, true);
     expect(payload.servers?.[0].username).toBeUndefined();
@@ -86,7 +117,7 @@ describe("portableSettings", () => {
   });
 
   it("rejects invalid schema versions", () => {
-    expect(() => parsePortableSettings({ schemaVersion: 2 })).toThrow();
+    expect(() => parsePortableSettings({ schemaVersion: 3 })).toThrow();
     expect(() => parsePortableSettings(null)).toThrow();
   });
 

@@ -108,6 +108,7 @@ export type FtpServerInput = {
   name?: string;
   ftpConfig?: FtpConfig;
   customization?: Partial<AddonCustomization>;
+  sharedIndexKey?: string;
 };
 
 export const DEFAULT_ADDON_CUSTOMIZATION: AddonCustomization = {

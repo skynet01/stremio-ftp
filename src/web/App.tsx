@@ -149,6 +149,7 @@ function emptyServerForm(id = 0): ServerForm {
     scanSchedule: { intervalMinutes: 0, nextScheduledScanAt: null },
     connectionStatus: { lastTestedAt: null, ok: null },
     pendingScanAfter: null,
+    sharedIndexKey: undefined,
     message: "Save FTP settings, then refresh the index.",
   };
 }
@@ -176,6 +177,7 @@ function serverFormFromPayload(server: FtpServerSettings): ServerForm {
     scanSchedule: server.scanSchedule,
     connectionStatus: server.connectionStatus,
     pendingScanAfter: server.pendingScanAfter,
+    sharedIndexKey: undefined,
     message: serverMessage(server.pendingScanAfter, server.scanStatus, "Server ready."),
   };
 }
@@ -232,6 +234,7 @@ function portableServerToForm(portable: PortableServer, index: number, id: numbe
       : base.catalogContentTypes,
     libraryLayout: portable.libraryLayout ?? base.libraryLayout,
     streamDeliveryMode: portable.streamDeliveryMode ?? base.streamDeliveryMode,
+    sharedIndexKey: portable.sharedIndexKey,
     scanSchedule: {
       intervalMinutes: portable.scanIntervalMinutes ?? 0,
       nextScheduledScanAt: null,
@@ -712,6 +715,7 @@ export function App() {
           libraryLayout: server.libraryLayout,
           streamDeliveryMode: server.streamDeliveryMode,
         },
+        sharedIndexKey: server.sharedIndexKey,
       });
       const savedFormBase = { ...serverFormFromPayload(result.server), pendingCreate: false };
       let savedScanStatus = savedFormBase.scanStatus;
@@ -1050,6 +1054,7 @@ export function App() {
             name: portable.name?.trim() || `Server ${index + 1}`,
             ftpConfig,
             customization: customizationPatchFor(portable),
+            sharedIndexKey: portable.sharedIndexKey,
           });
           finalForms.push({ ...serverFormFromPayload(saved.server), pendingCreate: false });
           if (hasCompleteFtpCreds(portable) && portable.scanIntervalMinutes && portable.scanIntervalMinutes > 0) {

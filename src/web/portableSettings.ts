@@ -23,10 +23,11 @@ export type PortableServer = {
   libraryLayout?: "auto" | "folders" | "flat";
   streamDeliveryMode?: "proxy" | "direct";
   scanIntervalMinutes?: number;
+  sharedIndexKey?: string;
 };
 
 export type PortableSettings = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   exportedAt: string;
   customization?: PortableCustomization;
   servers?: PortableServer[];
@@ -97,10 +98,10 @@ export function parsePortableSettings(raw: unknown): PortableSettings {
   if (!raw || typeof raw !== "object") throw new Error("Settings file must contain a JSON object.");
   const value = raw as Record<string, unknown>;
   const schemaVersion = value.schemaVersion;
-  if (schemaVersion !== 1) throw new Error("Unsupported settings schema version.");
+  if (schemaVersion !== 1 && schemaVersion !== 2) throw new Error("Unsupported settings schema version.");
   const exportedAt = typeof value.exportedAt === "string" ? value.exportedAt : new Date().toISOString();
   return {
-    schemaVersion: 1,
+    schemaVersion,
     exportedAt,
     customization: parseCustomization(value.customization),
     servers: Array.isArray(value.servers) ? value.servers.map(parseServer) : [],
@@ -143,6 +144,7 @@ function parseServer(value: unknown): PortableServer {
       typeof s.scanIntervalMinutes === "number" && Number.isFinite(s.scanIntervalMinutes) && s.scanIntervalMinutes >= 0
         ? Math.floor(s.scanIntervalMinutes)
         : undefined,
+    sharedIndexKey: stringOrUndefined(s.sharedIndexKey),
   };
 }
 

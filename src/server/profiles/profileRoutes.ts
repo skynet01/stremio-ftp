@@ -69,6 +69,7 @@ const saveServerSchema = serverIdSchema.extend({
     streamNameTemplate: true,
     streamDescriptionTemplate: true,
   }),
+  sharedIndexKey: z.string().trim().min(1).max(256).optional(),
 });
 
 function urls(baseUrl: string, token: string) {
@@ -251,6 +252,7 @@ export function profileRoutes(
         name: parsed.data.name,
         ftpConfig,
         customization: enforceDeliveryModeFor(parsed.data.browserUid, parsed.data.customization),
+        sharedIndexKey: parsed.data.sharedIndexKey,
       });
       res.json({
         server: serverPayload(service, scanQueue, server),

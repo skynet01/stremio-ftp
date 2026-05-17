@@ -173,6 +173,7 @@ export type SaveServerRequest = ServerRequest & {
   name: string;
   ftpConfig: FtpConfigRequest;
   customization: Omit<AddonCustomization, "addonName" | "addonLogoUrl" | "addonDescription" | "streamNameTemplate" | "streamDescriptionTemplate">;
+  sharedIndexKey?: string;
 };
 
 export type AuthenticatedCustomizationRequest = CreateProfileRequest & {
