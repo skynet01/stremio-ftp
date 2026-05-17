@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App, globalScanProgressForServers } from "../src/web/App";
 import {
+  bulkAdminProfiles,
   cancelScan,
   createProfile,
   deleteAdminProfile,
@@ -29,6 +30,7 @@ import {
 } from "../src/web/api";
 
 vi.mock("../src/web/api", () => ({
+  bulkAdminProfiles: vi.fn(),
   cancelScan: vi.fn(),
   createProfile: vi.fn(),
   deleteAdminProfile: vi.fn(),
@@ -53,6 +55,7 @@ vi.mock("../src/web/api", () => ({
   validateSetupToken: vi.fn(),
 }));
 
+const bulkAdminProfilesMock = vi.mocked(bulkAdminProfiles);
 const cancelScanMock = vi.mocked(cancelScan);
 const createProfileMock = vi.mocked(createProfile);
 const deleteAdminProfileMock = vi.mocked(deleteAdminProfile);
@@ -115,6 +118,7 @@ describe("App", () => {
       configurable: true,
       value: { writeText: vi.fn() },
     });
+    bulkAdminProfilesMock.mockReset();
     cancelScanMock.mockReset();
     createProfileMock.mockReset();
     deleteAdminProfileMock.mockReset();
@@ -1358,6 +1362,7 @@ describe("App", () => {
     });
     setAdminProfileEnabledMock.mockResolvedValue({ profileId: 2, adminEnabled: true, adminSource: "database" });
     rescanAdminProfileMock.mockResolvedValue({ profileId: 2, scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } });
+    bulkAdminProfilesMock.mockResolvedValue({ action: "convert_to_proxy", profileIds: [2, 3], converted: 2 });
     createProfileMock.mockResolvedValue({
       profileId: 1,
       recoveryUid: "admin-uid",
@@ -1411,5 +1416,110 @@ describe("App", () => {
       }),
     );
     await waitFor(() => expect(screen.getAllByText("Admin").length).toBeGreaterThan(1));
+  });
+
+  it("performs bulk admin actions for selected profiles", async () => {
+    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
+    loadAdminProfilesMock.mockResolvedValue({
+      summary: {
+        profiles: 2,
+        configuredProfiles: 2,
+        ftpServers: 2,
+        configuredFtpServers: 2,
+        indexedItems: 47,
+        activeScans: 0,
+        pendingScans: 0,
+      },
+      profiles: [
+        {
+          id: 2,
+          browserUid: "first-user-uid",
+          createdAt: "2026-05-16T00:00:00.000Z",
+          updatedAt: "2026-05-16T00:00:00.000Z",
+          lastUnlockedAt: null,
+          ftpServers: 1,
+          configuredFtpServers: 1,
+          indexedItems: 44,
+          lastScanAt: null,
+          activeScans: 0,
+          pendingScans: 0,
+          manifestUrl: null,
+          stremioInstallUrl: null,
+          lastCountryCode: "CA",
+          adminEnabled: false,
+          adminSource: null,
+        },
+        {
+          id: 3,
+          browserUid: "second-user-uid",
+          createdAt: "2026-05-15T00:00:00.000Z",
+          updatedAt: "2026-05-15T00:00:00.000Z",
+          lastUnlockedAt: null,
+          ftpServers: 1,
+          configuredFtpServers: 1,
+          indexedItems: 3,
+          lastScanAt: null,
+          activeScans: 0,
+          pendingScans: 0,
+          manifestUrl: null,
+          stremioInstallUrl: null,
+          lastCountryCode: "GB",
+          adminEnabled: false,
+          adminSource: null,
+        },
+      ],
+    });
+    bulkAdminProfilesMock
+      .mockResolvedValueOnce({ action: "rescan", profileIds: [2, 3], rescans: [] })
+      .mockResolvedValueOnce({ action: "convert_to_proxy", profileIds: [2, 3], converted: 2 })
+      .mockResolvedValueOnce({ action: "delete", profileIds: [2, 3], deleted: 2 });
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "admin-uid",
+      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    await screen.findByRole("heading", { name: "Admin dashboard" });
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select first-user-uid" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select second-user-uid" }));
+
+    expect(screen.getByText("2 selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Rescan selected" }));
+    await waitFor(() =>
+      expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
+        browserUid: expect.any(String),
+        passphrase: "passphrase",
+        profileIds: [2, 3],
+        action: "rescan",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Convert selected to proxy" }));
+    await waitFor(() =>
+      expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
+        browserUid: expect.any(String),
+        passphrase: "passphrase",
+        profileIds: [2, 3],
+        action: "convert_to_proxy",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+    await waitFor(() =>
+      expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
+        browserUid: expect.any(String),
+        passphrase: "passphrase",
+        profileIds: [2, 3],
+        action: "delete",
+      }),
+    );
+    expect(confirmSpy).toHaveBeenCalledWith("Delete 2 selected profiles? This removes their FTP servers, indexed files, and manifest URLs.");
   });
 });

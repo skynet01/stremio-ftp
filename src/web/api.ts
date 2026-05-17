@@ -253,6 +253,19 @@ export type AdminProfileRescanResponse = {
   scanStatus: ScanStatus;
 };
 
+export type AdminBulkProfileAction = "delete" | "rescan" | "convert_to_proxy";
+
+export type AdminBulkProfilesResponse = {
+  action: AdminBulkProfileAction;
+  profileIds: number[];
+  deleted?: number;
+  converted?: number;
+  rescans?: Array<{
+    profileId: number;
+    scanStatus: ScanStatus;
+  }>;
+};
+
 export type AdminProfileAdminResponse = {
   profileId: number;
   adminEnabled: boolean;
@@ -518,6 +531,22 @@ export async function rescanAdminProfile(request: CreateProfileRequest & { profi
     body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
   });
   return readJson<AdminProfileRescanResponse>(response);
+}
+
+export async function bulkAdminProfiles(
+  request: CreateProfileRequest & { profileIds: number[]; action: AdminBulkProfileAction },
+): Promise<AdminBulkProfilesResponse> {
+  const response = await fetch("/api/admin/profiles/bulk", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      browserUid: request.browserUid,
+      passphrase: request.passphrase,
+      profileIds: request.profileIds,
+      action: request.action,
+    }),
+  });
+  return readJson<AdminBulkProfilesResponse>(response);
 }
 
 export async function deleteAdminProfile(request: CreateProfileRequest & { profileId: number }): Promise<{ ok: true }> {

@@ -12,6 +12,10 @@ const adminAuthSchema = z.object({
 const setAdminSchema = adminAuthSchema.extend({
   adminEnabled: z.boolean(),
 });
+const bulkAdminSchema = adminAuthSchema.extend({
+  profileIds: z.array(z.number().int().positive()).min(1).max(100),
+  action: z.enum(["delete", "rescan", "convert_to_proxy"]),
+});
 const profileIdSchema = z.coerce.number().int().positive();
 
 function urls(baseUrl: string, token: string) {
@@ -91,6 +95,35 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
 
     try {
       res.json({ profileId: profileId.data, scanStatus: scanQueue.enqueueProfileScan(profileId.data, "manual") });
+    } catch (error) {
+      if (error instanceof ProfileNotFoundError) return res.status(404).json({ error: "Profile not found" });
+      throw error;
+    }
+  });
+
+  router.post("/profiles/bulk", async (req, res) => {
+    const parsed = bulkAdminSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid bulk admin request" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    const profileIds = [...new Set(parsed.data.profileIds)];
+    try {
+      if (parsed.data.action === "delete") {
+        const deleted = profileIds.reduce((count, profileId) => count + (service.deleteProfile(profileId) ? 1 : 0), 0);
+        return res.json({ action: parsed.data.action, profileIds, deleted });
+      }
+
+      if (parsed.data.action === "rescan") {
+        const rescans = profileIds.map((profileId) => ({ profileId, scanStatus: scanQueue.enqueueProfileScan(profileId, "manual") }));
+        return res.json({ action: parsed.data.action, profileIds, rescans });
+      }
+
+      const converted = profileIds.reduce((count, profileId) => {
+        service.setProfileAndServersStreamDeliveryMode(profileId, "proxy");
+        return count + 1;
+      }, 0);
+      return res.json({ action: parsed.data.action, profileIds, converted });
     } catch (error) {
       if (error instanceof ProfileNotFoundError) return res.status(404).json({ error: "Profile not found" });
       throw error;

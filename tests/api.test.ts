@@ -73,21 +73,23 @@ describe("web API setup token handling", () => {
     );
   });
 
-  it("posts admin manifest, rescan, delete, and admin toggle actions without leaking profile id into auth-only bodies", async () => {
+  it("posts admin manifest, rescan, delete, admin toggle, and bulk actions without leaking profile ids into auth-only bodies", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ profileId: 7, manifestUrl: "https://addon.example.test/u/token/manifest.json", stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json" }))
       .mockResolvedValueOnce(jsonResponse({ profileId: 7, scanStatus: { status: "queued" } }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
-      .mockResolvedValueOnce(jsonResponse({ profileId: 7, adminEnabled: true, adminSource: "database" }));
+      .mockResolvedValueOnce(jsonResponse({ profileId: 7, adminEnabled: true, adminSource: "database" }))
+      .mockResolvedValueOnce(jsonResponse({ action: "convert_to_proxy", profileIds: [7, 8], converted: 2 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { deleteAdminProfile, issueAdminManifestToken, rescanAdminProfile, saveSetupToken, setAdminProfileEnabled } = await import("../src/web/api");
+    const { bulkAdminProfiles, deleteAdminProfile, issueAdminManifestToken, rescanAdminProfile, saveSetupToken, setAdminProfileEnabled } = await import("../src/web/api");
     saveSetupToken("setup-secret-123");
     await issueAdminManifestToken({ browserUid: "admin-uid", passphrase: "passphrase", profileId: 7 });
     await rescanAdminProfile({ browserUid: "admin-uid", passphrase: "passphrase", profileId: 7 });
     await deleteAdminProfile({ browserUid: "admin-uid", passphrase: "passphrase", profileId: 7 });
     await setAdminProfileEnabled({ browserUid: "admin-uid", passphrase: "passphrase", profileId: 7, adminEnabled: true });
+    await bulkAdminProfiles({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [7, 8], action: "convert_to_proxy" });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -119,6 +121,14 @@ describe("web API setup token handling", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ browserUid: "admin-uid", passphrase: "passphrase", adminEnabled: true }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/admin/profiles/bulk",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [7, 8], action: "convert_to_proxy" }),
       }),
     );
   });

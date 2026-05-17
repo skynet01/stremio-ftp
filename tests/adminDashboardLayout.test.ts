@@ -7,6 +7,7 @@ describe("admin dashboard table layout", () => {
 
     expect(css).toMatch(/\.admin-profile-table\s*{[^}]*width:\s*100%;[^}]*min-width:\s*0;/s);
     expect(css).toMatch(/\.admin-profile-table th,\s*\.admin-profile-table td\s*{[^}]*padding:\s*10px\s+8px;/s);
+    expect(css).toMatch(/\.admin-profile-table th:nth-child\(1\),\s*\.admin-profile-table td:nth-child\(1\)\s*{[^}]*width:\s*38px;/s);
     expect(css).toMatch(/\.admin-actions\s*{[^}]*gap:\s*4px;/s);
   });
 

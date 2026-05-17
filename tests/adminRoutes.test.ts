@@ -203,6 +203,48 @@ describe("admin routes", () => {
     expect(response.body.scanStatus).toEqual(expect.objectContaining({ status: "queued", trigger: "manual" }));
   });
 
+  it("runs bulk admin actions for selected profiles", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config({ scanGlobalConcurrency: 0 }), db);
+    await createProfile(app, "admin-uid");
+    const first = await createProfile(app, "first-user-uid");
+    const second = await createProfile(app, "second-user-uid");
+
+    db.prepare("update profiles set stream_delivery_mode = 'direct' where id in (?, ?)").run(first.body.profileId, second.body.profileId);
+    db.prepare("update profile_ftp_servers set stream_delivery_mode = 'direct' where profile_id in (?, ?)").run(first.body.profileId, second.body.profileId);
+
+    const converted = await request(app)
+      .post("/api/admin/profiles/bulk")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [first.body.profileId, second.body.profileId], action: "convert_to_proxy" })
+      .expect(200);
+    expect(converted.body).toEqual({ action: "convert_to_proxy", profileIds: [first.body.profileId, second.body.profileId], converted: 2 });
+    expect(
+      db.prepare("select count(*) as count from profiles where id in (?, ?) and stream_delivery_mode = 'proxy'").get(first.body.profileId, second.body.profileId),
+    ).toEqual({ count: 2 });
+    expect(
+      db.prepare("select count(*) as count from profile_ftp_servers where profile_id in (?, ?) and stream_delivery_mode = 'proxy'").get(first.body.profileId, second.body.profileId),
+    ).toEqual({ count: 2 });
+
+    const rescanned = await request(app)
+      .post("/api/admin/profiles/bulk")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [first.body.profileId, second.body.profileId], action: "rescan" })
+      .expect(200);
+    expect(rescanned.body.rescans).toEqual([
+      expect.objectContaining({ profileId: first.body.profileId, scanStatus: expect.objectContaining({ status: "queued" }) }),
+      expect.objectContaining({ profileId: second.body.profileId, scanStatus: expect.objectContaining({ status: "queued" }) }),
+    ]);
+
+    const deleted = await request(app)
+      .post("/api/admin/profiles/bulk")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [first.body.profileId, second.body.profileId], action: "delete" })
+      .expect(200);
+    expect(deleted.body).toEqual({ action: "delete", profileIds: [first.body.profileId, second.body.profileId], deleted: 2 });
+  });
+
   it("deletes a target profile", async () => {
     const db = new Database(":memory:");
     migrate(db);

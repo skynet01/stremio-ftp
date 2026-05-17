@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Copy, Link2, RefreshCw, Search, Shield, ShieldCheck, Trash2 } from "lucide-react";
 import {
+  bulkAdminProfiles,
   deleteAdminProfile,
   issueAdminManifestToken,
   loadAdminProfiles,
@@ -27,6 +28,8 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [message, setMessage] = useState("Loading admin profile list...");
   const [loading, setLoading] = useState(false);
   const [busyProfileId, setBusyProfileId] = useState<number | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [selectedProfileIds, setSelectedProfileIds] = useState<Set<number>>(() => new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [sort, setSort] = useState<AdminSort | null>(null);
 
@@ -36,6 +39,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     try {
       const loaded = await loadAdminProfiles({ browserUid, passphrase });
       setData(loaded);
+      setSelectedProfileIds((current) => new Set([...current].filter((profileId) => loaded.profiles.some((profile) => profile.id === profileId))));
       setMessage(loaded.profiles.length ? "Admin profile list loaded." : "No profiles are set up yet.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load admin profiles.");
@@ -140,8 +144,49 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     setMessage(`Recovery UID copied for ${profile.browserUid}.`);
   }
 
+  async function runBulkAction(action: "delete" | "rescan" | "convert_to_proxy") {
+    const profileIds = profiles.filter((profile) => selectedProfileIds.has(profile.id)).map((profile) => profile.id);
+    if (!profileIds.length) return;
+    if (action === "delete") {
+      const confirmed = window.confirm(`Delete ${profileIds.length} selected profiles? This removes their FTP servers, indexed files, and manifest URLs.`);
+      if (!confirmed) return;
+    }
+
+    setBulkBusy(true);
+    try {
+      await bulkAdminProfiles({ browserUid, passphrase, profileIds, action });
+      if (action === "delete") setSelectedProfileIds(new Set());
+      setMessage(bulkActionMessage(action, profileIds.length));
+      await refreshProfiles();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to run bulk admin action.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   function updateSort(key: AdminSortKey) {
     setSort((current) => (current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }));
+  }
+
+  function toggleProfileSelection(profileId: number, selected: boolean) {
+    setSelectedProfileIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(profileId);
+      else next.delete(profileId);
+      return next;
+    });
+  }
+
+  function toggleVisibleSelection(selected: boolean) {
+    setSelectedProfileIds((current) => {
+      const next = new Set(current);
+      visibleProfiles.forEach((profile) => {
+        if (selected) next.add(profile.id);
+        else next.delete(profile.id);
+      });
+      return next;
+    });
   }
 
   const summary = data?.summary;
@@ -162,6 +207,9 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       )
     : profiles;
   const visibleProfiles = sort ? [...filteredProfiles].sort((left, right) => compareProfiles(left, right, sort)) : filteredProfiles;
+  const visibleSelectedCount = visibleProfiles.filter((profile) => selectedProfileIds.has(profile.id)).length;
+  const selectedCount = profiles.filter((profile) => selectedProfileIds.has(profile.id)).length;
+  const allVisibleSelected = visibleProfiles.length > 0 && visibleSelectedCount === visibleProfiles.length;
 
   return (
     <section className="panel admin-dashboard-panel" aria-labelledby="admin-dashboard-heading">
@@ -201,10 +249,33 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
               onChange={(event) => setSearchQuery(event.target.value)}
             />
           </label>
+          {selectedCount ? (
+            <div className="admin-bulk-actions" aria-label="Bulk profile actions">
+              <span>{selectedCount} selected</span>
+              <button type="button" className="secondary-button" disabled={bulkBusy} onClick={() => void runBulkAction("rescan")}>
+                Rescan selected
+              </button>
+              <button type="button" className="secondary-button" disabled={bulkBusy} onClick={() => void runBulkAction("convert_to_proxy")}>
+                Convert selected to proxy
+              </button>
+              <button type="button" className="secondary-button danger-button" disabled={bulkBusy} onClick={() => void runBulkAction("delete")}>
+                Delete selected
+              </button>
+            </div>
+          ) : null}
           <div className="admin-profile-table-wrap">
             <table className="admin-profile-table">
               <thead>
                 <tr>
+                  <th scope="col" className="admin-select-header">
+                    <input
+                      type="checkbox"
+                      className="admin-profile-select"
+                      aria-label="Select all visible profiles"
+                      checked={allVisibleSelected}
+                      onChange={(event) => toggleVisibleSelection(event.target.checked)}
+                    />
+                  </th>
                   <SortHeader label="Recovery UID" sortKey="browserUid" sort={sort} onSort={updateSort} />
                   <SortHeader label="Admin" sortKey="admin" sort={sort} onSort={updateSort} />
                   <SortHeader label="Servers" sortKey="servers" sort={sort} onSort={updateSort} />
@@ -218,6 +289,15 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
               <tbody>
                 {visibleProfiles.map((profile) => (
                   <tr key={profile.id}>
+                    <td data-label="Select" className="admin-select-cell">
+                      <input
+                        type="checkbox"
+                        className="admin-profile-select"
+                        aria-label={`Select ${profile.browserUid}`}
+                        checked={selectedProfileIds.has(profile.id)}
+                        onChange={(event) => toggleProfileSelection(profile.id, event.target.checked)}
+                      />
+                    </td>
                     <td data-label="Recovery UID">
                       <button
                         type="button"
@@ -322,6 +402,12 @@ function countryFlag(countryCode: string | null) {
   if (!code || !/^[A-Z]{2}$/.test(code)) return "??";
   const offset = 127397;
   return String.fromCodePoint(...[...code].map((character) => character.charCodeAt(0) + offset));
+}
+
+function bulkActionMessage(action: "delete" | "rescan" | "convert_to_proxy", count: number) {
+  if (action === "delete") return `Deleted ${count} selected profiles.`;
+  if (action === "rescan") return `Queued rescans for ${count} selected profiles.`;
+  return `Converted ${count} selected profiles and their FTP servers to proxy streaming.`;
 }
 
 function SortHeader({

@@ -758,6 +758,19 @@ export class ProfileService {
     if (result.changes === 0) throw new ProfileNotFoundError();
   }
 
+  setProfileAndServersStreamDeliveryMode(profileId: number, streamDeliveryMode: StreamDeliveryMode) {
+    const now = new Date().toISOString();
+    const profileResult = this.db
+      .prepare("update profiles set stream_delivery_mode = ?, updated_at = ? where id = ?")
+      .run(streamDeliveryMode, now, profileId);
+    if (profileResult.changes === 0) throw new ProfileNotFoundError();
+
+    const serversResult = this.db
+      .prepare("update profile_ftp_servers set stream_delivery_mode = ?, updated_at = ? where profile_id = ?")
+      .run(streamDeliveryMode, now, profileId);
+    return { profileId, serversUpdated: serversResult.changes };
+  }
+
   defaultFtpServerId(profileId: number): number {
     const row = this.db
       .prepare("select id from profile_ftp_servers where profile_id = ? order by id asc limit 1")
