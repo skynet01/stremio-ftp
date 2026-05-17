@@ -41,6 +41,7 @@ export type CatalogContentTypes = {
 
 export type LibraryLayout = "auto" | "folders" | "flat";
 export type StreamDeliveryMode = "proxy" | "direct";
+export type AdminSource = "environment" | "database" | null;
 
 export type IndexStatus = {
   lastScanAt: string | null;
@@ -75,6 +76,9 @@ export type AdminProfileSummary = {
   createdAt: string;
   updatedAt: string;
   lastUnlockedAt: string | null;
+  lastCountryCode: string | null;
+  adminEnabled: boolean;
+  adminSource: AdminSource;
   ftpServers: number;
   configuredFtpServers: number;
   indexedItems: number;
@@ -136,6 +140,12 @@ function catalogContentTypesFromRow(row: {
   };
 }
 
+function adminSourceFor(browserUid: string, databaseAdminEnabled: boolean, environmentAdminBrowserUids: ReadonlySet<string>): AdminSource {
+  if (environmentAdminBrowserUids.has(browserUid)) return "environment";
+  if (databaseAdminEnabled) return "database";
+  return null;
+}
+
 export class DuplicateProfileError extends Error {
   constructor() {
     super("Profile already exists");
@@ -158,7 +168,7 @@ export class ProfileService {
     return this.db;
   }
 
-  async createProfile(browserUid: string, passphrase: string) {
+  async createProfile(browserUid: string, passphrase: string, countryCode: string | null = null) {
     const token = randomToken();
     const now = new Date().toISOString();
     const passphraseVerifier = await createPassphraseVerifier(passphrase);
@@ -167,10 +177,10 @@ export class ProfileService {
       result = this.db.transaction(() => {
         const created = this.db
           .prepare(`
-            insert into profiles (browser_uid, passphrase_verifier, install_token_hash, created_at, updated_at)
-            values (?, ?, ?, ?, ?)
+            insert into profiles (browser_uid, passphrase_verifier, install_token_hash, last_country_code, created_at, updated_at)
+            values (?, ?, ?, ?, ?, ?)
           `)
-          .run(browserUid, passphraseVerifier, hashToken(token), now, now);
+          .run(browserUid, passphraseVerifier, hashToken(token), countryCode, now, now);
         this.insertDefaultServer(Number(created.lastInsertRowid), now);
         return created;
       })();
@@ -181,12 +191,22 @@ export class ProfileService {
     return { profileId: Number(result.lastInsertRowid), installUrlToken: token };
   }
 
-  async unlockProfile(browserUid: string, passphrase: string) {
+  async unlockProfile(browserUid: string, passphrase: string, countryCode: string | null = null) {
     const row = this.db.prepare("select id, passphrase_verifier from profiles where browser_uid = ?").get(browserUid) as
       | { id: number; passphrase_verifier: string }
       | undefined;
     if (!row || !(await verifyPassphrase(passphrase, row.passphrase_verifier))) throw new Error("Invalid passphrase");
-    this.db.prepare("update profiles set last_unlocked_at = ? where id = ?").run(new Date().toISOString(), row.id);
+    const now = new Date().toISOString();
+    if (countryCode) {
+      this.db.prepare("update profiles set last_unlocked_at = ?, last_country_code = ?, updated_at = ? where id = ?").run(
+        now,
+        countryCode,
+        now,
+        row.id,
+      );
+    } else {
+      this.db.prepare("update profiles set last_unlocked_at = ? where id = ?").run(now, row.id);
+    }
     return { profileId: row.id };
   }
 
@@ -527,7 +547,28 @@ export class ProfileService {
     if (result.changes === 0 || serverResult.changes === 0) throw new ProfileNotFoundError();
   }
 
-  listAdminProfileSummaries(): AdminProfileList {
+  isAdminBrowserUid(browserUid: string, environmentAdminBrowserUids: ReadonlySet<string>): boolean {
+    if (environmentAdminBrowserUids.has(browserUid)) return true;
+    const row = this.db.prepare("select admin_enabled from profiles where browser_uid = ?").get(browserUid) as
+      | { admin_enabled: number }
+      | undefined;
+    return Boolean(row?.admin_enabled);
+  }
+
+  setProfileAdminEnabled(profileId: number, adminEnabled: boolean, environmentAdminBrowserUids: ReadonlySet<string>) {
+    const result = this.db
+      .prepare("update profiles set admin_enabled = ?, updated_at = ? where id = ?")
+      .run(adminEnabled ? 1 : 0, new Date().toISOString(), profileId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
+    const row = this.db.prepare("select browser_uid, admin_enabled from profiles where id = ?").get(profileId) as {
+      browser_uid: string;
+      admin_enabled: number;
+    };
+    const adminSource = adminSourceFor(row.browser_uid, Boolean(row.admin_enabled), environmentAdminBrowserUids);
+    return { profileId, adminEnabled: adminSource !== null, adminSource };
+  }
+
+  listAdminProfileSummaries(environmentAdminBrowserUids: ReadonlySet<string> = new Set()): AdminProfileList {
     const rows = this.db
       .prepare(
         `
@@ -537,6 +578,8 @@ export class ProfileService {
           p.created_at,
           p.updated_at,
           p.last_unlocked_at,
+          p.last_country_code,
+          p.admin_enabled,
           count(s.id) as ftp_servers,
           coalesce(sum(case when s.encrypted_ftp_config is not null then 1 else 0 end), 0) as configured_ftp_servers,
           coalesce(sum(s.indexed_media_count), 0) as indexed_items,
@@ -554,6 +597,8 @@ export class ProfileService {
       created_at: string;
       updated_at: string;
       last_unlocked_at: string | null;
+      last_country_code: string | null;
+      admin_enabled: number;
       ftp_servers: number;
       configured_ftp_servers: number;
       indexed_items: number;
@@ -561,18 +606,24 @@ export class ProfileService {
       pending_scans: number;
     }>;
 
-    const profiles = rows.map((row) => ({
-      id: row.id,
-      browserUid: row.browser_uid,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      lastUnlockedAt: row.last_unlocked_at,
-      ftpServers: row.ftp_servers,
-      configuredFtpServers: row.configured_ftp_servers,
-      indexedItems: row.indexed_items,
-      lastScanAt: row.last_scan_at,
-      pendingScans: row.pending_scans,
-    }));
+    const profiles = rows.map((row) => {
+      const adminSource = adminSourceFor(row.browser_uid, Boolean(row.admin_enabled), environmentAdminBrowserUids);
+      return {
+        id: row.id,
+        browserUid: row.browser_uid,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        lastUnlockedAt: row.last_unlocked_at,
+        lastCountryCode: row.last_country_code,
+        adminEnabled: adminSource !== null,
+        adminSource,
+        ftpServers: row.ftp_servers,
+        configuredFtpServers: row.configured_ftp_servers,
+        indexedItems: row.indexed_items,
+        lastScanAt: row.last_scan_at,
+        pendingScans: row.pending_scans,
+      };
+    });
 
     return {
       summary: {

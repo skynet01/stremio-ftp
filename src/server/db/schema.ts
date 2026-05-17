@@ -110,6 +110,8 @@ export function migrate(db: Database.Database) {
       last_ftp_test_ok integer check (last_ftp_test_ok is null or last_ftp_test_ok in (0, 1)),
       scan_interval_minutes integer not null default 0 check (scan_interval_minutes >= 0),
       next_scheduled_scan_at text,
+      admin_enabled integer not null default 0 check (admin_enabled in (0, 1)),
+      last_country_code text,
       install_token_hash text not null unique,
       created_at text not null,
       updated_at text not null,
@@ -196,6 +198,8 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureProfileColumn(db, "last_ftp_test_ok", "integer");
   ensureProfileColumn(db, "scan_interval_minutes", "integer not null default 0");
   ensureProfileColumn(db, "next_scheduled_scan_at", "text");
+  ensureProfileColumn(db, "admin_enabled", "integer not null default 0");
+  ensureProfileColumn(db, "last_country_code", "text");
   ensureMediaColumn(db, "catalog_kind", "text not null default 'movie'");
   ensureMediaColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
   ensureFtpServerColumn(db, "catalog_content_uncategorized", "integer not null default 1");

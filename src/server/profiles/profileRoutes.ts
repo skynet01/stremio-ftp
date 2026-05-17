@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
+import { countryCodeFromRequest } from "../http/requestMetadata.js";
 import { MediaRepository } from "../media/mediaRepository.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
 import { DuplicateProfileError, ProfileService, type FtpServer } from "./profileService.js";
@@ -94,7 +95,7 @@ export function profileRoutes(
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid profile request" });
     try {
-      const created = await service.createProfile(parsed.data.browserUid, parsed.data.passphrase);
+      const created = await service.createProfile(parsed.data.browserUid, parsed.data.passphrase, countryCodeFromRequest(req));
       res.status(201).json({
         profileId: created.profileId,
         recoveryUid: parsed.data.browserUid,
@@ -110,7 +111,7 @@ export function profileRoutes(
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid unlock request" });
     try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase, countryCodeFromRequest(req));
       const issued = service.issueInstallToken(unlocked.profileId);
       res.json({
         ...unlocked,

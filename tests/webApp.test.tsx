@@ -18,6 +18,7 @@ import {
   saveFtpSettings,
   saveScanSchedule,
   saveSetupToken,
+  setAdminProfileEnabled,
   markSetupTokenValidated,
   setupTokenAvailable,
   setupTokenNeedsValidation,
@@ -41,6 +42,7 @@ vi.mock("../src/web/api", () => ({
   saveFtpSettings: vi.fn(),
   saveScanSchedule: vi.fn(),
   saveSetupToken: vi.fn(),
+  setAdminProfileEnabled: vi.fn(),
   markSetupTokenValidated: vi.fn(),
   setupTokenAvailable: vi.fn(),
   setupTokenNeedsValidation: vi.fn(),
@@ -63,6 +65,7 @@ const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
 const saveScanScheduleMock = vi.mocked(saveScanSchedule);
 const saveSetupTokenMock = vi.mocked(saveSetupToken);
+const setAdminProfileEnabledMock = vi.mocked(setAdminProfileEnabled);
 const markSetupTokenValidatedMock = vi.mocked(markSetupTokenValidated);
 const setupTokenAvailableMock = vi.mocked(setupTokenAvailable);
 const setupTokenNeedsValidationMock = vi.mocked(setupTokenNeedsValidation);
@@ -132,6 +135,7 @@ describe("App", () => {
     saveFtpSettingsMock.mockReset();
     saveScanScheduleMock.mockReset();
     saveSetupTokenMock.mockReset();
+    setAdminProfileEnabledMock.mockReset();
     markSetupTokenValidatedMock.mockReset();
     setupTokenAvailableMock.mockReset();
     setupTokenAvailableMock.mockReturnValue(true);
@@ -1301,9 +1305,13 @@ describe("App", () => {
           pendingScans: 1,
           manifestUrl: null,
           stremioInstallUrl: null,
+          lastCountryCode: "CA",
+          adminEnabled: false,
+          adminSource: null,
         },
       ],
     });
+    setAdminProfileEnabledMock.mockResolvedValue({ profileId: 2, adminEnabled: true, adminSource: "database" });
     createProfileMock.mockResolvedValue({
       profileId: 1,
       recoveryUid: "admin-uid",
@@ -1318,7 +1326,24 @@ describe("App", () => {
 
     await screen.findByRole("heading", { name: "Admin dashboard" });
     expect(await screen.findByText("user-uid")).toBeTruthy();
+    expect(screen.getByText("CA")).toBeTruthy();
     expect(screen.getAllByText("44").length).toBeGreaterThan(0);
     expect(loadAdminProfilesMock).toHaveBeenCalledWith(expect.objectContaining({ passphrase: "passphrase" }));
+
+    fireEvent.change(screen.getByLabelText("Search profiles"), { target: { value: "missing-uid" } });
+    expect(screen.queryByText("user-uid")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Search profiles"), { target: { value: "user-uid" } });
+    expect(screen.getByText("user-uid")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Promote user-uid to admin" }));
+    await waitFor(() =>
+      expect(setAdminProfileEnabledMock).toHaveBeenCalledWith({
+        browserUid: expect.any(String),
+        passphrase: "passphrase",
+        profileId: 2,
+        adminEnabled: true,
+      }),
+    );
+    await waitFor(() => expect(screen.getAllByText("Admin").length).toBeGreaterThan(1));
   });
 });

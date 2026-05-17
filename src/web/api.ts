@@ -215,6 +215,9 @@ export type AdminProfileSummary = {
   createdAt: string;
   updatedAt: string;
   lastUnlockedAt: string | null;
+  lastCountryCode: string | null;
+  adminEnabled: boolean;
+  adminSource: "environment" | "database" | null;
   ftpServers: number;
   configuredFtpServers: number;
   indexedItems: number;
@@ -242,6 +245,12 @@ export type AdminManifestTokenResponse = {
   profileId: number;
   manifestUrl: string;
   stremioInstallUrl: string;
+};
+
+export type AdminProfileAdminResponse = {
+  profileId: number;
+  adminEnabled: boolean;
+  adminSource: "environment" | "database" | null;
 };
 
 async function readJson<T extends object>(response: Response): Promise<T> {
@@ -503,4 +512,15 @@ export async function deleteAdminProfile(request: CreateProfileRequest & { profi
     body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
   });
   return readJson<{ ok: true }>(response);
+}
+
+export async function setAdminProfileEnabled(
+  request: CreateProfileRequest & { profileId: number; adminEnabled: boolean },
+): Promise<AdminProfileAdminResponse> {
+  const response = await fetch(`/api/admin/profiles/${request.profileId}/admin`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase, adminEnabled: request.adminEnabled }),
+  });
+  return readJson<AdminProfileAdminResponse>(response);
 }

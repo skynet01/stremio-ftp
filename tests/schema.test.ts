@@ -101,6 +101,8 @@ describe("schema", () => {
         "catalog_content_uncategorized",
         "stream_name_template",
         "stream_description_template",
+        "admin_enabled",
+        "last_country_code",
       ]),
     );
     expect(scanColumns.map((column) => column.name)).toEqual(

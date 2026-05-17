@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Copy, Link2, RefreshCw, Trash2 } from "lucide-react";
+import { Copy, Link2, RefreshCw, Search, Shield, ShieldCheck, Trash2 } from "lucide-react";
 import {
   deleteAdminProfile,
   issueAdminManifestToken,
   loadAdminProfiles,
+  setAdminProfileEnabled,
   type AdminProfileListResponse,
   type AdminProfileSummary,
 } from "../api.js";
@@ -19,6 +20,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [message, setMessage] = useState("Loading admin profile list...");
   const [loading, setLoading] = useState(false);
   const [busyProfileId, setBusyProfileId] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   async function refreshProfiles() {
     setLoading(true);
@@ -78,7 +80,48 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
+  async function toggleAdmin(profile: AdminProfileSummary) {
+    const nextAdminEnabled = !profile.adminEnabled;
+    setBusyProfileId(profile.id);
+    try {
+      const updated = await setAdminProfileEnabled({ browserUid, passphrase, profileId: profile.id, adminEnabled: nextAdminEnabled });
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              profiles: current.profiles.map((candidate) =>
+                candidate.id === profile.id
+                  ? { ...candidate, adminEnabled: updated.adminEnabled, adminSource: updated.adminSource }
+                  : candidate,
+              ),
+            }
+          : current,
+      );
+      setMessage(`${profile.browserUid} is ${updated.adminEnabled ? "an admin" : "no longer an admin"}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update admin access.");
+    } finally {
+      setBusyProfileId(null);
+    }
+  }
+
   const summary = data?.summary;
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const profiles = data?.profiles ?? [];
+  const filteredProfiles = normalizedSearch
+    ? profiles.filter((profile) =>
+        [
+          profile.browserUid,
+          profile.lastCountryCode ?? "unknown",
+          profile.adminEnabled ? "admin" : "user",
+          profile.adminSource ?? "",
+          String(profile.id),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedSearch),
+      )
+    : profiles;
 
   return (
     <section className="panel admin-dashboard-panel" aria-labelledby="admin-dashboard-heading">
@@ -106,11 +149,25 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       <Notice className="admin-dashboard-notice">{message}</Notice>
 
       {data?.profiles.length ? (
-        <div className="admin-profile-table-wrap">
+        <>
+          <label className="admin-profile-search">
+            <Search size={16} aria-hidden="true" />
+            <span className="sr-only">Search profiles</span>
+            <input
+              type="search"
+              aria-label="Search profiles"
+              placeholder="Search UID, country, or admin state"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+          </label>
+          <div className="admin-profile-table-wrap">
           <table className="admin-profile-table">
             <thead>
               <tr>
                 <th scope="col">Recovery UID</th>
+                <th scope="col">Country</th>
+                <th scope="col">Admin</th>
                 <th scope="col">Servers</th>
                 <th scope="col">Indexed</th>
                 <th scope="col">Last scan</th>
@@ -120,11 +177,17 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
               </tr>
             </thead>
             <tbody>
-              {data.profiles.map((profile) => (
+              {filteredProfiles.map((profile) => (
                 <tr key={profile.id}>
                   <td>
                     <code>{profile.browserUid}</code>
                     <span>Created {formatScanTime(profile.createdAt)}</span>
+                  </td>
+                  <td>
+                    <span className="admin-country-code">{profile.lastCountryCode ?? "Unknown"}</span>
+                  </td>
+                  <td>
+                    <AdminState profile={profile} />
                   </td>
                   <td>
                     {profile.configuredFtpServers}/{profile.ftpServers}
@@ -153,6 +216,16 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                       <button
                         type="button"
                         className="icon-button"
+                        aria-label={profile.adminEnabled ? `Demote ${profile.browserUid} from admin` : `Promote ${profile.browserUid} to admin`}
+                        title={profile.adminEnabled ? "Demote admin" : "Promote to admin"}
+                        disabled={busyProfileId === profile.id || profile.adminSource === "environment"}
+                        onClick={() => void toggleAdmin(profile)}
+                      >
+                        {profile.adminEnabled ? <ShieldCheck size={16} aria-hidden="true" /> : <Shield size={16} aria-hidden="true" />}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button"
                         aria-label={`Issue manifest URL for ${profile.browserUid}`}
                         title="Issue manifest URL"
                         disabled={busyProfileId === profile.id}
@@ -177,6 +250,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
             </tbody>
           </table>
         </div>
+        </>
       ) : null}
     </section>
   );
@@ -197,4 +271,10 @@ function ProfileStateBadge({ profile }: { profile: AdminProfileSummary }) {
   if (profile.indexedItems > 0) return <StatusBadge tone="green">Indexed</StatusBadge>;
   if (profile.configuredFtpServers > 0) return <StatusBadge tone="gray">Configured</StatusBadge>;
   return <StatusBadge tone="gray">Empty</StatusBadge>;
+}
+
+function AdminState({ profile }: { profile: AdminProfileSummary }) {
+  if (profile.adminSource === "environment") return <StatusBadge tone="green">Env admin</StatusBadge>;
+  if (profile.adminEnabled) return <StatusBadge tone="green">Admin</StatusBadge>;
+  return <StatusBadge tone="gray">User</StatusBadge>;
 }

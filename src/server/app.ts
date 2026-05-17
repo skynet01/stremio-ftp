@@ -73,7 +73,7 @@ export function createApp(
   app.use("/api/admin", requireSetupToken(config));
   app.get("/api/setup", (req, res) => {
     const browserUid = (req.query.browserUid ?? "").toString();
-    const isAdmin = Boolean(browserUid) && config.adminBrowserUids.has(browserUid);
+    const isAdmin = Boolean(browserUid) && profileService.isAdminBrowserUid(browserUid, config.adminBrowserUids);
     res.json({
       setupTokenRequired: Boolean(config.setupToken) || !config.allowPublicProfileApi,
       maxFtpServersPerProfile: isAdmin ? 0 : config.maxFtpServersPerProfile,

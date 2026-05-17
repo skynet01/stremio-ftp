@@ -112,6 +112,34 @@ describe("profile routes", () => {
     expect(response.body.stremioInstallUrl).toMatch(/^stremio:\/\/addon\.example\.test\/u\/.+\/manifest\.json$/);
   });
 
+  it("records the Cloudflare country on profile create and unlock", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .set("cf-ipcountry", "us")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    expect((db.prepare("select last_country_code from profiles where browser_uid = ?").get("browser-uid") as { last_country_code: string }).last_country_code).toBe(
+      "US",
+    );
+
+    await request(app)
+      .post("/api/profile/unlock")
+      .set("x-setup-token", "setup-secret-123")
+      .set("cf-ipcountry", "gb")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect((db.prepare("select last_country_code from profiles where browser_uid = ?").get("browser-uid") as { last_country_code: string }).last_country_code).toBe(
+      "GB",
+    );
+  });
+
   it("keeps the previous install token valid after unlocking a profile", async () => {
     const db = new Database(":memory:");
     migrate(db);
