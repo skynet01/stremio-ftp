@@ -78,6 +78,16 @@ async function waitForStatus(queue: ScanQueue, profileId: number, status: string
   throw new Error(`Timed out waiting for ${status}`);
 }
 
+async function waitForSharedStatus(queue: ScanQueue, sharedIndexGroupId: number, status: string) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    const current = queue.getSharedIndexScanStatus(sharedIndexGroupId);
+    if (current.status === status) return current;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for shared ${status}`);
+}
+
 async function waitForNextStatus(queue: ScanQueue, profileId: number, previousId: number | null, status: string) {
   const deadline = Date.now() + 1000;
   while (Date.now() < deadline) {
@@ -149,6 +159,28 @@ describe("ScanQueue", () => {
     releaseList.resolve([{ name: "Movie.2020.mkv", path: "/Movie.2020.mkv", type: "file", size: 1000 }]);
     const finished = await waitForStatus(queue, profileId, "succeeded");
     expect(finished.filesSeen).toBe(1);
+  });
+
+  it("runs shared index scans through the same queue and writes shared media", async () => {
+    const { profileService, mediaRepository, queue } = createHarness(async () => ({
+      list: async () => [{ name: "Shared.Movie.2020.mkv", path: "/Shared.Movie.2020.mkv", type: "file", size: 1000 }],
+      openReadStream: async () => Readable.from("not used"),
+      close: async () => undefined,
+    }));
+    const profileId = await createProfileWithFtp(profileService);
+    const serverId = profileService.defaultFtpServerId(profileId);
+    const group = profileService.createSharedIndexGroupFromServer(profileId, serverId, {
+      name: "Shared Main",
+      keyHint: "shared-main",
+    }).group;
+
+    const queued = queue.enqueueSharedIndexScan(group.id, "manual");
+
+    expect(["queued", "running"]).toContain(queued.status);
+    const finished = await waitForSharedStatus(queue, group.id, "succeeded");
+    expect(finished.mediaItems).toBe(1);
+    expect(mediaRepository.countForSharedIndexGroup(group.id)).toBe(1);
+    expect(profileService.getSharedIndexGroup(group.id)?.indexedMediaCount).toBe(1);
   });
 
   it("cancels a running profile scan and closes the FTP client", async () => {

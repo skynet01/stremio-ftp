@@ -213,6 +213,69 @@ export class MediaRepository {
       );
   }
 
+  upsertSharedParsedFile(sharedIndexGroupId: number, file: ParsedMediaFileInput) {
+    const lastSeenAt = file.lastSeenAt ?? new Date().toISOString();
+    this.db
+      .prepare(
+        `
+        insert into shared_media_files (
+          shared_index_group_id,
+          ftp_path,
+          filename,
+          normalized_filename,
+          extension,
+          size_bytes,
+          modified_at,
+          media_kind,
+          catalog_kind,
+          parsed_title,
+          parsed_year,
+          season,
+          episode,
+          imdb_id,
+          quality,
+          confidence,
+          last_seen_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(shared_index_group_id, ftp_path) do update set
+          filename = excluded.filename,
+          normalized_filename = excluded.normalized_filename,
+          extension = excluded.extension,
+          size_bytes = excluded.size_bytes,
+          modified_at = excluded.modified_at,
+          media_kind = excluded.media_kind,
+          catalog_kind = excluded.catalog_kind,
+          parsed_title = excluded.parsed_title,
+          parsed_year = excluded.parsed_year,
+          season = excluded.season,
+          episode = excluded.episode,
+          imdb_id = excluded.imdb_id,
+          quality = excluded.quality,
+          confidence = excluded.confidence,
+          last_seen_at = excluded.last_seen_at
+      `,
+      )
+      .run(
+        sharedIndexGroupId,
+        file.ftpPath,
+        file.filename,
+        file.normalizedFilename,
+        file.extension,
+        file.sizeBytes ?? null,
+        file.modifiedAt ?? null,
+        file.mediaKind,
+        file.catalogKind ?? file.mediaKind,
+        file.parsedTitle,
+        file.parsedYear,
+        file.season,
+        file.episode,
+        file.imdbId,
+        file.quality,
+        file.confidence,
+        lastSeenAt,
+      );
+  }
+
   deleteStaleUnderRoot(profileId: number, rootPath: string, seenSince: string, ftpServerId?: number | null) {
     const root = normalizeRootPath(rootPath);
     if (root === "/") {
@@ -233,6 +296,27 @@ export class MediaRepository {
       `,
       )
       .run(profileId, ftpServerId ?? null, ftpServerId ?? null, seenSince, root, rootWithSlash.length, rootWithSlash).changes;
+  }
+
+  deleteSharedStaleUnderRoot(sharedIndexGroupId: number, rootPath: string, seenSince: string) {
+    const root = normalizeRootPath(rootPath);
+    if (root === "/") {
+      return this.db
+        .prepare("delete from shared_media_files where shared_index_group_id = ? and last_seen_at < ?")
+        .run(sharedIndexGroupId, seenSince).changes;
+    }
+
+    const rootWithSlash = `${root}/`;
+    return this.db
+      .prepare(
+        `
+        delete from shared_media_files
+        where shared_index_group_id = ?
+          and last_seen_at < ?
+          and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
+      `,
+      )
+      .run(sharedIndexGroupId, seenSince, root, rootWithSlash.length, rootWithSlash).changes;
   }
 
   findEpisode(profileId: number, normalizedTitle: string, season: number, episode: number): MediaMatch[] {
@@ -317,6 +401,13 @@ export class MediaRepository {
     return row.count;
   }
 
+  countForSharedIndexGroup(sharedIndexGroupId: number): number {
+    const row = this.db
+      .prepare("select count(*) as count from shared_media_files where shared_index_group_id = ?")
+      .get(sharedIndexGroupId) as { count: number };
+    return row.count;
+  }
+
   aggregateCountsForProfile(profileId: number) {
     const total = this.countForProfile(profileId);
     const enriched = this.db
@@ -394,6 +485,22 @@ export class MediaRepository {
     return Boolean(row);
   }
 
+  sharedDirectorySnapshotMatchesModifiedAt(sharedIndexGroupId: number, dirPath: string, modifiedAt: string) {
+    const row = this.db
+      .prepare(
+        `
+        select id
+        from shared_directory_snapshots
+        where shared_index_group_id = ?
+          and dir_path = ?
+          and modified_at = ?
+        limit 1
+      `,
+      )
+      .get(sharedIndexGroupId, normalizeRootPath(dirPath), modifiedAt) as { id: number } | undefined;
+    return Boolean(row);
+  }
+
   directorySnapshotMatchesFingerprint(
     profileId: number,
     ftpServerId: number | null | undefined,
@@ -417,6 +524,23 @@ export class MediaRepository {
       .get(profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath), entryCount, fingerprint) as
       | { id: number }
       | undefined;
+    return Boolean(row);
+  }
+
+  sharedDirectorySnapshotMatchesFingerprint(sharedIndexGroupId: number, dirPath: string, entryCount: number, fingerprint: string) {
+    const row = this.db
+      .prepare(
+        `
+        select id
+        from shared_directory_snapshots
+        where shared_index_group_id = ?
+          and dir_path = ?
+          and entry_count = ?
+          and fingerprint = ?
+        limit 1
+      `,
+      )
+      .get(sharedIndexGroupId, normalizeRootPath(dirPath), entryCount, fingerprint) as { id: number } | undefined;
     return Boolean(row);
   }
 
@@ -451,6 +575,35 @@ export class MediaRepository {
       );
   }
 
+  saveSharedDirectorySnapshot(sharedIndexGroupId: number, snapshot: Omit<DirectorySnapshotInput, "ftpServerId">) {
+    this.db
+      .prepare(
+        `
+      insert into shared_directory_snapshots (
+        shared_index_group_id,
+        dir_path,
+        entry_count,
+        fingerprint,
+        modified_at,
+        last_seen_at
+      ) values (?, ?, ?, ?, ?, ?)
+      on conflict(shared_index_group_id, dir_path) do update set
+        entry_count = excluded.entry_count,
+        fingerprint = excluded.fingerprint,
+        modified_at = excluded.modified_at,
+        last_seen_at = excluded.last_seen_at
+    `,
+      )
+      .run(
+        sharedIndexGroupId,
+        normalizeRootPath(snapshot.dirPath),
+        snapshot.entryCount,
+        snapshot.fingerprint,
+        snapshot.modifiedAt ?? null,
+        snapshot.lastSeenAt,
+      );
+  }
+
   touchDirectorySnapshot(profileId: number, ftpServerId: number | null | undefined, dirPath: string, lastSeenAt: string) {
     this.db
       .prepare(
@@ -465,16 +618,40 @@ export class MediaRepository {
       .run(lastSeenAt, profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath));
   }
 
+  touchSharedDirectorySnapshot(sharedIndexGroupId: number, dirPath: string, lastSeenAt: string) {
+    this.db
+      .prepare(
+        `
+        update shared_directory_snapshots
+        set last_seen_at = ?
+        where shared_index_group_id = ?
+          and dir_path = ?
+      `,
+      )
+      .run(lastSeenAt, sharedIndexGroupId, normalizeRootPath(dirPath));
+  }
+
   clearDirectorySnapshots(profileId: number, ftpServerId?: number | null) {
     return this.db
       .prepare("delete from scan_directory_snapshots where profile_id = ? and (? is null or ftp_server_id = ?)")
       .run(profileId, ftpServerId ?? null, ftpServerId ?? null).changes;
   }
 
+  clearSharedDirectorySnapshots(sharedIndexGroupId: number) {
+    return this.db.prepare("delete from shared_directory_snapshots where shared_index_group_id = ?").run(sharedIndexGroupId).changes;
+  }
+
   countDirectorySnapshots(profileId: number, ftpServerId?: number | null) {
     const row = this.db
       .prepare("select count(*) as count from scan_directory_snapshots where profile_id = ? and (? is null or ftp_server_id = ?)")
       .get(profileId, ftpServerId ?? null, ftpServerId ?? null) as { count: number };
+    return row.count;
+  }
+
+  countSharedDirectorySnapshots(sharedIndexGroupId: number) {
+    const row = this.db
+      .prepare("select count(*) as count from shared_directory_snapshots where shared_index_group_id = ?")
+      .get(sharedIndexGroupId) as { count: number };
     return row.count;
   }
 
@@ -498,6 +675,27 @@ export class MediaRepository {
       `,
       )
       .run(seenAt, profileId, ftpServerId ?? null, ftpServerId ?? null, root, rootWithSlash.length, rootWithSlash).changes;
+  }
+
+  markSharedSeenUnderRoot(sharedIndexGroupId: number, rootPath: string, seenAt: string) {
+    const root = normalizeRootPath(rootPath);
+    if (root === "/") {
+      return this.db
+        .prepare("update shared_media_files set last_seen_at = ? where shared_index_group_id = ?")
+        .run(seenAt, sharedIndexGroupId).changes;
+    }
+
+    const rootWithSlash = `${root}/`;
+    return this.db
+      .prepare(
+        `
+        update shared_media_files
+        set last_seen_at = ?
+        where shared_index_group_id = ?
+          and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
+      `,
+      )
+      .run(seenAt, sharedIndexGroupId, root, rootWithSlash.length, rootWithSlash).changes;
   }
 
   catalogItems(

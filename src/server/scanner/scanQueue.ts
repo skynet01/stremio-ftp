@@ -40,8 +40,10 @@ export type ProfileScanStatus = {
 
 type ScanJobRow = {
   id: number;
+  target_kind: "profile_server" | "shared_group";
   profile_id: number;
   ftp_server_id: number | null;
+  shared_index_group_id: number | null;
   status: Exclude<ScanJobStatus, "idle">;
   trigger: ScanTrigger;
   progress_percent: number;
@@ -62,7 +64,7 @@ type ScanJobRow = {
 export class ScanQueue {
   private readonly db: Database.Database;
   private activeCount = 0;
-  private readonly running = new Set<number>();
+  private readonly running = new Set<string>();
   private readonly activeControllers = new Map<number, AbortController>();
 
   constructor(
@@ -109,6 +111,43 @@ export class ScanQueue {
         `,
         )
         .run(profileId, ftpServerId, trigger, scanMode, queuedScanMessage(scanMode), now);
+      return Number(insert.lastInsertRowid);
+    })();
+
+    if (typeof result !== "number") return result;
+    this.pump();
+    return this.getJobStatus(result);
+  }
+
+  enqueueSharedIndexScan(sharedIndexGroupId: number, trigger: ScanTrigger, options: EnqueueScanOptions = {}): ProfileScanStatus {
+    const result = this.db.transaction((): ProfileScanStatus | number => {
+      const active = this.activeJobForSharedIndexGroup(sharedIndexGroupId);
+      if (active) return this.rowToStatus(active);
+
+      const queuedCount = countFromRow(this.db.prepare("select count(*) as count from scan_jobs where status = 'queued'").get());
+      if (queuedCount >= this.config.scanQueueMax) {
+        const scanConfig = this.profileService.sharedIndexScanConfig(sharedIndexGroupId);
+        return this.insertSkippedJob(scanConfig.profileId, scanConfig.serverId, trigger, "Scan queue is full.", {
+          targetKind: "shared_group",
+          sharedIndexGroupId,
+        });
+      }
+
+      const scanConfig = this.profileService.sharedIndexScanConfig(sharedIndexGroupId);
+      const scanMode = this.scanModeForNextSharedJob(sharedIndexGroupId, Boolean(options.force));
+      if (options.force) this.mediaRepository.clearSharedDirectorySnapshots(sharedIndexGroupId);
+
+      const now = new Date().toISOString();
+      const insert = this.db
+        .prepare(
+          `
+          insert into scan_jobs (
+            target_kind, profile_id, ftp_server_id, shared_index_group_id, status, trigger,
+            progress_percent, scan_mode, message, queued_at
+          ) values ('shared_group', ?, ?, ?, 'queued', ?, 0, ?, ?, ?)
+        `,
+        )
+        .run(scanConfig.profileId, scanConfig.serverId, sharedIndexGroupId, trigger, scanMode, queuedScanMessage(scanMode), now);
       return Number(insert.lastInsertRowid);
     })();
 
@@ -182,6 +221,57 @@ export class ScanQueue {
     return this.getJobStatus(active.id);
   }
 
+  cancelSharedIndexScan(sharedIndexGroupId: number): ProfileScanStatus {
+    const active = this.activeJobForSharedIndexGroup(sharedIndexGroupId);
+    if (!active) return this.getSharedIndexScanStatus(sharedIndexGroupId);
+
+    if (active.status === "queued") {
+      this.cancelJob(active.id);
+      return this.getJobStatus(active.id);
+    }
+
+    this.activeControllers.get(active.id)?.abort();
+    this.db
+      .prepare(
+        `
+        update scan_jobs
+        set message = 'Halting scan.'
+        where id = ? and status = 'running'
+      `,
+      )
+      .run(active.id);
+    return this.getJobStatus(active.id);
+  }
+
+  getSharedIndexScanStatus(sharedIndexGroupId: number): ProfileScanStatus {
+    const row = this.db
+      .prepare("select * from scan_jobs where target_kind = 'shared_group' and shared_index_group_id = ? order by id desc limit 1")
+      .get(sharedIndexGroupId);
+    const scanJob = optionalScanJobRow(row);
+    if (!scanJob) {
+      return {
+        id: null,
+        status: "idle",
+        trigger: null,
+        progressPercent: 0,
+        entriesSeen: 0,
+        filesSeen: 0,
+        directoriesSeen: 0,
+        currentPath: null,
+        estimatedSecondsRemaining: null,
+        message: null,
+        error: null,
+        queuedAt: null,
+        startedAt: null,
+        finishedAt: null,
+        mediaItems: this.mediaRepository.countForSharedIndexGroup(sharedIndexGroupId),
+        mediaItemsAdded: 0,
+        scanMode: null,
+      };
+    }
+    return this.rowToStatus(scanJob);
+  }
+
   enqueueDueScheduledScans(nowIso = new Date().toISOString()) {
     for (const { profileId, serverId } of this.profileService.dueScheduledScanServerIds(nowIso)) {
       const ftpConfig = this.profileService.getFtpServerConfig(profileId, serverId);
@@ -205,7 +295,7 @@ export class ScanQueue {
       const rows = this.db
         .prepare("select * from scan_jobs where status = 'queued' order by queued_at asc, id asc limit ?")
         .all(this.config.scanQueueMax);
-      const scanJob = rows.map(optionalScanJobRow).find((row) => row && !this.running.has(row.profile_id));
+      const scanJob = rows.map(optionalScanJobRow).find((row) => row && !this.running.has(targetKey(row)));
       if (!scanJob) return;
       this.startJob(scanJob);
     }
@@ -213,7 +303,7 @@ export class ScanQueue {
 
   private startJob(row: ScanJobRow) {
     const startedAt = new Date().toISOString();
-    this.running.add(row.profile_id);
+    this.running.add(targetKey(row));
     this.activeCount += 1;
     this.db
       .prepare(
@@ -230,21 +320,78 @@ export class ScanQueue {
     const abortController = new AbortController();
     this.activeControllers.set(row.id, abortController);
 
-    void this.runJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), row.scan_mode ?? "full", abortController.signal)
+    const run =
+      row.target_kind === "shared_group" && row.shared_index_group_id
+        ? this.runSharedJob(row.id, row.shared_index_group_id, row.scan_mode ?? "full", abortController.signal)
+        : this.runJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), row.scan_mode ?? "full", abortController.signal);
+
+    void run
       .catch((error: unknown) => {
         if (isScanCancelledError(error)) {
           this.cancelJob(row.id);
           return;
         }
         const message = error instanceof Error ? error.message : "Unable to refresh FTP index";
-        this.failJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), message);
+        if (row.target_kind === "shared_group" && row.shared_index_group_id) this.failSharedJob(row.id, message);
+        else this.failJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), message);
       })
       .finally(() => {
         this.activeControllers.delete(row.id);
-        this.running.delete(row.profile_id);
+        this.running.delete(targetKey(row));
         this.activeCount -= 1;
         this.pump();
       });
+  }
+
+  private async runSharedJob(jobId: number, sharedIndexGroupId: number, scanMode: ScanMode, signal: AbortSignal) {
+    const scanConfig = this.profileService.sharedIndexScanConfig(sharedIndexGroupId);
+    const ftpConfig = scanConfig.ftpConfig;
+    if (!ftpConfig.username?.trim() || !ftpConfig.password) throw new Error("FTP username and password are required");
+    const progressBaselineItems = this.lastSuccessfulSharedProgressItems(sharedIndexGroupId);
+    const initialMediaItems = this.mediaRepository.countForSharedIndexGroup(sharedIndexGroupId);
+
+    let filesSeen = 0;
+    const startedAt = Date.now();
+    for (const rootPath of ftpConfig.roots) {
+      throwIfScanCancelled(signal);
+      const result = await crawlProfileRoot({
+        profileId: scanConfig.profileId,
+        ftpServerId: scanConfig.serverId,
+        sharedIndexGroupId,
+        rootPath,
+        ftpConfig,
+        factory: this.ftpClientFactory,
+        repo: this.mediaRepository,
+        parserOptions: {
+          contentTypes: scanConfig.customization.catalogContentTypes,
+          libraryLayout: scanConfig.customization.libraryLayout,
+        },
+        onProgress: (progress) => this.saveProgress(jobId, startedAt, progress, progressBaselineItems, scanMode),
+        signal,
+      });
+      filesSeen += result.filesSeen;
+    }
+
+    throwIfScanCancelled(signal);
+    const lastScanAt = new Date().toISOString();
+    const mediaItems = this.mediaRepository.countForSharedIndexGroup(sharedIndexGroupId);
+    const mediaItemsAdded = Math.max(0, mediaItems - initialMediaItems);
+    this.profileService.saveSharedIndexStatus(sharedIndexGroupId, { lastScanAt, mediaItems });
+    this.db
+      .prepare(
+        `
+        update scan_jobs
+        set status = 'succeeded',
+            progress_percent = 100,
+            files_seen = ?,
+            media_items_added = ?,
+            estimated_seconds_remaining = 0,
+            message = ?,
+            finished_at = ?
+        where id = ?
+      `,
+      )
+      .run(filesSeen, mediaItemsAdded, scanFinishedMessage(filesSeen, null), lastScanAt, jobId);
   }
 
   private async runJob(jobId: number, profileId: number, ftpServerId: number, scanMode: ScanMode, signal: AbortSignal) {
@@ -430,6 +577,21 @@ export class ScanQueue {
       .run(error, `Scan failed: ${error}${retryMessage}`, new Date().toISOString(), jobId);
   }
 
+  private failSharedJob(jobId: number, error: string) {
+    this.db
+      .prepare(
+        `
+        update scan_jobs
+        set status = 'failed',
+            error = ?,
+            message = ?,
+            finished_at = ?
+        where id = ?
+      `,
+      )
+      .run(error, `Shared scan failed: ${error}`, new Date().toISOString(), jobId);
+  }
+
   private lastSuccessfulProgressItems(profileId: number, ftpServerId: number) {
     const row = this.db
       .prepare(
@@ -445,6 +607,24 @@ export class ScanQueue {
       `,
       )
       .get(profileId, ftpServerId) as { items: number } | undefined;
+    return row?.items && row.items > 0 ? row.items : null;
+  }
+
+  private lastSuccessfulSharedProgressItems(sharedIndexGroupId: number) {
+    const row = this.db
+      .prepare(
+        `
+        select entries_seen + directories_seen as items
+        from scan_jobs
+        where target_kind = 'shared_group'
+          and shared_index_group_id = ?
+          and status = 'succeeded'
+          and entries_seen + directories_seen > 0
+        order by finished_at desc, id desc
+        limit 1
+      `,
+      )
+      .get(sharedIndexGroupId) as { items: number } | undefined;
     return row?.items && row.items > 0 ? row.items : null;
   }
 
@@ -488,22 +668,33 @@ export class ScanQueue {
     return this.insertSkippedJob(profileId, ftpServerId, "manual", `Manual scan cooldown active. Try again in ${formatDuration(nextAllowedAt - Date.now())}.`);
   }
 
-  private insertSkippedJob(profileId: number, ftpServerId: number, trigger: ScanTrigger, message: string) {
+  private insertSkippedJob(
+    profileId: number,
+    ftpServerId: number,
+    trigger: ScanTrigger,
+    message: string,
+    target: { targetKind?: "profile_server" | "shared_group"; sharedIndexGroupId?: number | null } = {},
+  ) {
     const now = new Date().toISOString();
     const result = this.db
       .prepare(
         `
-        insert into scan_jobs (profile_id, ftp_server_id, status, trigger, progress_percent, message, queued_at, finished_at)
-        values (?, ?, 'skipped', ?, 0, ?, ?, ?)
+        insert into scan_jobs (target_kind, profile_id, ftp_server_id, shared_index_group_id, status, trigger, progress_percent, message, queued_at, finished_at)
+        values (?, ?, ?, ?, 'skipped', ?, 0, ?, ?, ?)
       `,
       )
-      .run(profileId, ftpServerId, trigger, message, now, now);
+      .run(target.targetKind ?? "profile_server", profileId, ftpServerId, target.sharedIndexGroupId ?? null, trigger, message, now, now);
     return this.getJobStatus(Number(result.lastInsertRowid));
   }
 
   private scanModeForNextJob(profileId: number, ftpServerId: number, force: boolean): ScanMode {
     if (force) return "force";
     return this.mediaRepository.countDirectorySnapshots(profileId, ftpServerId) > 0 ? "incremental" : "full";
+  }
+
+  private scanModeForNextSharedJob(sharedIndexGroupId: number, force: boolean): ScanMode {
+    if (force) return "force";
+    return this.mediaRepository.countSharedDirectorySnapshots(sharedIndexGroupId) > 0 ? "incremental" : "full";
   }
 
   private activeJobForServer(profileId: number, ftpServerId: number) {
@@ -514,12 +705,30 @@ export class ScanQueue {
         from scan_jobs
         where profile_id = ?
           and ftp_server_id = ?
+          and target_kind = 'profile_server'
           and status in ('queued', 'running')
         order by id desc
         limit 1
       `,
       )
       .get(profileId, ftpServerId);
+    return optionalScanJobRow(row);
+  }
+
+  private activeJobForSharedIndexGroup(sharedIndexGroupId: number) {
+    const row = this.db
+      .prepare(
+        `
+        select *
+        from scan_jobs
+        where target_kind = 'shared_group'
+          and shared_index_group_id = ?
+          and status in ('queued', 'running')
+        order by id desc
+        limit 1
+      `,
+      )
+      .get(sharedIndexGroupId);
     return optionalScanJobRow(row);
   }
 
@@ -542,7 +751,9 @@ export class ScanQueue {
       mediaItemsAdded: row.media_items_added,
       scanMode: row.scan_mode,
       mediaItems:
-        row.ftp_server_id === null
+        row.target_kind === "shared_group" && row.shared_index_group_id !== null
+          ? this.mediaRepository.countForSharedIndexGroup(row.shared_index_group_id)
+          : row.ftp_server_id === null
           ? this.mediaRepository.countForProfile(row.profile_id)
           : this.mediaRepository.countForServer(row.profile_id, row.ftp_server_id),
     };
@@ -639,8 +850,10 @@ function scanJobRow(row: unknown): ScanJobRow {
   if (!isRecord(row)) throw new Error(SCAN_JOB_ROW_ERROR);
   return {
     id: numberField(row, "id"),
+    target_kind: scanTargetKind(row.target_kind),
     profile_id: numberField(row, "profile_id"),
     ftp_server_id: nullableNumberField(row, "ftp_server_id"),
+    shared_index_group_id: nullableNumberField(row, "shared_index_group_id"),
     status: persistedScanStatus(row.status),
     trigger: scanTrigger(row.trigger),
     progress_percent: numberField(row, "progress_percent"),
@@ -714,6 +927,19 @@ function persistedScanStatus(value: unknown): ScanJobRow["status"] {
   }
 }
 
+function scanTargetKind(value: unknown): ScanJobRow["target_kind"] {
+  switch (value) {
+    case "profile_server":
+    case undefined:
+    case null:
+      return "profile_server";
+    case "shared_group":
+      return "shared_group";
+    default:
+      throw new Error(`${SCAN_JOB_ROW_ERROR}: target_kind`);
+  }
+}
+
 function scanTrigger(value: unknown): ScanTrigger {
   switch (value) {
     case "manual":
@@ -722,4 +948,8 @@ function scanTrigger(value: unknown): ScanTrigger {
     default:
       throw new Error(`${SCAN_JOB_ROW_ERROR}: trigger`);
   }
+}
+
+function targetKey(row: ScanJobRow) {
+  return row.target_kind === "shared_group" ? `shared:${row.shared_index_group_id}` : `profile:${row.profile_id}`;
 }

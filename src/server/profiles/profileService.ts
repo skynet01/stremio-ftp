@@ -723,6 +723,42 @@ export class ProfileService {
     return this.getFtpServer(profileId, serverId);
   }
 
+  sharedIndexScanConfig(groupId: number): {
+    group: SharedIndexGroup;
+    profileId: number;
+    serverId: number;
+    ftpConfig: FtpConfig;
+    customization: AddonCustomization;
+  } {
+    const group = this.getSharedIndexGroup(groupId);
+    if (!group) throw new ProfileNotFoundError();
+    if (!group.masterProfileFtpServerId) throw new Error("Shared index group has no master server");
+    const row = this.db
+      .prepare("select profile_id, id from profile_ftp_servers where id = ?")
+      .get(group.masterProfileFtpServerId) as { profile_id: number; id: number } | undefined;
+    if (!row) throw new Error("Shared index group has no valid master server");
+    const ftpConfig = this.getFtpServerConfig(row.profile_id, row.id);
+    if (!ftpConfig) throw new Error("Shared index master FTP settings are not configured");
+    return {
+      group,
+      profileId: row.profile_id,
+      serverId: row.id,
+      ftpConfig,
+      customization: {
+        ...DEFAULT_ADDON_CUSTOMIZATION,
+        catalogContentTypes: group.catalogContentTypes,
+        libraryLayout: group.libraryLayout,
+      },
+    };
+  }
+
+  saveSharedIndexStatus(groupId: number, status: IndexStatus) {
+    const result = this.db
+      .prepare("update shared_index_groups set last_indexed_at = ?, indexed_media_count = ?, updated_at = ? where id = ?")
+      .run(status.lastScanAt, status.mediaItems, new Date().toISOString(), groupId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
+  }
+
   listAdminProfileSummaries(environmentAdminBrowserUids: ReadonlySet<string> = new Set()): AdminProfileList {
     const rows = this.db
       .prepare(

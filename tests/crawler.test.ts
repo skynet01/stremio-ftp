@@ -54,6 +54,49 @@ describe("crawler", () => {
     expect(repo.findEpisode(profileId, "show name", 2, 5)).toHaveLength(1);
   });
 
+  it("can index media into a shared group target", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    db.prepare("insert into profile_ftp_servers (profile_id, name, created_at, updated_at) values (?, 'Server 1', 'n', 'n')").run(profileId);
+    const server = db.prepare("select id from profile_ftp_servers where profile_id = ?").get(profileId) as { id: number };
+    const sharedIndexGroupId = Number(
+      db
+        .prepare(
+          `
+          insert into shared_index_groups (
+            key_hint, name, shared_index_key_hash, host, port, tls_mode, allow_invalid_certificate,
+            root_paths_json, library_layout, catalog_content_json, enabled, auto_link_imports,
+            master_profile_ftp_server_id, created_at, updated_at
+          ) values ('shared', 'Shared', 'hash', 'x', 21, 'none', 0, '["/"]', 'auto', '{}', 1, 1, ?, 'n', 'n')
+        `,
+        )
+        .run(server.id).lastInsertRowid,
+    );
+    const repo = new MediaRepository(db);
+    const factory: FtpClientFactory = async () => ({
+      list: async () => [{ name: "Shared.Movie.2020.mkv", path: "/Shared.Movie.2020.mkv", type: "file", size: 1000 }],
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
+      close: async () => undefined,
+    });
+
+    const result = await crawlProfileRoot({
+      profileId,
+      sharedIndexGroupId,
+      rootPath: "/",
+      ftpConfig,
+      factory,
+      repo,
+    });
+
+    expect(result.filesSeen).toBe(1);
+    expect(repo.countForSharedIndexGroup(sharedIndexGroupId)).toBe(1);
+    expect(repo.countForProfile(profileId)).toBe(0);
+  });
+
+
   it("skips unchanged directory subtrees using saved scan snapshots", async () => {
     const db = new Database(":memory:");
     migrate(db);

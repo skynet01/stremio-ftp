@@ -10,6 +10,7 @@ const LEGACY_CRAWL_SNAPSHOT_PREFIXES = ["parser-2026-05-04-3"];
 export type CrawlProfileRootInput = {
   profileId: number;
   ftpServerId?: number | null;
+  sharedIndexGroupId?: number | null;
   rootPath: string;
   ftpConfig: FtpConfig;
   factory: FtpClientFactory;
@@ -63,12 +64,11 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     const fingerprint = fingerprintEntries(entries);
     if (
       canTrustDirectoryFingerprint(entries) &&
-      snapshotMatchesDirectoryFingerprint(input.repo, input.profileId, input.ftpServerId ?? null, normalizedPath, entries.length, fingerprint)
+      snapshotMatchesDirectoryFingerprint(input.repo, input, normalizedPath, entries.length, fingerprint)
     ) {
       entriesSeen += entries.length;
-      filesSeen += input.repo.markSeenUnderRoot(input.profileId, normalizedPath, crawlStartedAt, input.ftpServerId ?? null);
-      input.repo.saveDirectorySnapshot(input.profileId, {
-        ftpServerId: input.ftpServerId ?? null,
+      filesSeen += markSeenUnderRoot(input, normalizedPath, crawlStartedAt);
+      saveDirectorySnapshot(input, {
         dirPath: normalizedPath,
         entryCount: entries.length,
         fingerprint,
@@ -91,7 +91,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
         const parsed = parseMediaPath(entry.path, input.parserOptions);
         if (parsed) {
           filesSeen += 1;
-          input.repo.upsertParsedFile(input.profileId, {
+          upsertParsedFile(input, {
             ...parsed,
             ftpServerId: input.ftpServerId ?? null,
             sizeBytes: entry.size ?? null,
@@ -103,8 +103,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
       }
     }
 
-    input.repo.saveDirectorySnapshot(input.profileId, {
-      ftpServerId: input.ftpServerId ?? null,
+    saveDirectorySnapshot(input, {
       dirPath: normalizedPath,
       entryCount: entries.length,
       fingerprint,
@@ -115,7 +114,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
 
   try {
     await walk(input.rootPath, 0);
-    input.repo.deleteStaleUnderRoot(input.profileId, input.rootPath, crawlStartedAt, input.ftpServerId ?? null);
+    deleteStaleUnderRoot(input, input.rootPath, crawlStartedAt);
     return { filesSeen };
   } finally {
     input.signal?.removeEventListener("abort", closeClientOnAbort);
@@ -156,14 +155,56 @@ function fingerprintEntries(entries: FtpEntry[]) {
 
 function snapshotMatchesDirectoryFingerprint(
   repo: MediaRepository,
-  profileId: number,
-  ftpServerId: number | null,
+  input: CrawlProfileRootInput,
   dirPath: string,
   entryCount: number,
   fingerprint: string,
 ) {
-  if (repo.directorySnapshotMatchesFingerprint(profileId, ftpServerId, dirPath, entryCount, fingerprint)) return true;
+  if (input.sharedIndexGroupId) {
+    if (repo.sharedDirectorySnapshotMatchesFingerprint(input.sharedIndexGroupId, dirPath, entryCount, fingerprint)) return true;
+    return LEGACY_CRAWL_SNAPSHOT_PREFIXES.some((prefix) =>
+      repo.sharedDirectorySnapshotMatchesFingerprint(input.sharedIndexGroupId!, dirPath, entryCount, `${prefix}\n${fingerprint}`),
+    );
+  }
+  if (repo.directorySnapshotMatchesFingerprint(input.profileId, input.ftpServerId ?? null, dirPath, entryCount, fingerprint)) return true;
   return LEGACY_CRAWL_SNAPSHOT_PREFIXES.some((prefix) =>
-    repo.directorySnapshotMatchesFingerprint(profileId, ftpServerId, dirPath, entryCount, `${prefix}\n${fingerprint}`),
+    repo.directorySnapshotMatchesFingerprint(input.profileId, input.ftpServerId ?? null, dirPath, entryCount, `${prefix}\n${fingerprint}`),
   );
+}
+
+function markSeenUnderRoot(input: CrawlProfileRootInput, rootPath: string, seenAt: string) {
+  return input.sharedIndexGroupId
+    ? input.repo.markSharedSeenUnderRoot(input.sharedIndexGroupId, rootPath, seenAt)
+    : input.repo.markSeenUnderRoot(input.profileId, rootPath, seenAt, input.ftpServerId ?? null);
+}
+
+function saveDirectorySnapshot(input: CrawlProfileRootInput, snapshot: {
+  dirPath: string;
+  entryCount: number;
+  fingerprint: string;
+  modifiedAt?: string | null;
+  lastSeenAt: string;
+}) {
+  if (input.sharedIndexGroupId) {
+    input.repo.saveSharedDirectorySnapshot(input.sharedIndexGroupId, snapshot);
+    return;
+  }
+  input.repo.saveDirectorySnapshot(input.profileId, {
+    ftpServerId: input.ftpServerId ?? null,
+    ...snapshot,
+  });
+}
+
+function upsertParsedFile(input: CrawlProfileRootInput, file: Parameters<MediaRepository["upsertParsedFile"]>[1]) {
+  if (input.sharedIndexGroupId) {
+    input.repo.upsertSharedParsedFile(input.sharedIndexGroupId, file);
+    return;
+  }
+  input.repo.upsertParsedFile(input.profileId, file);
+}
+
+function deleteStaleUnderRoot(input: CrawlProfileRootInput, rootPath: string, seenAt: string) {
+  return input.sharedIndexGroupId
+    ? input.repo.deleteSharedStaleUnderRoot(input.sharedIndexGroupId, rootPath, seenAt)
+    : input.repo.deleteStaleUnderRoot(input.profileId, rootPath, seenAt, input.ftpServerId ?? null);
 }
