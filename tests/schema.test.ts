@@ -84,13 +84,18 @@ describe("schema", () => {
       "profiles",
       "scan_directory_snapshots",
       "scan_jobs",
+      "shared_directory_snapshots",
+      "shared_index_groups",
+      "shared_media_files",
     ]);
   });
 
   it("creates scan schedule columns and scan job persistence", () => {
     const db = createDb();
     const profileColumns = db.prepare("pragma table_info(profiles)").all() as { name: string }[];
+    const serverColumns = db.prepare("pragma table_info(profile_ftp_servers)").all() as { name: string }[];
     const scanColumns = db.prepare("pragma table_info(scan_jobs)").all() as { name: string }[];
+    const sharedGroupColumns = db.prepare("pragma table_info(shared_index_groups)").all() as { name: string }[];
     const enrichmentColumns = db.prepare("pragma table_info(catalog_enrichment)").all() as { name: string }[];
 
     expect(profileColumns.map((column) => column.name)).toEqual(
@@ -107,6 +112,8 @@ describe("schema", () => {
     );
     expect(scanColumns.map((column) => column.name)).toEqual(
       expect.arrayContaining([
+        "target_kind",
+        "shared_index_group_id",
         "profile_id",
         "ftp_server_id",
         "status",
@@ -121,7 +128,94 @@ describe("schema", () => {
         "estimated_seconds_remaining",
       ]),
     );
+    expect(serverColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["shared_index_group_id", "shared_index_key_hash"]));
+    expect(sharedGroupColumns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "key_hint",
+        "shared_index_key_hash",
+        "master_profile_ftp_server_id",
+        "root_paths_json",
+        "catalog_content_json",
+        "auto_link_imports",
+      ]),
+    );
     expect(enrichmentColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["algorithm_version"]));
+  });
+
+  it("stores shared index groups, shared media, and scan target rows", () => {
+    const db = createDb();
+    const profileId = insertProfile(db);
+    db.prepare("insert into profile_ftp_servers (profile_id, name, created_at, updated_at) values (?, 'Server 1', 'now', 'now')").run(profileId);
+    const serverId = db.prepare("select id from profile_ftp_servers where profile_id = ?").get(profileId) as { id: number };
+    const groupId = db
+      .prepare(
+        `
+          insert into shared_index_groups (
+            key_hint, name, shared_index_key_hash, host, port, tls_mode, allow_invalid_certificate,
+            root_paths_json, library_layout, catalog_content_json, enabled, auto_link_imports,
+            master_profile_ftp_server_id, created_at, updated_at
+          ) values (
+            'sputnik-main', 'Sputnik Main', 'hash-1', 'sputnik.whatbox.ca', 21, 'explicit', 0,
+            '["/media"]', 'auto', '{"movies":true,"series":true,"anime":false,"uncategorized":true}', 1, 1,
+            ?, '2026-05-17T00:00:00.000Z', '2026-05-17T00:00:00.000Z'
+          )
+        `,
+      )
+      .run(serverId.id).lastInsertRowid as number;
+
+    db.prepare("update profile_ftp_servers set shared_index_group_id = ?, shared_index_key_hash = 'hash-1' where id = ?").run(groupId, serverId.id);
+    db.prepare(
+      `
+        insert into shared_media_files (
+          shared_index_group_id, ftp_path, filename, normalized_filename, extension, size_bytes,
+          media_kind, parsed_title, parsed_year, confidence, last_seen_at
+        ) values (?, '/media/Movie.mkv', 'Movie.mkv', 'movie.mkv', 'mkv', 1024, 'movie', 'movie', 2020, 90, '2026-05-17T00:00:00.000Z')
+      `,
+    ).run(groupId);
+    db.prepare(
+      `
+        insert into scan_jobs (target_kind, shared_index_group_id, profile_id, status, trigger, progress_percent, message, queued_at)
+        values ('shared_group', ?, ?, 'queued', 'manual', 0, 'Shared scan queued.', '2026-05-17T00:00:00.000Z')
+      `,
+    ).run(groupId, profileId);
+
+    const linked = db.prepare("select shared_index_group_id from profile_ftp_servers where id = ?").get(serverId.id) as { shared_index_group_id: number };
+    const sharedCount = db.prepare("select count(*) as count from shared_media_files where shared_index_group_id = ?").get(groupId) as { count: number };
+    expect(linked.shared_index_group_id).toBe(groupId);
+    expect(sharedCount.count).toBe(1);
+  });
+
+  it("clears a shared index master when the master server is deleted", () => {
+    const db = createDb();
+    const profileId = insertProfile(db);
+    db.prepare("insert into profile_ftp_servers (profile_id, name, created_at, updated_at) values (?, 'Server 2', 'now', 'now')").run(profileId);
+    const master = db.prepare("select id from profile_ftp_servers where profile_id = ? order by id desc limit 1").get(profileId) as { id: number };
+    const groupId = db
+      .prepare(
+        `
+          insert into shared_index_groups (
+            key_hint, name, shared_index_key_hash, host, port, tls_mode, allow_invalid_certificate,
+            root_paths_json, library_layout, catalog_content_json, enabled, auto_link_imports,
+            master_profile_ftp_server_id, created_at, updated_at
+          ) values (
+            'main', 'Main', 'hash', 'ftp.example.test', 21, 'explicit', 0,
+            '["/"]', 'auto', '{}', 1, 1, ?, 'now', 'now'
+          )
+        `,
+      )
+      .run(master.id).lastInsertRowid as number;
+
+    db.prepare("delete from profile_ftp_servers where id = ?").run(master.id);
+
+    const group = db.prepare("select master_profile_ftp_server_id from shared_index_groups where id = ?").get(groupId) as {
+      master_profile_ftp_server_id: number | null;
+    };
+    expect(group.master_profile_ftp_server_id).toBeNull();
+  });
+
+  it("can run shared schema migration twice", () => {
+    const db = createDb();
+    expect(() => migrate(db)).not.toThrow();
   });
 
   it("allows halted scan jobs to be stored as cancelled", () => {

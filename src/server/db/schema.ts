@@ -2,8 +2,10 @@ import type Database from "better-sqlite3";
 
 const SCAN_JOBS_COLUMNS = `
       id integer primary key autoincrement,
+      target_kind text not null default 'profile_server' check (target_kind in ('profile_server', 'shared_group')),
       profile_id integer not null references profiles(id) on delete cascade,
       ftp_server_id integer references profile_ftp_servers(id) on delete cascade,
+      shared_index_group_id integer references shared_index_groups(id) on delete cascade,
       status text not null check (status in ('queued', 'running', 'succeeded', 'failed', 'skipped', 'cancelled')),
       trigger text not null check (trigger in ('manual', 'scheduled')),
       progress_percent integer not null default 0 check (progress_percent between 0 and 100),
@@ -19,6 +21,60 @@ const SCAN_JOBS_COLUMNS = `
       queued_at text not null,
       started_at text,
       finished_at text
+`;
+
+const SHARED_INDEX_GROUPS_COLUMNS = `
+      id integer primary key autoincrement,
+      key_hint text not null,
+      name text not null,
+      shared_index_key_hash text not null unique,
+      host text not null,
+      port integer not null check (port between 1 and 65535),
+      tls_mode text not null check (tls_mode in ('none', 'explicit', 'implicit')),
+      allow_invalid_certificate integer not null default 0 check (allow_invalid_certificate in (0, 1)),
+      root_paths_json text not null,
+      library_layout text not null default 'auto' check (library_layout in ('auto', 'folders', 'flat')),
+      catalog_content_json text not null default '{}',
+      enabled integer not null default 1 check (enabled in (0, 1)),
+      auto_link_imports integer not null default 1 check (auto_link_imports in (0, 1)),
+      master_profile_ftp_server_id integer references profile_ftp_servers(id) on delete set null,
+      indexed_media_count integer not null default 0 check (indexed_media_count >= 0),
+      last_indexed_at text,
+      created_at text not null,
+      updated_at text not null
+`;
+
+const SHARED_MEDIA_FILES_COLUMNS = `
+      id integer primary key autoincrement,
+      shared_index_group_id integer not null references shared_index_groups(id) on delete cascade,
+      ftp_path text not null,
+      filename text not null,
+      normalized_filename text not null,
+      extension text not null,
+      size_bytes integer check (size_bytes is null or size_bytes >= 0),
+      modified_at text,
+      media_kind text not null check (media_kind in ('movie', 'series')),
+      catalog_kind text not null default 'movie' check (catalog_kind in ('movie', 'series', 'anime')),
+      parsed_title text,
+      parsed_year integer check (parsed_year is null or parsed_year between 1888 and 2200),
+      season integer check (season is null or season > 0),
+      episode integer check (episode is null or episode > 0),
+      imdb_id text,
+      quality text,
+      confidence integer not null check (confidence between 0 and 100),
+      last_seen_at text not null,
+      unique(shared_index_group_id, ftp_path)
+`;
+
+const SHARED_DIRECTORY_SNAPSHOTS_COLUMNS = `
+      id integer primary key autoincrement,
+      shared_index_group_id integer not null references shared_index_groups(id) on delete cascade,
+      dir_path text not null,
+      entry_count integer not null check (entry_count >= 0),
+      fingerprint text not null,
+      modified_at text,
+      last_seen_at text not null,
+      unique(shared_index_group_id, dir_path)
 `;
 
 const MEDIA_FILES_COLUMNS = `
@@ -152,6 +208,24 @@ export function migrate(db: Database.Database) {
     create index if not exists idx_profile_ftp_servers_profile_id on profile_ftp_servers(profile_id);
     create index if not exists idx_profile_ftp_servers_pending_scan on profile_ftp_servers(pending_scan_after);
 
+    create table if not exists shared_index_groups (
+${SHARED_INDEX_GROUPS_COLUMNS}
+    );
+
+    create table if not exists shared_media_files (
+${SHARED_MEDIA_FILES_COLUMNS}
+    );
+
+    create table if not exists shared_directory_snapshots (
+${SHARED_DIRECTORY_SNAPSHOTS_COLUMNS}
+    );
+
+    create index if not exists idx_shared_index_groups_key_hash on shared_index_groups(shared_index_key_hash);
+    create index if not exists idx_shared_index_groups_enabled on shared_index_groups(enabled, auto_link_imports);
+    create index if not exists idx_shared_media_episode on shared_media_files(shared_index_group_id, media_kind, parsed_title, season, episode);
+    create index if not exists idx_shared_media_movie on shared_media_files(shared_index_group_id, media_kind, imdb_id, parsed_title, parsed_year);
+    create index if not exists idx_shared_directory_snapshots_group on shared_directory_snapshots(shared_index_group_id);
+
     create table if not exists media_files (
 ${MEDIA_FILES_COLUMNS}
     );
@@ -173,6 +247,7 @@ ${CATALOG_ENRICHMENT_COLUMNS}
     );
 
     create index if not exists idx_scan_jobs_profile_status on scan_jobs(profile_id, status);
+    create index if not exists idx_scan_jobs_target_status on scan_jobs(target_kind, shared_index_group_id, profile_id, ftp_server_id, status);
     create index if not exists idx_scan_jobs_status_queued on scan_jobs(status, queued_at);
     create index if not exists idx_scan_directory_snapshots_profile_server on scan_directory_snapshots(profile_id, ftp_server_id);
     create index if not exists idx_catalog_enrichment_status on catalog_enrichment(profile_id, ftp_server_id, status, next_attempt_at);
@@ -203,11 +278,16 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureMediaColumn(db, "catalog_kind", "text not null default 'movie'");
   ensureMediaColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
   ensureFtpServerColumn(db, "catalog_content_uncategorized", "integer not null default 1");
+  ensureFtpServerColumn(db, "shared_index_group_id", "integer references shared_index_groups(id) on delete set null");
+  ensureFtpServerColumn(db, "shared_index_key_hash", "text");
   ensureScanJobColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
+  ensureScanJobColumn(db, "target_kind", "text not null default 'profile_server'");
+  ensureScanJobColumn(db, "shared_index_group_id", "integer references shared_index_groups(id) on delete cascade");
   ensureScanJobColumn(db, "scan_mode", "text");
   ensureScanJobColumn(db, "media_items_added", "integer not null default 0");
   ensureMediaServerUnique(db);
   ensureScanJobsCancelledStatus(db);
+  ensureSharedIndexTables(db);
   ensureDefaultFtpServers(db);
   ensureCatalogEnrichmentTable(db);
   ensureCatalogEnrichmentColumn(db, "algorithm_version", "integer not null default 1");
@@ -250,6 +330,31 @@ ${CATALOG_ENRICHMENT_COLUMNS}
     );
     create index if not exists idx_catalog_enrichment_status on catalog_enrichment(profile_id, ftp_server_id, status, next_attempt_at);
     create index if not exists idx_catalog_enrichment_catalog on catalog_enrichment(profile_id, catalog_kind, status);
+  `);
+}
+
+function ensureSharedIndexTables(db: Database.Database) {
+  db.exec(`
+    create table if not exists shared_index_groups (
+${SHARED_INDEX_GROUPS_COLUMNS}
+    );
+
+    create table if not exists shared_media_files (
+${SHARED_MEDIA_FILES_COLUMNS}
+    );
+
+    create table if not exists shared_directory_snapshots (
+${SHARED_DIRECTORY_SNAPSHOTS_COLUMNS}
+    );
+
+    create index if not exists idx_shared_index_groups_key_hash on shared_index_groups(shared_index_key_hash);
+    create index if not exists idx_shared_index_groups_enabled on shared_index_groups(enabled, auto_link_imports);
+    create index if not exists idx_shared_media_episode on shared_media_files(shared_index_group_id, media_kind, parsed_title, season, episode);
+    create index if not exists idx_shared_media_movie on shared_media_files(shared_index_group_id, media_kind, imdb_id, parsed_title, parsed_year);
+    create index if not exists idx_shared_directory_snapshots_group on shared_directory_snapshots(shared_index_group_id);
+    create index if not exists idx_profile_ftp_servers_shared_group on profile_ftp_servers(shared_index_group_id);
+    create index if not exists idx_profile_ftp_servers_shared_key on profile_ftp_servers(shared_index_key_hash);
+    create index if not exists idx_scan_jobs_target_status on scan_jobs(target_kind, shared_index_group_id, profile_id, ftp_server_id, status);
   `);
 }
 
