@@ -14,6 +14,8 @@ export type ParsedMediaFileInput = Omit<ParsedMedia, "catalogKind"> & {
 export type MediaMatch = {
   id: number;
   ftpServerId: number | null;
+  sharedIndexGroupId?: number | null;
+  source?: "profile" | "shared";
   serverName: string | null;
   streamDeliveryMode?: "proxy" | "direct" | null;
   ftpPath: string;
@@ -77,6 +79,8 @@ export type DirectorySnapshotInput = {
 type MediaFileRow = {
   id: number;
   ftp_server_id: number | null;
+  shared_index_group_id?: number | null;
+  source?: "profile" | "shared";
   server_name?: string | null;
   stream_delivery_mode?: "proxy" | "direct" | null;
   ftp_path: string;
@@ -89,6 +93,8 @@ function toMediaMatch(row: MediaFileRow): MediaMatch {
   return {
     id: row.id,
     ftpServerId: row.ftp_server_id,
+    sharedIndexGroupId: row.shared_index_group_id ?? null,
+    source: row.source ?? "profile",
     serverName: row.server_name ?? null,
     streamDeliveryMode: row.stream_delivery_mode ?? null,
     ftpPath: row.ftp_path,
@@ -327,6 +333,7 @@ export class MediaRepository {
         from media_files mf
         left join profile_ftp_servers s on s.id = mf.ftp_server_id
         where mf.profile_id = ?
+          and (mf.ftp_server_id is null or s.shared_index_group_id is null)
           and mf.media_kind = 'series'
           and mf.parsed_title = ?
           and mf.season = ?
@@ -335,7 +342,7 @@ export class MediaRepository {
       `,
       )
       .all(profileId, normalizedTitle, season, episode) as MediaFileRow[];
-    return rows.map(toMediaMatch);
+    return rows.map(toMediaMatch).concat(this.findSharedEpisode(profileId, normalizedTitle, season, episode));
   }
 
   findMovie(profileId: number, imdbId: string, normalizedTitle: string, year: number | null): MediaMatch[] {
@@ -351,6 +358,7 @@ export class MediaRepository {
          and ce.status = 'matched'
         left join profile_ftp_servers s on s.id = mf.ftp_server_id
         where mf.profile_id = ?
+          and (mf.ftp_server_id is null or s.shared_index_group_id is null)
           and (
             (
               mf.media_kind = 'movie'
@@ -371,6 +379,52 @@ export class MediaRepository {
       `,
       )
       .all(profileId, imdbId, normalizedTitle, year, year, imdbId) as MediaFileRow[];
+    return rows.map(toMediaMatch).concat(this.findSharedMovie(profileId, imdbId, normalizedTitle, year));
+  }
+
+  private findSharedEpisode(profileId: number, normalizedTitle: string, season: number, episode: number): MediaMatch[] {
+    const rows = this.db
+      .prepare(
+        `
+        select sm.id, s.id as ftp_server_id, sm.shared_index_group_id, 'shared' as source,
+               s.name as server_name, s.stream_delivery_mode, sm.ftp_path, sm.filename, sm.quality, sm.size_bytes
+        from profile_ftp_servers s
+        join shared_index_groups g on g.id = s.shared_index_group_id and g.enabled = 1
+        join shared_media_files sm on sm.shared_index_group_id = g.id
+        where s.profile_id = ?
+          and sm.media_kind = 'series'
+          and sm.parsed_title = ?
+          and sm.season = ?
+          and sm.episode = ?
+        order by s.name asc, sm.confidence desc, sm.size_bytes desc
+      `,
+      )
+      .all(profileId, normalizedTitle, season, episode) as MediaFileRow[];
+    return rows.map(toMediaMatch);
+  }
+
+  private findSharedMovie(profileId: number, imdbId: string, normalizedTitle: string, year: number | null): MediaMatch[] {
+    const rows = this.db
+      .prepare(
+        `
+        select sm.id, s.id as ftp_server_id, sm.shared_index_group_id, 'shared' as source,
+               s.name as server_name, s.stream_delivery_mode, sm.ftp_path, sm.filename, sm.quality, sm.size_bytes
+        from profile_ftp_servers s
+        join shared_index_groups g on g.id = s.shared_index_group_id and g.enabled = 1
+        join shared_media_files sm on sm.shared_index_group_id = g.id
+        where s.profile_id = ?
+          and sm.media_kind = 'movie'
+          and (
+            (sm.imdb_id is not null and sm.imdb_id = ?)
+            or (
+              sm.parsed_title = ?
+              and (? is null or sm.parsed_year is null or sm.parsed_year = ?)
+            )
+          )
+        order by s.name asc, sm.confidence desc, sm.size_bytes desc
+      `,
+      )
+      .all(profileId, imdbId, normalizedTitle, year, year) as MediaFileRow[];
     return rows.map(toMediaMatch);
   }
 
@@ -386,6 +440,24 @@ export class MediaRepository {
       `,
       )
       .get(profileId, fileId) as MediaFileRow | undefined;
+    return row ? toMediaMatch(row) : null;
+  }
+
+  getSharedFileForProfile(profileId: number, serverId: number, sharedMediaId: number): MediaMatch | null {
+    const row = this.db
+      .prepare(
+        `
+        select sm.id, s.id as ftp_server_id, sm.shared_index_group_id, 'shared' as source,
+               s.name as server_name, s.stream_delivery_mode, sm.ftp_path, sm.filename, sm.quality, sm.size_bytes
+        from profile_ftp_servers s
+        join shared_index_groups g on g.id = s.shared_index_group_id and g.enabled = 1
+        join shared_media_files sm on sm.shared_index_group_id = g.id
+        where s.profile_id = ?
+          and s.id = ?
+          and sm.id = ?
+      `,
+      )
+      .get(profileId, serverId, sharedMediaId) as MediaFileRow | undefined;
     return row ? toMediaMatch(row) : null;
   }
 

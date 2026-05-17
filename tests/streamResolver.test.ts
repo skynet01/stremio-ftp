@@ -95,6 +95,36 @@ describe("stream resolver", () => {
     expect(streams[0]?.url).toBe("https://addon.example.test/proxy/token%20with%2Fslash/99");
   });
 
+  it("uses shared proxy URLs for shared index matches", async () => {
+    const streams = await resolveStreams({
+      baseUrl: "https://addon.example.test",
+      installToken: "token",
+      profileId: 1,
+      type: "movie",
+      id: "tt7654321",
+      metadata: { name: "The Movie!", releaseInfo: "2021" },
+      mediaRepository: {
+        findEpisode: () => [],
+        findMovie: () => [
+          {
+            id: 77,
+            source: "shared",
+            ftpServerId: 12,
+            sharedIndexGroupId: 3,
+            serverName: "Shared",
+            filename: "The.Movie.2021.mkv",
+            ftpPath: "/Movies/The.Movie.2021.mkv",
+            quality: "1080p",
+            sizeBytes: null,
+          },
+        ],
+      },
+    });
+
+    expect(streams[0]?.url).toBe("https://addon.example.test/proxy/token/shared/12/77");
+  });
+
+
   it("returns no streams for malformed series IDs", async () => {
     const findEpisode = vi.fn(() => [
       {

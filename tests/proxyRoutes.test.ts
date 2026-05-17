@@ -71,6 +71,36 @@ describe("proxy routes", () => {
     expect(resolve).not.toHaveBeenCalled();
   });
 
+  it("routes shared proxy ids to the shared resolver input", async () => {
+    const resolve = vi.fn(async () => ({
+      filename: "video.mkv",
+      sizeBytes: 4,
+      openReadStream: async () => Readable.from("test"),
+    }));
+    const router = createProxyRouter({ resolve });
+
+    const express = (await import("express")).default;
+    const app = express().use(router);
+
+    const response = await request(app).get("/proxy/token/shared/12/44").expect(200);
+    expect(responseBodyText(response)).toBe("test");
+    expect(resolve).toHaveBeenCalledWith({ installToken: "token", serverId: 12, sharedMediaId: 44 });
+  });
+
+  it("rejects invalid shared proxy ids before calling the resolver", async () => {
+    const resolve = vi.fn();
+    const router = createProxyRouter({ resolve });
+
+    const express = (await import("express")).default;
+    const app = express().use(router);
+
+    for (const path of ["/proxy/token/shared/0/44", "/proxy/token/shared/12/0", "/proxy/token/shared/a/44", "/proxy/token/shared/12/b"]) {
+      await request(app).get(path).expect(404);
+    }
+
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
   it("returns zero-byte known-size files without opening a stream", async () => {
     const openReadStream = vi.fn();
     const router = createProxyRouter({

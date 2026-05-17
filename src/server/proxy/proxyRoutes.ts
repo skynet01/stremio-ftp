@@ -10,7 +10,7 @@ type ProxyFile = {
 };
 
 type ProxyDeps = {
-  resolve(input: { installToken: string; fileId: number }): Promise<ProxyFile | null>;
+  resolve(input: { installToken: string; fileId: number } | { installToken: string; serverId: number; sharedMediaId: number }): Promise<ProxyFile | null>;
 };
 
 export function createProxyRouter(deps: ProxyDeps) {
@@ -20,11 +20,45 @@ export function createProxyRouter(deps: ProxyDeps) {
     void handleProxyRequest(deps, req, res, true).catch(next);
   });
 
+  router.head("/proxy/:installToken/shared/:serverId/:sharedMediaId", (req, res, next) => {
+    void handleSharedProxyRequest(deps, req, res, true).catch(next);
+  });
+
   router.get("/proxy/:installToken/:fileId", (req, res, next) => {
     void handleProxyRequest(deps, req, res, false).catch(next);
   });
 
+  router.get("/proxy/:installToken/shared/:serverId/:sharedMediaId", (req, res, next) => {
+    void handleSharedProxyRequest(deps, req, res, false).catch(next);
+  });
+
   return router;
+}
+
+async function handleSharedProxyRequest(deps: ProxyDeps, req: Request, res: Response, headOnly: boolean) {
+  const installToken = req.params.installToken;
+  const serverIdParam = req.params.serverId;
+  const sharedMediaIdParam = req.params.sharedMediaId;
+  if (typeof installToken !== "string" || typeof serverIdParam !== "string" || typeof sharedMediaIdParam !== "string") {
+    res.sendStatus(404);
+    return;
+  }
+
+  if (!/^[1-9]\d*$/.test(serverIdParam) || !/^[1-9]\d*$/.test(sharedMediaIdParam)) {
+    res.sendStatus(404);
+    return;
+  }
+
+  const file = await deps.resolve({
+    installToken,
+    serverId: Number(serverIdParam),
+    sharedMediaId: Number(sharedMediaIdParam),
+  });
+  if (!file) {
+    res.sendStatus(404);
+    return;
+  }
+  await streamProxyFile(file, req, res, headOnly);
 }
 
 async function handleProxyRequest(deps: ProxyDeps, req: Request, res: Response, headOnly: boolean) {
@@ -47,6 +81,10 @@ async function handleProxyRequest(deps: ProxyDeps, req: Request, res: Response, 
     return;
   }
 
+  await streamProxyFile(file, req, res, headOnly);
+}
+
+async function streamProxyFile(file: ProxyFile, req: Request, res: Response, headOnly: boolean) {
   const rangeHeader = req.header("range");
   const range = parseRangeHeader(rangeHeader, file.sizeBytes);
   if (rangeHeader && file.sizeBytes !== null && !range) {

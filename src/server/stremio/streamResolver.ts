@@ -12,6 +12,7 @@ import {
 
 export type MediaMatch = {
   id: number;
+  source?: "profile" | "shared";
   ftpPath: string;
   filename: string;
   quality: string | null;
@@ -98,7 +99,9 @@ export function streamForMatch(input: {
     url:
       deliveryMode === "direct" && ftpConfig
         ? ftpUrl(ftpConfig, match.ftpPath)
-        : proxyUrl(input.baseUrl, input.installToken, match.id),
+        : match.source === "shared" && match.ftpServerId
+          ? sharedProxyUrl(input.baseUrl, input.installToken, match.ftpServerId, match.id)
+          : proxyUrl(input.baseUrl, input.installToken, match.id),
     behaviorHints: {
       notWebReady: true,
       filename: match.filename,
@@ -217,6 +220,11 @@ function releaseParts(filename: string) {
 function proxyUrl(baseUrl: string, installToken: string, mediaId: number): string {
   const root = baseUrl.replace(/\/+$/, "");
   return `${root}/proxy/${encodeURIComponent(installToken)}/${encodeURIComponent(String(mediaId))}`;
+}
+
+function sharedProxyUrl(baseUrl: string, installToken: string, serverId: number, mediaId: number): string {
+  const root = baseUrl.replace(/\/+$/, "");
+  return `${root}/proxy/${encodeURIComponent(installToken)}/shared/${encodeURIComponent(String(serverId))}/${encodeURIComponent(String(mediaId))}`;
 }
 
 function ftpUrl(config: FtpConfig, ftpPath: string): string {
