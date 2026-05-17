@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
+import { ProfileService } from "../src/server/profiles/profileService";
 
 function config(): AppConfig {
   return {
@@ -827,6 +828,101 @@ describe("profile routes", () => {
       .send({ browserUid: "browser-uid", passphrase: "passphrase", serverId: onlyServerId })
       .expect(400);
     expect(rejected.body).toEqual({ error: "At least one FTP server is required" });
+  });
+
+  it("auto-links saved servers to approved shared indexes and routes rescans to the shared scan", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db, {
+      ftpClientFactory: async () => ({
+        list: async () => [{ name: "Shared.Movie.2020.mkv", path: "/Shared.Movie.2020.mkv", type: "file", size: 1000 }],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+    });
+    const service = new ProfileService(db, config().encryptionKey);
+
+    const created = await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    const serverId = service.defaultFtpServerId(created.body.profileId);
+    service.saveFtpServerConfig(created.body.profileId, serverId, {
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      username: "master",
+      password: "secret",
+      tlsMode: "explicit",
+      allowInvalidCertificate: false,
+      roots: ["/media"],
+    }, false);
+    const group = service.createSharedIndexGroupFromServer(created.body.profileId, serverId, {
+      name: "Sputnik Main",
+      keyHint: "sputnik-main",
+    });
+
+    const saved = await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        serverId,
+        name: "Sputnik Main",
+        sharedIndexKey: group.sharedIndexKey,
+        ftpConfig: {
+          host: "sputnik.whatbox.ca",
+          port: 21,
+          username: "user",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: false,
+          roots: ["/media"],
+        },
+        customization: {
+          catalogEnabled: false,
+          catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+          libraryLayout: "auto",
+          streamDeliveryMode: "proxy",
+        },
+      })
+      .expect(200);
+
+    expect(saved.body.server.sharedIndex).toMatchObject({ name: "Sputnik Main", keyHint: "sputnik-main", linked: true });
+    expect(JSON.stringify(saved.body.server)).not.toContain(group.sharedIndexKey);
+    expect(JSON.stringify(saved.body.server)).not.toContain("secret");
+
+    const rescan = await request(app)
+      .post("/api/profile/index/rescan")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", serverId })
+      .expect(200);
+    expect(["queued", "running"]).toContain(rescan.body.scanStatus.status);
+
+    let loaded = await request(app)
+      .post("/api/profile/servers/load")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+    for (let attempt = 0; attempt < 20 && loaded.body.servers[0].scanStatus.status !== "succeeded"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      loaded = await request(app)
+        .post("/api/profile/servers/load")
+        .set("x-setup-token", "setup-secret-123")
+        .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+        .expect(200);
+    }
+    expect(loaded.body.servers[0].scanStatus.status).toBe("succeeded");
+    expect(loaded.body.servers[0].indexStatus.mediaItems).toBe(1);
+
+    const schedule = await request(app)
+      .post("/api/profile/index/schedule")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", serverId, intervalMinutes: 360 })
+      .expect(400);
+    expect(schedule.body.error).toContain("Shared index scans");
   });
 
   it("lets database admins bypass the FTP server cap", async () => {

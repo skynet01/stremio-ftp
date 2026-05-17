@@ -39,6 +39,13 @@ export type ServerForm = {
   connectionStatus: ConnectionStatus;
   pendingScanAfter: string | null;
   sharedIndexKey?: string;
+  sharedIndex?: {
+    id: number;
+    name: string;
+    keyHint: string;
+    linked: boolean;
+    message: string;
+  } | null;
   message: string;
   pendingCreate?: boolean;
   draft?: boolean;

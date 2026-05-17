@@ -916,6 +916,10 @@ export class ProfileService {
     if (input.ftpConfig) this.saveFtpServerConfig(profileId, serverId, input.ftpConfig);
     if (input.customization) this.saveFtpServerCustomization(profileId, serverId, input.customization, true);
     if (input.name !== undefined) this.renameFtpServer(profileId, serverId, input.name);
+    if (input.sharedIndexKey) {
+      const group = this.resolveApprovedSharedIndexKey(profileId, serverId, input.sharedIndexKey);
+      if (group) this.linkServerToSharedGroup(profileId, serverId, group.id, input.sharedIndexKey);
+    }
     return this.getFtpServer(profileId, serverId);
   }
 

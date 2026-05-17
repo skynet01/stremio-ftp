@@ -150,6 +150,7 @@ function emptyServerForm(id = 0): ServerForm {
     connectionStatus: { lastTestedAt: null, ok: null },
     pendingScanAfter: null,
     sharedIndexKey: undefined,
+    sharedIndex: null,
     message: "Save FTP settings, then refresh the index.",
   };
 }
@@ -178,6 +179,7 @@ function serverFormFromPayload(server: FtpServerSettings): ServerForm {
     connectionStatus: server.connectionStatus,
     pendingScanAfter: server.pendingScanAfter,
     sharedIndexKey: undefined,
+    sharedIndex: server.sharedIndex ?? null,
     message: serverMessage(server.pendingScanAfter, server.scanStatus, "Server ready."),
   };
 }

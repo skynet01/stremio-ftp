@@ -96,6 +96,13 @@ export type FtpServerSettings = {
   scanSchedule: ScanSchedule;
   connectionStatus: ConnectionStatus;
   pendingScanAfter: string | null;
+  sharedIndex?: {
+    id: number;
+    name: string;
+    keyHint: string;
+    linked: boolean;
+    message: string;
+  } | null;
 };
 
 const SETUP_TOKEN_STORAGE_KEY = "stremio-ftp-setup-token";

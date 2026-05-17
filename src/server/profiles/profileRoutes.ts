@@ -387,7 +387,11 @@ export function profileRoutes(
           .listFtpServers(unlocked.profileId)
           .filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig));
         if (!servers.length) return res.status(400).json({ error: "FTP settings are not configured" });
-        const scanStatuses = servers.map((server) => scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id, scanOptions));
+        const scanStatuses = servers.map((server) =>
+          server.sharedIndex
+            ? scanQueue.enqueueSharedIndexScan(server.sharedIndex.id, "manual", scanOptions)
+            : scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id, scanOptions),
+        );
         return res.json({
           scanStatus: scanStatuses[0],
           scanStatuses,
@@ -399,6 +403,8 @@ export function profileRoutes(
       const ftpConfig = service.getFtpServerConfig(unlocked.profileId, serverId);
       if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
       if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "Fill in username and password before scanning this server." });
+      const server = service.getFtpServer(unlocked.profileId, serverId);
+      if (server.sharedIndex) return res.json({ scanStatus: scanQueue.enqueueSharedIndexScan(server.sharedIndex.id, "manual", scanOptions) });
       res.json({ scanStatus: scanQueue.enqueueProfileScan(unlocked.profileId, "manual", serverId, scanOptions) });
     } catch (error) {
       res.status(400).json({ error: ftpErrorMessage(error, "Unable to refresh FTP index") });
@@ -412,7 +418,8 @@ export function profileRoutes(
     try {
       const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
       const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
-      res.json({ scanStatus: scanQueue.cancelServerScan(unlocked.profileId, serverId) });
+      const server = service.getFtpServer(unlocked.profileId, serverId);
+      res.json({ scanStatus: server.sharedIndex ? scanQueue.cancelSharedIndexScan(server.sharedIndex.id) : scanQueue.cancelServerScan(unlocked.profileId, serverId) });
     } catch {
       res.status(401).json({ error: "Invalid passphrase" });
     }
@@ -448,6 +455,10 @@ export function profileRoutes(
         });
       }
       const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
+      const server = service.getFtpServer(unlocked.profileId, serverId);
+      if (server.sharedIndex) {
+        return res.status(400).json({ error: "Shared index scans are scheduled from the master index." });
+      }
       const nextScheduledScanAt =
         parsed.data.intervalMinutes > 0 ? new Date(Date.now() + parsed.data.intervalMinutes * 60_000).toISOString() : null;
       service.saveFtpServerScanSchedule(unlocked.profileId, serverId, {
@@ -468,9 +479,11 @@ function serverPayloads(service: ProfileService, scanQueue: ScanQueue, profileId
   return servers.map((server) => serverPayload(service, scanQueue, server));
 }
 
-function serverPayload(_service: ProfileService, scanQueue: ScanQueue, server: FtpServer) {
+function serverPayload(service: ProfileService, scanQueue: ScanQueue, server: FtpServer) {
   const ftpConfig = server.ftpConfig;
   const draft = ftpConfig ? isDraftFtpConfig(ftpConfig) : false;
+  const sharedGroup = server.sharedIndex ? service.getSharedIndexGroup(server.sharedIndex.id) : null;
+  const sharedScanStatus = sharedGroup ? scanQueue.getSharedIndexScanStatus(sharedGroup.id) : null;
   return {
     id: server.id,
     name: server.name,
@@ -488,11 +501,22 @@ function serverPayload(_service: ProfileService, scanQueue: ScanQueue, server: F
         }
       : null,
     customization: server.customization,
-    indexStatus: server.indexStatus,
-    scanStatus: scanQueue.getServerScanStatus(server.profileId, server.id),
-    scanSchedule: server.scanSchedule,
+    indexStatus: sharedGroup
+      ? { lastScanAt: sharedGroup.lastIndexedAt, mediaItems: sharedGroup.indexedMediaCount }
+      : server.indexStatus,
+    scanStatus: sharedScanStatus ?? scanQueue.getServerScanStatus(server.profileId, server.id),
+    scanSchedule: sharedGroup ? { intervalMinutes: 0, nextScheduledScanAt: null } : server.scanSchedule,
     connectionStatus: server.connectionStatus,
-    pendingScanAfter: server.pendingScanAfter,
+    pendingScanAfter: sharedGroup ? null : server.pendingScanAfter,
+    sharedIndex: sharedGroup
+      ? {
+          id: sharedGroup.id,
+          name: sharedGroup.name,
+          keyHint: sharedGroup.keyHint,
+          linked: true,
+          message: "Scanning handled by shared master index.",
+        }
+      : null,
   };
 }
 
