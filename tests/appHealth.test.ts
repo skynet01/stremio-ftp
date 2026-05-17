@@ -59,6 +59,32 @@ describe("app health", () => {
     expect(response.header["content-security-policy"]).toContain("img-src 'self' data: https:");
   });
 
+  it("does not force HTTPS upgrades when serving over plain HTTP", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const config: AppConfig = {
+      baseUrl: "http://192.168.66.174:7021",
+      configDir: "/tmp",
+      sqlitePath: ":memory:",
+      encryptionKey: "0123456789abcdef0123456789abcdef",
+      setupToken: "setup-secret-123",
+      allowPublicProfileApi: false,
+      port: 7000,
+      logLevel: "error",
+      crawlerConcurrency: 2,
+      ftpTimeoutMs: 15000,
+      ftpMaxConnections: 4,
+      maxOnDemandSearchMs: 4500,
+      profileRateLimitWindowMs: 600000,
+      profileRateLimitMax: 30,
+      tmdbApiKey: null,
+    };
+
+    const response = await request(createApp(config, db)).get("/health").expect(200);
+
+    expect(response.header["content-security-policy"]).not.toContain("upgrade-insecure-requests");
+  });
+
   it("serves the configuration portal at /configure", async () => {
     const db = new Database(":memory:");
     migrate(db);

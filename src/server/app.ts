@@ -39,6 +39,7 @@ export function createApp(
       contentSecurityPolicy: {
         directives: {
           imgSrc: ["'self'", "data:", "https:"],
+          upgradeInsecureRequests: config.baseUrl.startsWith("https://") ? [] : null,
         },
       },
       crossOriginResourcePolicy: { policy: "cross-origin" },
