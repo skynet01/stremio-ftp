@@ -218,7 +218,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
               <tbody>
                 {visibleProfiles.map((profile) => (
                   <tr key={profile.id}>
-                    <td>
+                    <td data-label="Recovery UID">
                       <button
                         type="button"
                         className="admin-profile-identity-button"
@@ -232,32 +232,33 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                         <code>{truncateUid(profile.browserUid)}</code>
                       </button>
                     </td>
-                    <td>
+                    <td data-label="Admin">
                       <AdminState profile={profile} />
                     </td>
-                    <td>
+                    <td data-label="Servers">
                       {profile.configuredFtpServers}/{profile.ftpServers}
                     </td>
-                    <td>{profile.indexedItems}</td>
-                    <td>{formatScanTime(profile.lastScanAt)}</td>
-                    <td>
+                    <td data-label="Indexed">{profile.indexedItems}</td>
+                    <td data-label="Last scan">{formatScanTime(profile.lastScanAt)}</td>
+                    <td data-label="State">
                       <ProfileStateBadge profile={profile} />
                     </td>
-                    <td>
+                    <td data-label="Manifest">
                       {profile.manifestUrl ? (
                         <button
                           type="button"
-                          className="secondary-button admin-manifest-copy"
+                          className="icon-button admin-manifest-copy"
+                          aria-label={`Copy manifest URL for ${profile.browserUid}`}
+                          title="Copy manifest URL"
                           onClick={() => void navigator.clipboard?.writeText(profile.manifestUrl!)}
                         >
-                          <Copy size={14} aria-hidden="true" />
-                          Copy URL
+                          <Copy size={16} aria-hidden="true" />
                         </button>
                       ) : (
                         <span className="admin-empty-value">Not issued</span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="Actions">
                       <div className="admin-actions">
                         <button
                           type="button"

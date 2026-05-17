@@ -1125,7 +1125,7 @@ input:-webkit-autofill:active {
 
 .admin-profile-table-wrap {
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
 }
@@ -1151,14 +1151,14 @@ input:-webkit-autofill:active {
 
 .admin-profile-table {
   width: 100%;
-  min-width: 1080px;
+  min-width: 0;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
 .admin-profile-table th,
 .admin-profile-table td {
-  padding: 14px 16px;
+  padding: 10px 8px;
   border-bottom: 1px solid var(--line-soft);
   text-align: left;
   vertical-align: middle;
@@ -1168,29 +1168,51 @@ input:-webkit-autofill:active {
   color: var(--muted);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.62rem;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .admin-profile-table th:nth-child(1),
 .admin-profile-table td:nth-child(1) {
-  width: 170px;
+  width: 142px;
+}
+
+.admin-profile-table th:nth-child(2),
+.admin-profile-table td:nth-child(2) {
+  width: 96px;
+}
+
+.admin-profile-table th:nth-child(3),
+.admin-profile-table td:nth-child(3),
+.admin-profile-table th:nth-child(4),
+.admin-profile-table td:nth-child(4) {
+  width: 76px;
 }
 
 .admin-profile-table th:nth-child(5),
 .admin-profile-table td:nth-child(5) {
-  width: 200px;
+  width: 168px;
   white-space: nowrap;
+}
+
+.admin-profile-table th:nth-child(6),
+.admin-profile-table td:nth-child(6) {
+  width: 94px;
+}
+
+.admin-profile-table th:nth-child(7),
+.admin-profile-table td:nth-child(7) {
+  width: 82px;
 }
 
 .admin-profile-table th:nth-child(8),
 .admin-profile-table td:nth-child(8) {
-  width: 196px;
+  width: 172px;
 }
 
 .admin-profile-table td {
   color: var(--cream-dim);
-  font-size: 0.86rem;
+  font-size: 0.78rem;
 }
 
 .admin-profile-table tbody tr:last-child td {
@@ -1237,12 +1259,12 @@ input:-webkit-autofill:active {
 
 .admin-profile-identity-button {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-columns: 20px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  width: 148px;
+  gap: 6px;
+  width: 126px;
   min-height: 34px;
-  padding: 0 6px;
+  padding: 0 5px;
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
@@ -1279,13 +1301,13 @@ input:-webkit-autofill:active {
 
 .admin-actions {
   display: inline-flex;
-  gap: 8px;
+  gap: 4px;
 }
 
 .admin-manifest-copy {
+  width: 34px;
+  min-width: 34px;
   min-height: 34px;
-  padding: 0 10px;
-  font-size: 0.6rem;
 }
 
 .admin-empty-value {
@@ -2155,7 +2177,75 @@ input:-webkit-autofill:active {
   }
 
   .admin-profile-table {
-    min-width: 760px;
+    min-width: 0;
+  }
+
+  .admin-profile-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .admin-profile-table,
+  .admin-profile-table tbody,
+  .admin-profile-table tr,
+  .admin-profile-table td {
+    display: block;
+  }
+
+  .admin-profile-table tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  .admin-profile-table tr {
+    display: grid;
+    gap: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .admin-profile-table th,
+  .admin-profile-table td {
+    width: auto !important;
+  }
+
+  .admin-profile-table td {
+    display: grid;
+    grid-template-columns: minmax(82px, 0.4fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+    white-space: normal;
+  }
+
+  .admin-profile-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .admin-profile-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .admin-profile-identity-button {
+    width: min(100%, 168px);
+  }
+
+  .admin-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .server-accordion-trigger {
