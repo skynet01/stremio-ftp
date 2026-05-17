@@ -14,6 +14,7 @@ import {
   loadScanStatus,
   loadSetupStatus,
   rescanIndex,
+  rescanAdminProfile,
   saveCustomization,
   saveFtpSettings,
   saveScanSchedule,
@@ -38,6 +39,7 @@ vi.mock("../src/web/api", () => ({
   loadScanStatus: vi.fn(),
   loadSetupStatus: vi.fn(),
   rescanIndex: vi.fn(),
+  rescanAdminProfile: vi.fn(),
   saveCustomization: vi.fn(),
   saveFtpSettings: vi.fn(),
   saveScanSchedule: vi.fn(),
@@ -61,6 +63,7 @@ const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
 const loadScanStatusMock = vi.mocked(loadScanStatus);
 const loadSetupStatusMock = vi.mocked(loadSetupStatus);
 const rescanIndexMock = vi.mocked(rescanIndex);
+const rescanAdminProfileMock = vi.mocked(rescanAdminProfile);
 const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
 const saveScanScheduleMock = vi.mocked(saveScanSchedule);
@@ -108,6 +111,10 @@ describe("App", () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.history.pushState({}, "", "/");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn() },
+    });
     cancelScanMock.mockReset();
     createProfileMock.mockReset();
     deleteAdminProfileMock.mockReset();
@@ -131,6 +138,7 @@ describe("App", () => {
     loadSetupStatusMock.mockReset();
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: true });
     rescanIndexMock.mockReset();
+    rescanAdminProfileMock.mockReset();
     saveCustomizationMock.mockReset();
     saveFtpSettingsMock.mockReset();
     saveScanScheduleMock.mockReset();
@@ -1312,7 +1320,7 @@ describe("App", () => {
       profiles: [
         {
           id: 2,
-          browserUid: "user-uid",
+          browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852",
           createdAt: "2026-05-16T00:00:00.000Z",
           updatedAt: "2026-05-16T00:00:00.000Z",
           lastUnlockedAt: null,
@@ -1328,9 +1336,28 @@ describe("App", () => {
           adminEnabled: false,
           adminSource: null,
         },
+        {
+          id: 3,
+          browserUid: "aa2f80d7-4971-4919-8f4e-ab80aa2de852",
+          createdAt: "2026-05-15T00:00:00.000Z",
+          updatedAt: "2026-05-15T00:00:00.000Z",
+          lastUnlockedAt: null,
+          ftpServers: 1,
+          configuredFtpServers: 1,
+          indexedItems: 3,
+          lastScanAt: "2026-05-16T00:00:00.000Z",
+          activeScans: 0,
+          pendingScans: 0,
+          manifestUrl: null,
+          stremioInstallUrl: null,
+          lastCountryCode: "GB",
+          adminEnabled: true,
+          adminSource: "database",
+        },
       ],
     });
     setAdminProfileEnabledMock.mockResolvedValue({ profileId: 2, adminEnabled: true, adminSource: "database" });
+    rescanAdminProfileMock.mockResolvedValue({ profileId: 2, scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } });
     createProfileMock.mockResolvedValue({
       profileId: 1,
       recoveryUid: "admin-uid",
@@ -1344,17 +1371,37 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
 
     await screen.findByRole("heading", { name: "Admin dashboard" });
-    expect(await screen.findByText("user-uid")).toBeTruthy();
-    expect(screen.getByText("CA")).toBeTruthy();
+    const uidButton = await screen.findByRole("button", { name: "Copy recovery UID bf1f80d7-4971-4919-8f4e-ab80aa2de852" });
+    expect(uidButton).toHaveTextContent("🇨🇦");
+    expect(uidButton).toHaveTextContent("bf1f80d7-4971");
+    expect(uidButton).not.toHaveTextContent("bf1f80d7-4971-4919-8f4e-ab80aa2de852");
+    expect(uidButton).toHaveAttribute("title", "CA");
+    fireEvent.click(uidButton);
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("bf1f80d7-4971-4919-8f4e-ab80aa2de852");
+    expect(screen.queryByRole("columnheader", { name: "Country" })).toBeNull();
     expect(screen.getAllByText("44").length).toBeGreaterThan(0);
     expect(loadAdminProfilesMock).toHaveBeenCalledWith(expect.objectContaining({ passphrase: "passphrase" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rescan bf1f80d7-4971-4919-8f4e-ab80aa2de852" }));
+    await waitFor(() =>
+      expect(rescanAdminProfileMock).toHaveBeenCalledWith({
+        browserUid: expect.any(String),
+        passphrase: "passphrase",
+        profileId: 2,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Indexed" }));
+    let uidButtons = screen.getAllByRole("button", { name: /^Copy recovery UID / });
+    expect(uidButtons[0]).toHaveAccessibleName("Copy recovery UID aa2f80d7-4971-4919-8f4e-ab80aa2de852");
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Indexed" }));
+    uidButtons = screen.getAllByRole("button", { name: /^Copy recovery UID / });
+    expect(uidButtons[0]).toHaveAccessibleName("Copy recovery UID bf1f80d7-4971-4919-8f4e-ab80aa2de852");
 
     fireEvent.change(screen.getByLabelText("Search profiles"), { target: { value: "missing-uid" } });
-    expect(screen.queryByText("user-uid")).toBeNull();
-    fireEvent.change(screen.getByLabelText("Search profiles"), { target: { value: "user-uid" } });
-    expect(screen.getByText("user-uid")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Copy recovery UID bf1f80d7-4971-4919-8f4e-ab80aa2de852" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Search profiles"), { target: { value: "bf1f80d7" } });
+    expect(screen.getByRole("button", { name: "Copy recovery UID bf1f80d7-4971-4919-8f4e-ab80aa2de852" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Promote user-uid to admin" }));
+    fireEvent.click(screen.getByRole("button", { name: "Promote bf1f80d7-4971-4919-8f4e-ab80aa2de852 to admin" }));
     await waitFor(() =>
       expect(setAdminProfileEnabledMock).toHaveBeenCalledWith({
         browserUid: expect.any(String),

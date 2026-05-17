@@ -83,6 +83,20 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     }
   });
 
+  router.post("/profiles/:profileId/rescan", async (req, res) => {
+    const profileId = profileIdSchema.safeParse(req.params.profileId);
+    if (!profileId.success) return res.status(400).json({ error: "Invalid profile id" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    try {
+      res.json({ profileId: profileId.data, scanStatus: scanQueue.enqueueProfileScan(profileId.data, "manual") });
+    } catch (error) {
+      if (error instanceof ProfileNotFoundError) return res.status(404).json({ error: "Profile not found" });
+      throw error;
+    }
+  });
+
   router.post("/profiles/:profileId/delete", async (req, res) => {
     const profileId = profileIdSchema.safeParse(req.params.profileId);
     if (!profileId.success) return res.status(400).json({ error: "Invalid profile id" });

@@ -1151,8 +1151,9 @@ input:-webkit-autofill:active {
 
 .admin-profile-table {
   width: 100%;
-  min-width: 1040px;
+  min-width: 1080px;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .admin-profile-table th,
@@ -1169,6 +1170,22 @@ input:-webkit-autofill:active {
   font-size: 0.62rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+}
+
+.admin-profile-table th:nth-child(1),
+.admin-profile-table td:nth-child(1) {
+  width: 170px;
+}
+
+.admin-profile-table th:nth-child(5),
+.admin-profile-table td:nth-child(5) {
+  width: 200px;
+  white-space: nowrap;
+}
+
+.admin-profile-table th:nth-child(8),
+.admin-profile-table td:nth-child(8) {
+  width: 196px;
 }
 
 .admin-profile-table td {
@@ -1190,26 +1207,74 @@ input:-webkit-autofill:active {
   white-space: nowrap;
 }
 
+.admin-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
+}
+
+.admin-sort-button:hover,
+.admin-sort-button:focus-visible {
+  color: var(--cream);
+}
+
+.admin-sort-indicator {
+  display: inline-block;
+  min-width: 1ch;
+  color: var(--muted-2) !important;
+  font-size: 0.7rem !important;
+  line-height: 1;
+}
+
+.admin-profile-identity-button {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 148px;
+  min-height: 34px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cream);
+  text-align: left;
+}
+
+.admin-profile-identity-button:hover,
+.admin-profile-identity-button:focus-visible {
+  border-color: var(--line-soft);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.admin-profile-identity-button code {
+  max-width: 100%;
+}
+
+.admin-country-flag {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0 !important;
+  color: var(--cream) !important;
+  font-size: 1rem !important;
+  line-height: 1;
+}
+
 .admin-profile-table td span:not(.badge) {
   display: block;
   margin-top: 5px;
   color: var(--muted-2);
   font-size: 0.72rem;
-}
-
-.admin-country-code {
-  display: inline-flex;
-  width: max-content;
-  min-width: 42px;
-  margin-top: 0 !important;
-  justify-content: center;
-  border-radius: 6px;
-  padding: 4px 8px;
-  border: 1px solid var(--line-soft);
-  color: var(--cream-dim) !important;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.72rem;
-  text-transform: uppercase;
 }
 
 .admin-actions {

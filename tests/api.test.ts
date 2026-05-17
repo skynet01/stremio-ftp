@@ -73,17 +73,19 @@ describe("web API setup token handling", () => {
     );
   });
 
-  it("posts admin manifest, delete, and admin toggle actions without leaking profile id into auth-only bodies", async () => {
+  it("posts admin manifest, rescan, delete, and admin toggle actions without leaking profile id into auth-only bodies", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ profileId: 7, manifestUrl: "https://addon.example.test/u/token/manifest.json", stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json" }))
+      .mockResolvedValueOnce(jsonResponse({ profileId: 7, scanStatus: { status: "queued" } }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({ profileId: 7, adminEnabled: true, adminSource: "database" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { deleteAdminProfile, issueAdminManifestToken, saveSetupToken, setAdminProfileEnabled } = await import("../src/web/api");
+    const { deleteAdminProfile, issueAdminManifestToken, rescanAdminProfile, saveSetupToken, setAdminProfileEnabled } = await import("../src/web/api");
     saveSetupToken("setup-secret-123");
     await issueAdminManifestToken({ browserUid: "admin-uid", passphrase: "passphrase", profileId: 7 });
+    await rescanAdminProfile({ browserUid: "admin-uid", passphrase: "passphrase", profileId: 7 });
     await deleteAdminProfile({ browserUid: "admin-uid", passphrase: "passphrase", profileId: 7 });
     await setAdminProfileEnabled({ browserUid: "admin-uid", passphrase: "passphrase", profileId: 7, adminEnabled: true });
 
@@ -97,7 +99,7 @@ describe("web API setup token handling", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "/api/admin/profiles/7/delete",
+      "/api/admin/profiles/7/rescan",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ browserUid: "admin-uid", passphrase: "passphrase" }),
@@ -105,6 +107,14 @@ describe("web API setup token handling", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
+      "/api/admin/profiles/7/delete",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ browserUid: "admin-uid", passphrase: "passphrase" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
       "/api/admin/profiles/7/admin",
       expect.objectContaining({
         method: "POST",

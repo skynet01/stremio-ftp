@@ -186,6 +186,23 @@ describe("admin routes", () => {
     await request(app).get(`/u/${token}/manifest.json`).expect(200);
   });
 
+  it("queues a profile rescan for a super admin", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config({ scanGlobalConcurrency: 0 }), db);
+    await createProfile(app, "admin-uid");
+    const user = await createProfile(app, "user-uid");
+
+    const response = await request(app)
+      .post(`/api/admin/profiles/${user.body.profileId}/rescan`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(response.body.profileId).toBe(user.body.profileId);
+    expect(response.body.scanStatus).toEqual(expect.objectContaining({ status: "queued", trigger: "manual" }));
+  });
+
   it("deletes a target profile", async () => {
     const db = new Database(":memory:");
     migrate(db);

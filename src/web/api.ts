@@ -248,6 +248,11 @@ export type AdminManifestTokenResponse = {
   stremioInstallUrl: string;
 };
 
+export type AdminProfileRescanResponse = {
+  profileId: number;
+  scanStatus: ScanStatus;
+};
+
 export type AdminProfileAdminResponse = {
   profileId: number;
   adminEnabled: boolean;
@@ -504,6 +509,15 @@ export async function issueAdminManifestToken(request: CreateProfileRequest & { 
     body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
   });
   return readJson<AdminManifestTokenResponse>(response);
+}
+
+export async function rescanAdminProfile(request: CreateProfileRequest & { profileId: number }): Promise<AdminProfileRescanResponse> {
+  const response = await fetch(`/api/admin/profiles/${request.profileId}/rescan`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
+  });
+  return readJson<AdminProfileRescanResponse>(response);
 }
 
 export async function deleteAdminProfile(request: CreateProfileRequest & { profileId: number }): Promise<{ ok: true }> {
