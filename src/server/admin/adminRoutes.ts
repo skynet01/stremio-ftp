@@ -2,8 +2,9 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import { countryCodeFromRequest } from "../http/requestMetadata.js";
+import type { ProfileScanStatus } from "../scanner/scanQueue.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
-import { ProfileNotFoundError, ProfileService } from "../profiles/profileService.js";
+import { ProfileNotFoundError, ProfileService, type FtpServer } from "../profiles/profileService.js";
 
 const adminAuthSchema = z.object({
   browserUid: z.string().min(8),
@@ -14,7 +15,7 @@ const setAdminSchema = adminAuthSchema.extend({
 });
 const bulkAdminSchema = adminAuthSchema.extend({
   profileIds: z.array(z.number().int().positive()).min(1).max(100),
-  action: z.enum(["delete", "rescan", "convert_to_proxy"]),
+  action: z.enum(["delete", "rescan", "cancel_scan", "convert_to_proxy"]),
 });
 const profileIdSchema = z.coerce.number().int().positive();
 
@@ -24,6 +25,10 @@ function urls(baseUrl: string, token: string) {
     manifestUrl,
     stremioInstallUrl: manifestUrl.replace(/^https?:\/\//, "stremio://"),
   };
+}
+
+function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: string | null }) {
+  return !ftpConfig.username?.trim() || !ftpConfig.password;
 }
 
 export function adminRoutes(config: AppConfig, service: ProfileService, scanQueue: ScanQueue) {
@@ -50,9 +55,9 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
 
     const list = service.listAdminProfileSummaries(config.adminBrowserUids);
     const profiles = list.profiles.map((profile) => {
-      const scanStatus = scanQueue.getProfileScanStatus(profile.id);
-      const activeScans = scanStatus.status === "running" ? 1 : 0;
-      const queuedScans = scanStatus.status === "queued" ? 1 : 0;
+      const scanStatuses = service.listFtpServers(profile.id).map((server) => scanQueue.getServerScanStatus(profile.id, server.id));
+      const activeScans = scanStatuses.filter((scanStatus) => scanStatus.status === "running").length;
+      const queuedScans = scanStatuses.filter((scanStatus) => scanStatus.status === "queued").length;
       return {
         ...profile,
         activeScans,
@@ -111,19 +116,35 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     try {
       if (parsed.data.action === "delete") {
         const deleted = profileIds.reduce((count, profileId) => count + (service.deleteProfile(profileId) ? 1 : 0), 0);
-        return res.json({ action: parsed.data.action, profileIds, deleted });
+        return res.json({ action: parsed.data.action, profileIds, deleted, summary: { profiles: profileIds.length, deleted } });
       }
 
       if (parsed.data.action === "rescan") {
-        const rescans = profileIds.map((profileId) => ({ profileId, scanStatus: scanQueue.enqueueProfileScan(profileId, "manual") }));
-        return res.json({ action: parsed.data.action, profileIds, rescans });
+        const scans = bulkScanTargets(service, profileIds).flatMap(({ profileId, servers }) =>
+          servers.map((server) => ({ profileId, serverId: server.id, serverName: server.name, scanStatus: scanQueue.enqueueProfileScan(profileId, "manual", server.id) })),
+        );
+        return res.json({ action: parsed.data.action, profileIds, scans, summary: scanSummary(profileIds, scans, skippedProfileCount(service, profileIds)) });
       }
 
+      if (parsed.data.action === "cancel_scan") {
+        const targets = bulkScanTargets(service, profileIds);
+        const pendingRetries = targets.reduce((sum, { servers }) => sum + servers.filter((server) => server.pendingScanAfter).length, 0);
+        const scans = targets.flatMap(({ profileId, servers }) =>
+          servers.map((server) => {
+            if (server.pendingScanAfter) service.clearPendingScan(profileId, server.id);
+            return { profileId, serverId: server.id, serverName: server.name, scanStatus: scanQueue.cancelServerScan(profileId, server.id) };
+          }),
+        );
+        return res.json({ action: parsed.data.action, profileIds, scans, summary: scanSummary(profileIds, scans, skippedProfileCount(service, profileIds), pendingRetries) });
+      }
+
+      let serversConverted = 0;
       const converted = profileIds.reduce((count, profileId) => {
-        service.setProfileAndServersStreamDeliveryMode(profileId, "proxy");
+        const result = service.setProfileAndServersStreamDeliveryMode(profileId, "proxy");
+        serversConverted += result.serversUpdated;
         return count + 1;
       }, 0);
-      return res.json({ action: parsed.data.action, profileIds, converted });
+      return res.json({ action: parsed.data.action, profileIds, converted, summary: { profiles: profileIds.length, converted, servers: serversConverted } });
     } catch (error) {
       if (error instanceof ProfileNotFoundError) return res.status(404).json({ error: "Profile not found" });
       throw error;
@@ -158,4 +179,37 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   });
 
   return router;
+}
+
+function bulkScanTargets(service: ProfileService, profileIds: number[]) {
+  return profileIds.map((profileId) => ({
+    profileId,
+    servers: configuredFtpServers(service, profileId),
+  }));
+}
+
+function configuredFtpServers(service: ProfileService, profileId: number): FtpServer[] {
+  return service.listFtpServers(profileId).filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig));
+}
+
+function skippedProfileCount(service: ProfileService, profileIds: number[]) {
+  return bulkScanTargets(service, profileIds).filter(({ servers }) => servers.length === 0).length;
+}
+
+function scanSummary(
+  profileIds: number[],
+  scans: Array<{ scanStatus: ProfileScanStatus }>,
+  skippedProfiles: number,
+  stoppedPendingRetries = 0,
+) {
+  return {
+    profiles: profileIds.length,
+    servers: scans.length,
+    queued: scans.filter(({ scanStatus }) => scanStatus.status === "queued").length,
+    running: scans.filter(({ scanStatus }) => scanStatus.status === "running" && scanStatus.message !== "Halting scan.").length,
+    halting: scans.filter(({ scanStatus }) => scanStatus.status === "running" && scanStatus.message === "Halting scan.").length,
+    cancelled: stoppedPendingRetries + scans.filter(({ scanStatus }) => scanStatus.status === "cancelled").length,
+    skipped: skippedProfiles + scans.filter(({ scanStatus }) => scanStatus.status === "skipped").length,
+    failed: scans.filter(({ scanStatus }) => scanStatus.status === "failed").length,
+  };
 }

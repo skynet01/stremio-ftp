@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Link2, RefreshCw, Search, Shield, ShieldCheck, Trash2 } from "lucide-react";
+import { CircleStop, Copy, Link2, RefreshCw, Search, Shield, ShieldCheck, Trash2, X } from "lucide-react";
 import {
   bulkAdminProfiles,
   deleteAdminProfile,
@@ -7,6 +7,8 @@ import {
   loadAdminProfiles,
   rescanAdminProfile,
   setAdminProfileEnabled,
+  type AdminBulkProfileAction,
+  type AdminBulkProfilesResponse,
   type AdminProfileListResponse,
   type AdminProfileSummary,
 } from "../api.js";
@@ -29,6 +31,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [loading, setLoading] = useState(false);
   const [busyProfileId, setBusyProfileId] = useState<number | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<AdminBulkProfilesResponse | null>(null);
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<number>>(() => new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [sort, setSort] = useState<AdminSort | null>(null);
@@ -144,8 +147,8 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     setMessage(`Recovery UID copied for ${profile.browserUid}.`);
   }
 
-  async function runBulkAction(action: "delete" | "rescan" | "convert_to_proxy") {
-    const profileIds = profiles.filter((profile) => selectedProfileIds.has(profile.id)).map((profile) => profile.id);
+  async function runBulkAction(action: AdminBulkProfileAction) {
+    const profileIds = selectedProfiles.map((profile) => profile.id);
     if (!profileIds.length) return;
     if (action === "delete") {
       const confirmed = window.confirm(`Delete ${profileIds.length} selected profiles? This removes their FTP servers, indexed files, and manifest URLs.`);
@@ -154,9 +157,10 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
 
     setBulkBusy(true);
     try {
-      await bulkAdminProfiles({ browserUid, passphrase, profileIds, action });
+      const result = await bulkAdminProfiles({ browserUid, passphrase, profileIds, action });
+      setBulkResult(result);
       if (action === "delete") setSelectedProfileIds(new Set());
-      setMessage(bulkActionMessage(action, profileIds.length));
+      setMessage(bulkActionMessage(result, profileIds.length));
       await refreshProfiles();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to run bulk admin action.");
@@ -207,8 +211,10 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       )
     : profiles;
   const visibleProfiles = sort ? [...filteredProfiles].sort((left, right) => compareProfiles(left, right, sort)) : filteredProfiles;
+  const selectedProfiles = profiles.filter((profile) => selectedProfileIds.has(profile.id));
   const visibleSelectedCount = visibleProfiles.filter((profile) => selectedProfileIds.has(profile.id)).length;
-  const selectedCount = profiles.filter((profile) => selectedProfileIds.has(profile.id)).length;
+  const selectedCount = selectedProfiles.length;
+  const selectedHasScanActivity = selectedProfiles.some((profile) => profile.activeScans > 0 || profile.pendingScans > 0);
   const allVisibleSelected = visibleProfiles.length > 0 && visibleSelectedCount === visibleProfiles.length;
 
   return (
@@ -252,8 +258,14 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
           {selectedCount ? (
             <div className="admin-bulk-actions" aria-label="Bulk profile actions">
               <span>{selectedCount} selected</span>
-              <button type="button" className="secondary-button" disabled={bulkBusy} onClick={() => void runBulkAction("rescan")}>
-                Rescan selected
+              <button
+                type="button"
+                className={`secondary-button ${selectedHasScanActivity ? "danger-button" : ""}`}
+                disabled={bulkBusy}
+                onClick={() => void runBulkAction(selectedHasScanActivity ? "cancel_scan" : "rescan")}
+              >
+                {selectedHasScanActivity ? <CircleStop size={15} aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
+                {selectedHasScanActivity ? "Halt selected scans" : "Rescan selected"}
               </button>
               <button type="button" className="secondary-button" disabled={bulkBusy} onClick={() => void runBulkAction("convert_to_proxy")}>
                 Convert selected to proxy
@@ -389,6 +401,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
           </div>
         </>
       ) : null}
+      {bulkResult ? <BulkActionDialog result={bulkResult} profiles={profiles} onClose={() => setBulkResult(null)} /> : null}
     </section>
   );
 }
@@ -404,10 +417,81 @@ function countryFlag(countryCode: string | null) {
   return String.fromCodePoint(...[...code].map((character) => character.charCodeAt(0) + offset));
 }
 
-function bulkActionMessage(action: "delete" | "rescan" | "convert_to_proxy", count: number) {
-  if (action === "delete") return `Deleted ${count} selected profiles.`;
-  if (action === "rescan") return `Queued rescans for ${count} selected profiles.`;
-  return `Converted ${count} selected profiles and their FTP servers to proxy streaming.`;
+function bulkActionMessage(result: AdminBulkProfilesResponse, count: number) {
+  if (result.action === "delete") return `Deleted ${result.summary?.deleted ?? result.deleted ?? count} selected profiles.`;
+  if (result.action === "rescan") return `Queued ${result.summary?.queued ?? 0} scans across ${count} selected profiles.`;
+  if (result.action === "cancel_scan") return `Halted ${result.summary?.cancelled ?? result.summary?.halting ?? 0} scans across ${count} selected profiles.`;
+  return `Converted ${result.summary?.converted ?? result.converted ?? count} selected profiles and their FTP servers to proxy streaming.`;
+}
+
+function BulkActionDialog({
+  result,
+  profiles,
+  onClose,
+}: {
+  result: AdminBulkProfilesResponse;
+  profiles: AdminProfileSummary[];
+  onClose: () => void;
+}) {
+  const stats = bulkResultStats(result);
+  const profileNameById = new Map(profiles.map((profile) => [profile.id, profile.browserUid]));
+  return (
+    <div className="admin-bulk-dialog-backdrop">
+      <div className="admin-bulk-dialog" role="dialog" aria-modal={true} aria-labelledby="admin-bulk-dialog-heading">
+        <div className="admin-bulk-dialog-header">
+          <div>
+            <span className="section-label">{bulkActionLabel(result.action)}</span>
+            <h3 id="admin-bulk-dialog-heading">Bulk action status</h3>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close bulk action status" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="admin-bulk-result-grid">
+          {stats.map((stat) => (
+            <div key={stat.label}>{stat.value} {stat.label}</div>
+          ))}
+        </div>
+        {result.scans?.length ? (
+          <ul className="admin-bulk-result-list">
+            {result.scans.slice(0, 12).map((scan) => (
+              <li key={`${scan.profileId}-${scan.serverId}`}>
+                <span>{truncateUid(profileNameById.get(scan.profileId) ?? String(scan.profileId))}</span>
+                <span>{scan.serverName}</span>
+                <StatusBadge tone={scan.scanStatus.status === "failed" ? "red" : scan.scanStatus.status === "queued" ? "amber" : "green"}>
+                  {scan.scanStatus.status}
+                </StatusBadge>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function bulkActionLabel(action: AdminBulkProfileAction) {
+  if (action === "delete") return "Delete";
+  if (action === "rescan") return "Rescan";
+  if (action === "cancel_scan") return "Halt scans";
+  return "Proxy conversion";
+}
+
+function bulkResultStats(result: AdminBulkProfilesResponse) {
+  const summary = result.summary;
+  const stats = [
+    { label: "profiles", value: summary?.profiles ?? result.profileIds.length },
+    { label: "servers", value: summary?.servers ?? 0 },
+    { label: "queued", value: summary?.queued ?? 0 },
+    { label: "running", value: summary?.running ?? 0 },
+    { label: "halting", value: summary?.halting ?? 0 },
+    { label: "cancelled", value: summary?.cancelled ?? 0 },
+    { label: "skipped", value: summary?.skipped ?? 0 },
+    { label: "failed", value: summary?.failed ?? 0 },
+    { label: "converted", value: summary?.converted ?? result.converted ?? 0 },
+    { label: "deleted", value: summary?.deleted ?? result.deleted ?? 0 },
+  ];
+  return stats.filter((stat) => stat.value > 0 || stat.label === "profiles");
 }
 
 function SortHeader({

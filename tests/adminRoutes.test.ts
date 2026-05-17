@@ -49,6 +49,60 @@ async function createProfile(app: ReturnType<typeof createApp>, browserUid: stri
     .expect(201);
 }
 
+async function saveDefaultFtp(app: ReturnType<typeof createApp>, browserUid: string, host = "ftp.example.test") {
+  return request(app)
+    .post("/api/profile/ftp")
+    .set("x-setup-token", "setup-secret-123")
+    .send({
+      browserUid,
+      passphrase: "passphrase",
+      ftpConfig: {
+        host,
+        port: 21,
+        username: "user",
+        password: "secret",
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/"],
+      },
+    })
+    .expect(200);
+}
+
+async function createAndSaveFtpServer(app: ReturnType<typeof createApp>, browserUid: string, name: string, host: string) {
+  const created = await request(app)
+    .post("/api/profile/servers")
+    .set("x-setup-token", "setup-secret-123")
+    .send({ browserUid, passphrase: "passphrase" })
+    .expect(201);
+
+  return request(app)
+    .post("/api/profile/servers/save")
+    .set("x-setup-token", "setup-secret-123")
+    .send({
+      browserUid,
+      passphrase: "passphrase",
+      serverId: created.body.server.id,
+      name,
+      ftpConfig: {
+        host,
+        port: 21,
+        username: "user",
+        password: "secret",
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/"],
+      },
+      customization: {
+        catalogEnabled: false,
+        catalogContentTypes: { movies: true, series: true, anime: false },
+        libraryLayout: "auto",
+        streamDeliveryMode: "proxy",
+      },
+    })
+    .expect(200);
+}
+
 describe("admin routes", () => {
   it("requires setup token and admin profile credentials", async () => {
     const db = new Database(":memory:");
@@ -210,6 +264,8 @@ describe("admin routes", () => {
     await createProfile(app, "admin-uid");
     const first = await createProfile(app, "first-user-uid");
     const second = await createProfile(app, "second-user-uid");
+    await saveDefaultFtp(app, "first-user-uid", "first.example.test");
+    await saveDefaultFtp(app, "second-user-uid", "second.example.test");
 
     db.prepare("update profiles set stream_delivery_mode = 'direct' where id in (?, ?)").run(first.body.profileId, second.body.profileId);
     db.prepare("update profile_ftp_servers set stream_delivery_mode = 'direct' where profile_id in (?, ?)").run(first.body.profileId, second.body.profileId);
@@ -219,7 +275,12 @@ describe("admin routes", () => {
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [first.body.profileId, second.body.profileId], action: "convert_to_proxy" })
       .expect(200);
-    expect(converted.body).toEqual({ action: "convert_to_proxy", profileIds: [first.body.profileId, second.body.profileId], converted: 2 });
+    expect(converted.body).toMatchObject({
+      action: "convert_to_proxy",
+      profileIds: [first.body.profileId, second.body.profileId],
+      converted: 2,
+      summary: { profiles: 2, servers: 2, converted: 2 },
+    });
     expect(
       db.prepare("select count(*) as count from profiles where id in (?, ?) and stream_delivery_mode = 'proxy'").get(first.body.profileId, second.body.profileId),
     ).toEqual({ count: 2 });
@@ -232,17 +293,76 @@ describe("admin routes", () => {
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [first.body.profileId, second.body.profileId], action: "rescan" })
       .expect(200);
-    expect(rescanned.body.rescans).toEqual([
-      expect.objectContaining({ profileId: first.body.profileId, scanStatus: expect.objectContaining({ status: "queued" }) }),
-      expect.objectContaining({ profileId: second.body.profileId, scanStatus: expect.objectContaining({ status: "queued" }) }),
-    ]);
+    expect(rescanned.body.summary).toMatchObject({ profiles: 2, servers: 2, queued: 2, skipped: 0 });
 
     const deleted = await request(app)
       .post("/api/admin/profiles/bulk")
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [first.body.profileId, second.body.profileId], action: "delete" })
       .expect(200);
-    expect(deleted.body).toEqual({ action: "delete", profileIds: [first.body.profileId, second.body.profileId], deleted: 2 });
+    expect(deleted.body).toMatchObject({
+      action: "delete",
+      profileIds: [first.body.profileId, second.body.profileId],
+      deleted: 2,
+      summary: { profiles: 2, deleted: 2 },
+    });
+  });
+
+  it("bulk rescans and cancels every configured FTP server in selected profiles", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config({ scanGlobalConcurrency: 0 }), db);
+    await createProfile(app, "admin-uid");
+    const user = await createProfile(app, "user-uid");
+    await saveDefaultFtp(app, "user-uid", "main.example.test");
+    await createAndSaveFtpServer(app, "user-uid", "Mirror", "mirror.example.test");
+
+    const rescanned = await request(app)
+      .post("/api/admin/profiles/bulk")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [user.body.profileId], action: "rescan" })
+      .expect(200);
+    expect(rescanned.body.summary).toMatchObject({ profiles: 1, servers: 2, queued: 2, skipped: 0 });
+    expect(rescanned.body.scans).toEqual([
+      expect.objectContaining({ profileId: user.body.profileId, scanStatus: expect.objectContaining({ status: "queued" }) }),
+      expect.objectContaining({ profileId: user.body.profileId, scanStatus: expect.objectContaining({ status: "queued" }) }),
+    ]);
+
+    const listed = await request(app)
+      .post("/api/admin/profiles")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(listed.body.profiles).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: user.body.profileId, activeScans: 0, pendingScans: 2 })]),
+    );
+
+    const cancelled = await request(app)
+      .post("/api/admin/profiles/bulk")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [user.body.profileId], action: "cancel_scan" })
+      .expect(200);
+    expect(cancelled.body.summary).toMatchObject({ profiles: 1, servers: 2, cancelled: 2 });
+  });
+
+  it("bulk cancel clears scheduled retry scans", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config({ scanGlobalConcurrency: 0 }), db);
+    await createProfile(app, "admin-uid");
+    const user = await createProfile(app, "user-uid");
+    await saveDefaultFtp(app, "user-uid", "main.example.test");
+    const serverId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(user.body.profileId) as number;
+    db.prepare("update profile_ftp_servers set pending_scan_after = ? where id = ?").run("2026-05-17T12:00:00.000Z", serverId);
+
+    const cancelled = await request(app)
+      .post("/api/admin/profiles/bulk")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileIds: [user.body.profileId], action: "cancel_scan" })
+      .expect(200);
+
+    expect(cancelled.body.summary).toMatchObject({ profiles: 1, servers: 1, cancelled: 1 });
+    expect(db.prepare("select pending_scan_after from profile_ftp_servers where id = ?").pluck().get(serverId)).toBeNull();
   });
 
   it("deletes a target profile", async () => {

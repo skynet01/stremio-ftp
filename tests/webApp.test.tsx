@@ -1470,9 +1470,22 @@ describe("App", () => {
       ],
     });
     bulkAdminProfilesMock
-      .mockResolvedValueOnce({ action: "rescan", profileIds: [2, 3], rescans: [] })
-      .mockResolvedValueOnce({ action: "convert_to_proxy", profileIds: [2, 3], converted: 2 })
-      .mockResolvedValueOnce({ action: "delete", profileIds: [2, 3], deleted: 2 });
+      .mockResolvedValueOnce({
+        action: "rescan",
+        profileIds: [2, 3],
+        scans: [
+          { profileId: 2, serverId: 20, serverName: "Main", scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } },
+          { profileId: 3, serverId: 30, serverName: "Main", scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } },
+        ],
+        summary: { profiles: 2, servers: 2, queued: 2, running: 0, halting: 0, cancelled: 0, skipped: 0, failed: 0 },
+      })
+      .mockResolvedValueOnce({
+        action: "convert_to_proxy",
+        profileIds: [2, 3],
+        converted: 2,
+        summary: { profiles: 2, servers: 2, converted: 2 },
+      })
+      .mockResolvedValueOnce({ action: "delete", profileIds: [2, 3], deleted: 2, summary: { profiles: 2, deleted: 2 } });
     createProfileMock.mockResolvedValue({
       profileId: 1,
       recoveryUid: "admin-uid",
@@ -1500,6 +1513,8 @@ describe("App", () => {
         action: "rescan",
       }),
     );
+    expect(within(await screen.findByRole("dialog", { name: "Bulk action status" })).getByText("2 queued")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close bulk action status" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Convert selected to proxy" }));
     await waitFor(() =>
@@ -1510,6 +1525,8 @@ describe("App", () => {
         action: "convert_to_proxy",
       }),
     );
+    expect(within(await screen.findByRole("dialog", { name: "Bulk action status" })).getByText("2 converted")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close bulk action status" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
     await waitFor(() =>
@@ -1521,5 +1538,74 @@ describe("App", () => {
       }),
     );
     expect(confirmSpy).toHaveBeenCalledWith("Delete 2 selected profiles? This removes their FTP servers, indexed files, and manifest URLs.");
+  });
+
+  it("halts selected admin scans when selected profiles are already scanning", async () => {
+    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
+    loadAdminProfilesMock.mockResolvedValue({
+      summary: {
+        profiles: 1,
+        configuredProfiles: 1,
+        ftpServers: 2,
+        configuredFtpServers: 2,
+        indexedItems: 0,
+        activeScans: 1,
+        pendingScans: 1,
+      },
+      profiles: [
+        {
+          id: 2,
+          browserUid: "first-user-uid",
+          createdAt: "2026-05-16T00:00:00.000Z",
+          updatedAt: "2026-05-16T00:00:00.000Z",
+          lastUnlockedAt: null,
+          ftpServers: 2,
+          configuredFtpServers: 2,
+          indexedItems: 0,
+          lastScanAt: null,
+          activeScans: 1,
+          pendingScans: 1,
+          manifestUrl: null,
+          stremioInstallUrl: null,
+          lastCountryCode: "CA",
+          adminEnabled: false,
+          adminSource: null,
+        },
+      ],
+    });
+    bulkAdminProfilesMock.mockResolvedValueOnce({
+      action: "cancel_scan",
+      profileIds: [2],
+      scans: [
+        { profileId: 2, serverId: 20, serverName: "Main", scanStatus: { ...idleScanStatus, status: "cancelled", trigger: "manual", message: "Scan halted." } },
+        { profileId: 2, serverId: 21, serverName: "Mirror", scanStatus: { ...idleScanStatus, status: "cancelled", trigger: "manual", message: "Scan halted." } },
+      ],
+      summary: { profiles: 1, servers: 2, queued: 0, running: 0, halting: 0, cancelled: 2, skipped: 0, failed: 0 },
+    });
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "admin-uid",
+      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    await screen.findByRole("heading", { name: "Admin dashboard" });
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select first-user-uid" }));
+    fireEvent.click(screen.getByRole("button", { name: "Halt selected scans" }));
+
+    await waitFor(() =>
+      expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
+        browserUid: expect.any(String),
+        passphrase: "passphrase",
+        profileIds: [2],
+        action: "cancel_scan",
+      }),
+    );
+    expect(within(await screen.findByRole("dialog", { name: "Bulk action status" })).getByText("2 cancelled")).toBeTruthy();
   });
 });

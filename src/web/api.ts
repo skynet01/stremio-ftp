@@ -253,17 +253,35 @@ export type AdminProfileRescanResponse = {
   scanStatus: ScanStatus;
 };
 
-export type AdminBulkProfileAction = "delete" | "rescan" | "convert_to_proxy";
+export type AdminBulkProfileAction = "delete" | "rescan" | "cancel_scan" | "convert_to_proxy";
+
+export type AdminBulkProfileSummary = {
+  profiles: number;
+  servers?: number;
+  queued?: number;
+  running?: number;
+  halting?: number;
+  cancelled?: number;
+  skipped?: number;
+  failed?: number;
+  converted?: number;
+  deleted?: number;
+};
+
+export type AdminBulkProfileScanResult = {
+  profileId: number;
+  serverId: number;
+  serverName: string;
+  scanStatus: ScanStatus;
+};
 
 export type AdminBulkProfilesResponse = {
   action: AdminBulkProfileAction;
   profileIds: number[];
+  summary?: AdminBulkProfileSummary;
   deleted?: number;
   converted?: number;
-  rescans?: Array<{
-    profileId: number;
-    scanStatus: ScanStatus;
-  }>;
+  scans?: AdminBulkProfileScanResult[];
 };
 
 export type AdminProfileAdminResponse = {
