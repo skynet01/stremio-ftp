@@ -17,4 +17,10 @@ describe("admin dashboard table layout", () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.admin-profile-table tr\s*{[^}]*display:\s*grid;/);
     expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.admin-profile-table td::before\s*{[^}]*content:\s*attr\(data-label\);/);
   });
+
+  it("keeps admin status pills content-sized on mobile", () => {
+    const css = readFileSync("src/web/styles.css", "utf8");
+
+    expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.admin-profile-table \.badge\s*{[^}]*justify-self:\s*start;[^}]*width:\s*max-content;/);
+  });
 });

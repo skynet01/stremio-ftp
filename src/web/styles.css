@@ -2243,6 +2243,12 @@ input:-webkit-autofill:active {
     width: min(100%, 168px);
   }
 
+  .admin-profile-table .badge {
+    justify-self: start;
+    width: max-content;
+    max-width: 100%;
+  }
+
   .admin-actions {
     flex-wrap: wrap;
     justify-content: flex-start;
