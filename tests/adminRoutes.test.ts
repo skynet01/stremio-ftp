@@ -5,7 +5,7 @@ import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
 
-function config(): AppConfig {
+function config(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     baseUrl: "https://addon.example.test",
     configDir: "/tmp",
@@ -33,8 +33,10 @@ function config(): AppConfig {
     maxFtpServersPerProfile: 0,
     proxyStreamsDisabled: false,
     adminBrowserUids: new Set(["admin-uid"]),
+    superAdminBrowserUids: new Set(["admin-uid"]),
     emptyProfileCleanupDays: 0,
     emptyProfileCleanupIntervalMs: 60000,
+    ...overrides,
   };
 }
 
@@ -66,6 +68,26 @@ describe("admin routes", () => {
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "admin-uid", passphrase: "wrong-passphrase" })
       .expect(401);
+  });
+
+  it("requires super admin env access instead of admin-enabled access for admin APIs", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config({ adminBrowserUids: new Set(["admin-uid"]), superAdminBrowserUids: new Set(["super-admin-uid"]) }), db);
+    await createProfile(app, "admin-uid");
+    await createProfile(app, "super-admin-uid");
+
+    await request(app)
+      .post("/api/admin/profiles")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(403);
+
+    await request(app)
+      .post("/api/admin/profiles")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "super-admin-uid", passphrase: "passphrase" })
+      .expect(200);
   });
 
   it("lists profile summaries for an admin", async () => {
@@ -112,7 +134,7 @@ describe("admin routes", () => {
     );
   });
 
-  it("promotes a profile to database admin and allows it to load admin summaries", async () => {
+  it("promotes a profile to database admin without granting admin API access", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const app = createApp(config(), db);
@@ -127,38 +149,22 @@ describe("admin routes", () => {
 
     expect(promoted.body).toEqual({ profileId: user.body.profileId, adminEnabled: true, adminSource: "database" });
 
-    const response = await request(app)
+    await request(app)
       .post("/api/admin/profiles")
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "user-uid", passphrase: "passphrase" })
+      .expect(403);
+
+    const response = await request(app)
+      .post("/api/admin/profiles")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
       .expect(200);
     expect(response.body.profiles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ browserUid: "user-uid", adminEnabled: true, adminSource: "database" }),
       ]),
     );
-  });
-
-  it("prevents database-only admins from demoting themselves", async () => {
-    const db = new Database(":memory:");
-    migrate(db);
-    const app = createApp(config(), db);
-    await createProfile(app, "admin-uid");
-    const user = await createProfile(app, "user-uid");
-
-    await request(app)
-      .post(`/api/admin/profiles/${user.body.profileId}/admin`)
-      .set("x-setup-token", "setup-secret-123")
-      .send({ browserUid: "admin-uid", passphrase: "passphrase", adminEnabled: true })
-      .expect(200);
-
-    const response = await request(app)
-      .post(`/api/admin/profiles/${user.body.profileId}/admin`)
-      .set("x-setup-token", "setup-secret-123")
-      .send({ browserUid: "user-uid", passphrase: "passphrase", adminEnabled: false })
-      .expect(400);
-
-    expect(response.body).toEqual({ error: "Cannot remove your only admin access" });
   });
 
   it("issues a fresh manifest URL and keeps it usable", async () => {

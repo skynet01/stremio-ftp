@@ -23,6 +23,8 @@ function config(): AppConfig {
     profileRateLimitWindowMs: 60000,
     profileRateLimitMax: 30,
     tmdbApiKey: null,
+    adminBrowserUids: new Set(),
+    superAdminBrowserUids: new Set(),
     scanGlobalConcurrency: 1,
     scanQueueMax: 10,
     scanCooldownMs: 60000,
@@ -825,6 +827,25 @@ describe("profile routes", () => {
       .send({ browserUid: "browser-uid", passphrase: "passphrase", serverId: onlyServerId })
       .expect(400);
     expect(rejected.body).toEqual({ error: "At least one FTP server is required" });
+  });
+
+  it("lets database admins bypass the FTP server cap", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), maxFtpServersPerProfile: 1 }, db);
+
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    db.prepare("update profiles set admin_enabled = 1 where browser_uid = ?").run("browser-uid");
+
+    await request(app)
+      .post("/api/profile/servers")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
   });
 
   it("rejects profile APIs without a setup token by default", async () => {

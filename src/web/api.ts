@@ -207,6 +207,7 @@ export type SetupStatusResponse = {
   maxFtpServersPerProfile?: number;
   proxyStreamsDisabled?: boolean;
   isAdmin?: boolean;
+  isSuperAdmin?: boolean;
 };
 
 export type AdminProfileSummary = {

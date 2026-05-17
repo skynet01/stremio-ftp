@@ -1260,7 +1260,7 @@ describe("App", () => {
   });
 
   it("hides the admin dashboard for non-admin profiles", async () => {
-    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false });
+    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: false });
     createProfileMock.mockResolvedValue({
       profileId: 1,
       recoveryUid: "browser-uid",
@@ -1278,8 +1278,27 @@ describe("App", () => {
     expect(loadAdminProfilesMock).not.toHaveBeenCalled();
   });
 
-  it("shows admin profile summaries for admin profiles", async () => {
-    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: true });
+  it("hides the admin dashboard for admin profiles that are not super admins", async () => {
+    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: true, isSuperAdmin: false });
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "admin-uid",
+      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("button", { name: "Log out" });
+
+    expect(screen.queryByRole("heading", { name: "Admin dashboard" })).toBeNull();
+    expect(loadAdminProfilesMock).not.toHaveBeenCalled();
+  });
+
+  it("shows admin profile summaries for super admin profiles", async () => {
+    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
     loadAdminProfilesMock.mockResolvedValue({
       summary: {
         profiles: 2,

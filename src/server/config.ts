@@ -25,6 +25,7 @@ export type AppConfig = {
   maxFtpServersPerProfile: number;
   proxyStreamsDisabled: boolean;
   adminBrowserUids: ReadonlySet<string>;
+  superAdminBrowserUids: ReadonlySet<string>;
   emptyProfileCleanupDays: number;
   emptyProfileCleanupIntervalMs: number;
 };
@@ -63,6 +64,15 @@ function booleanValue(env: Record<string, string | undefined>, key: string, fall
   if (raw === "true") return true;
   if (raw === "false") return false;
   throw new Error(`${key} must be true or false`);
+}
+
+function uidSetValue(env: Record<string, string | undefined>, key: string) {
+  return new Set(
+    (env[key] ?? "")
+      .split(/[,\s]+/)
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env): AppConfig {
@@ -105,12 +115,8 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     scanTransientRetryDelayMs: numberValue(env, "SCAN_TRANSIENT_RETRY_DELAY_MS", 300000),
     maxFtpServersPerProfile: nonNegativeNumberValue(env, "MAX_FTP_SERVERS_PER_PROFILE", 0),
     proxyStreamsDisabled: booleanValue(env, "DISABLE_PROXY_STREAMS", false),
-    adminBrowserUids: new Set(
-      (env.ADMIN_BROWSER_UIDS ?? "")
-        .split(/[,\s]+/)
-        .map((value) => value.trim())
-        .filter(Boolean),
-    ),
+    adminBrowserUids: uidSetValue(env, "ADMIN_BROWSER_UIDS"),
+    superAdminBrowserUids: uidSetValue(env, "SUPER_ADMIN_BROWSER_UIDS"),
     emptyProfileCleanupDays: nonNegativeNumberValue(env, "EMPTY_PROFILE_CLEANUP_DAYS", 7),
     emptyProfileCleanupIntervalMs: numberValue(env, "EMPTY_PROFILE_CLEANUP_INTERVAL_MS", 7 * 24 * 60 * 60 * 1000),
   };

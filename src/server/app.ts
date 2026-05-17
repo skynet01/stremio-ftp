@@ -74,11 +74,13 @@ export function createApp(
   app.get("/api/setup", (req, res) => {
     const browserUid = (req.query.browserUid ?? "").toString();
     const isAdmin = Boolean(browserUid) && profileService.isAdminBrowserUid(browserUid, config.adminBrowserUids);
+    const isSuperAdmin = Boolean(browserUid) && config.superAdminBrowserUids.has(browserUid);
     res.json({
       setupTokenRequired: Boolean(config.setupToken) || !config.allowPublicProfileApi,
       maxFtpServersPerProfile: isAdmin ? 0 : config.maxFtpServersPerProfile,
       proxyStreamsDisabled: isAdmin ? false : config.proxyStreamsDisabled,
       isAdmin,
+      isSuperAdmin,
     });
   });
   app.get("/api/setup/validate", requireSetupToken(config), (_req, res) => {

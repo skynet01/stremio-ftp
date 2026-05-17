@@ -32,10 +32,12 @@ Add two columns to `profiles`:
 
 The app updates `last_country_code` during profile create/unlock and admin authorization when a two-letter country code is present in `cf-ipcountry`; otherwise it keeps the previous value. `XX`, empty strings, and invalid values are stored as null only when creating a new profile without a known country.
 
-Admin authorization succeeds when either:
+Restriction-bypass admin status succeeds when either:
 
 - `browserUid` is in `config.adminBrowserUids`, or
 - the matching profile has `admin_enabled = 1`.
+
+Admin dashboard/API authorization is separate and requires `browserUid` to be listed in `SUPER_ADMIN_BROWSER_UIDS`. Super-admin access is env-only and is not exposed as a dashboard toggle.
 
 Admin list rows add `adminEnabled`, `adminSource`, and `lastCountryCode`.
 
@@ -63,7 +65,7 @@ Response:
 }
 ```
 
-The route refuses to demote the currently authenticated admin if that admin is not also listed in `ADMIN_BROWSER_UIDS`.
+Only super-admin profiles may call this route. The route toggles restriction-bypass admin access, not super-admin dashboard access.
 
 ## UI Design
 
@@ -88,9 +90,8 @@ Automated tests cover:
 
 - migrations add the new columns,
 - `cf-ipcountry` is captured on create/unlock,
-- DB-promoted profiles can call admin APIs,
+- DB-promoted profiles can bypass profile restrictions but cannot call admin APIs unless they are also listed in `SUPER_ADMIN_BROWSER_UIDS`,
 - admin toggle endpoint promotes and demotes a target profile,
-- self-demotion is blocked when it would remove the current admin's only admin path,
 - API client posts the admin toggle body correctly,
 - UI filters profiles by UID/country/admin state,
 - UI calls the admin toggle endpoint and updates the row.
@@ -98,4 +99,4 @@ Automated tests cover:
 ## Risks
 
 - Header-derived country is only as reliable as the reverse proxy. In production Cloudflare sets it; local dev may show `Unknown`.
-- DB admin promotion increases sensitivity of the SQLite database. Admin API remains guarded by setup token plus a valid admin profile passphrase.
+- DB admin promotion increases sensitivity of the SQLite database because it bypasses profile restrictions. Admin API remains guarded by setup token, valid profile passphrase, and `SUPER_ADMIN_BROWSER_UIDS`.

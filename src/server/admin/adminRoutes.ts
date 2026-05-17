@@ -34,7 +34,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     } catch {
       return { ok: false as const, status: 401, error: "Invalid passphrase" };
     }
-    if (!service.isAdminBrowserUid(parsed.data.browserUid, config.adminBrowserUids)) {
+    if (!config.superAdminBrowserUids.has(parsed.data.browserUid)) {
       return { ok: false as const, status: 403, error: "Admin access required" };
     }
     return { ok: true as const, profileId: unlocked.profileId, browserUid: parsed.data.browserUid };
@@ -101,9 +101,6 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     if (!parsed.success) return res.status(400).json({ error: "Invalid admin request" });
     const auth = await authorize(req);
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-    if (auth.profileId === profileId.data && !config.adminBrowserUids.has(auth.browserUid) && !parsed.data.adminEnabled) {
-      return res.status(400).json({ error: "Cannot remove your only admin access" });
-    }
 
     try {
       res.json(service.setProfileAdminEnabled(profileId.data, parsed.data.adminEnabled, config.adminBrowserUids));

@@ -175,4 +175,57 @@ describe("app health", () => {
 
     expect(response.body).toEqual({ ok: true });
   });
+
+  it("separates admin restrictions from super admin dashboard access", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const config = {
+      ...loadMinimalConfig(),
+      adminBrowserUids: new Set(["admin-uid"]),
+      superAdminBrowserUids: new Set(["super-admin-uid"]),
+      maxFtpServersPerProfile: 2,
+      proxyStreamsDisabled: true,
+    };
+    const app = createApp(config, db);
+
+    const adminResponse = await request(app).get("/api/setup").query({ browserUid: "admin-uid" }).expect(200);
+    expect(adminResponse.body).toEqual(
+      expect.objectContaining({
+        maxFtpServersPerProfile: 0,
+        proxyStreamsDisabled: false,
+        isAdmin: true,
+        isSuperAdmin: false,
+      }),
+    );
+
+    const superAdminResponse = await request(app).get("/api/setup").query({ browserUid: "super-admin-uid" }).expect(200);
+    expect(superAdminResponse.body).toEqual(
+      expect.objectContaining({
+        maxFtpServersPerProfile: 2,
+        proxyStreamsDisabled: true,
+        isAdmin: false,
+        isSuperAdmin: true,
+      }),
+    );
+  });
 });
+
+function loadMinimalConfig(): AppConfig {
+  return {
+    baseUrl: "https://addon.example.test",
+    configDir: "/tmp",
+    sqlitePath: ":memory:",
+    encryptionKey: "0123456789abcdef0123456789abcdef",
+    setupToken: "setup-secret-123",
+    allowPublicProfileApi: false,
+    port: 7000,
+    logLevel: "error",
+    crawlerConcurrency: 2,
+    ftpTimeoutMs: 15000,
+    ftpMaxConnections: 4,
+    maxOnDemandSearchMs: 4500,
+    profileRateLimitWindowMs: 600000,
+    profileRateLimitMax: 30,
+    tmdbApiKey: null,
+  };
+}

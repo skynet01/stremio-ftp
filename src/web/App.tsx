@@ -341,7 +341,7 @@ export function App() {
   const [changelogEntries, setChangelogEntries] = useState<ChangelogEntry[]>(APP_CHANGELOG);
   const [maxFtpServersPerProfile, setMaxFtpServersPerProfile] = useState(0);
   const [proxyStreamsDisabled, setProxyStreamsDisabled] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [importedSettings, setImportedSettings] = useState<ImportSummary | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [exportStripCredentials, setExportStripCredentials] = useState(true);
@@ -359,11 +359,11 @@ export function App() {
       .then((status) => {
         if (typeof status.maxFtpServersPerProfile === "number") setMaxFtpServersPerProfile(status.maxFtpServersPerProfile);
         if (typeof status.proxyStreamsDisabled === "boolean") setProxyStreamsDisabled(status.proxyStreamsDisabled);
-        setIsAdmin(Boolean(status.isAdmin));
+        setIsSuperAdmin(Boolean(status.isSuperAdmin));
         if (needsSetupProbe) setSetupTokenRequired(status.setupTokenRequired);
       })
       .catch(() => {
-        setIsAdmin(false);
+        setIsSuperAdmin(false);
         if (needsSetupProbe) setSetupTokenRequired(true);
       });
   }, [recoveryUid]);
@@ -1252,7 +1252,7 @@ export function App() {
                   </button>
                 </div>
               )}
-              {isAdmin ? <AdminDashboard browserUid={recoveryUid} passphrase={passphrase} /> : null}
+              {isSuperAdmin ? <AdminDashboard browserUid={recoveryUid} passphrase={passphrase} /> : null}
             </>
           ) : null}
         </div>

@@ -87,7 +87,7 @@ export function profileRoutes(
 ) {
   const router = Router();
   const rateLimitProfiles = profileRateLimiter(config.profileRateLimitWindowMs, config.profileRateLimitMax);
-  const isAdminBrowserUid = (browserUid: string) => config.adminBrowserUids.has(browserUid);
+  const isAdminBrowserUid = (browserUid: string) => service.isAdminBrowserUid(browserUid, config.adminBrowserUids);
   const enforceDeliveryModeFor = <T extends { streamDeliveryMode?: "proxy" | "direct" }>(browserUid: string, value: T): T =>
     config.proxyStreamsDisabled && !isAdminBrowserUid(browserUid) ? { ...value, streamDeliveryMode: "direct" } : value;
 

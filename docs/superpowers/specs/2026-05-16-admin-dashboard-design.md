@@ -2,11 +2,11 @@
 
 ## Problem
 
-Production support currently requires direct database or server inspection to answer basic account questions: which recovery UIDs exist, whether their indexes are populated, how many FTP servers are configured, and what manifest URL can be tested. Admin-enabled profiles already exist through `ADMIN_BROWSER_UIDS`, but the web UI does not expose an admin-only view.
+Production support currently requires direct database or server inspection to answer basic account questions: which recovery UIDs exist, whether their indexes are populated, how many FTP servers are configured, and what manifest URL can be tested. Super-admin profiles are configured through `SUPER_ADMIN_BROWSER_UIDS`, but the web UI does not expose an operator-only view.
 
 ## Goals
 
-- Show an admin dashboard only after an admin-enabled browser UID has unlocked its profile.
+- Show an admin dashboard only after a super-admin browser UID has unlocked its profile.
 - Let admins inspect all profiles without exposing FTP passwords or passphrases.
 - Show each profile's recovery UID, creation/update/unlock timestamps, FTP server counts, configured server counts, indexed media totals, latest scan timestamp, current scan state, and a manifest URL for debugging.
 - Let admins issue a fresh manifest URL for any profile, because existing install tokens are stored as hashes and cannot be recovered.
@@ -19,11 +19,11 @@ Production support currently requires direct database or server inspection to an
 - No passphrase reset or impersonated profile unlock.
 - No editing another account's FTP settings, addon customization, stream format, scan schedule, or server list in v1.
 - No background FTP stream failure log viewer. Direct FTP playback happens in the Stremio client after the manifest stream URL is returned, so the server cannot observe direct FTP connection failures.
-- No new admin role model beyond `ADMIN_BROWSER_UIDS`.
+- No dashboard-admin toggle; dashboard access remains env-only through `SUPER_ADMIN_BROWSER_UIDS`.
 
 ## Architecture
 
-Add a small admin API beside the existing profile API. All admin routes require the existing setup token middleware and then verify that the submitted `{ browserUid, passphrase }` unlocks a profile whose browser UID is listed in `config.adminBrowserUids`.
+Add a small admin API beside the existing profile API. All admin routes require the existing setup token middleware and then verify that the submitted `{ browserUid, passphrase }` unlocks a profile whose browser UID is listed in `config.superAdminBrowserUids`.
 
 The admin API will live in a new `src/server/admin/adminRoutes.ts` module so `profileRoutes.ts` stays focused on self-service profile behavior. `ProfileService` will get one read-focused admin summary method and will reuse existing `unlockProfile`, `issueInstallToken`, and `deleteProfile` methods for authorization and actions.
 
