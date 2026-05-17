@@ -8,6 +8,13 @@ import {
   verifyPassphrase,
 } from "../security/crypto.js";
 import { DEFAULT_STREAM_DESCRIPTION_TEMPLATE, DEFAULT_STREAM_NAME_TEMPLATE } from "../../shared/streamFormatter.js";
+import {
+  canonicalRootPaths,
+  generateSharedIndexKey,
+  hashSharedIndexKey,
+  keyHintFromName,
+  serverMatchesSharedIndexGroup,
+} from "../shared/sharedIndex.js";
 
 export type FtpConfig = {
   host: string;
@@ -68,6 +75,34 @@ export type FtpServer = {
   scanSchedule: ScanSchedule;
   connectionStatus: ConnectionStatus;
   pendingScanAfter: string | null;
+  sharedIndex: SharedIndexLink | null;
+};
+
+export type SharedIndexLink = {
+  id: number;
+  name: string;
+  keyHint: string;
+};
+
+export type SharedIndexGroup = {
+  id: number;
+  keyHint: string;
+  name: string;
+  host: string;
+  port: number;
+  tlsMode: FtpConfig["tlsMode"];
+  allowInvalidCertificate: boolean;
+  rootPaths: string[];
+  libraryLayout: LibraryLayout;
+  catalogContentTypes: CatalogContentTypes;
+  enabled: boolean;
+  autoLinkImports: boolean;
+  masterProfileFtpServerId: number | null;
+  indexedMediaCount: number;
+  lastIndexedAt: string | null;
+  linkedServers: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AdminProfileSummary = {
@@ -569,6 +604,125 @@ export class ProfileService {
     return { profileId, adminEnabled: adminSource !== null, adminSource };
   }
 
+  createSharedIndexGroupFromServer(
+    profileId: number,
+    serverId: number,
+    input: { name: string; keyHint?: string; autoLinkImports?: boolean; enabled?: boolean },
+  ): { group: SharedIndexGroup; sharedIndexKey: string } {
+    const server = this.getFtpServer(profileId, serverId);
+    if (!server.ftpConfig) throw new Error("FTP settings are not configured");
+    const customization = server.customization;
+    const now = new Date().toISOString();
+    const sharedIndexKey = generateSharedIndexKey();
+    const keyHint = input.keyHint?.trim() || keyHintFromName(input.name);
+    const content = customization.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
+    const result = this.db
+      .prepare(
+        `
+        insert into shared_index_groups (
+          key_hint, name, shared_index_key_hash, host, port, tls_mode, allow_invalid_certificate,
+          root_paths_json, library_layout, catalog_content_json, enabled, auto_link_imports,
+          master_profile_ftp_server_id, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        keyHint,
+        input.name.trim() || server.name,
+        hashSharedIndexKey(sharedIndexKey),
+        server.ftpConfig.host.trim().toLowerCase(),
+        server.ftpConfig.port,
+        server.ftpConfig.tlsMode,
+        server.ftpConfig.allowInvalidCertificate ? 1 : 0,
+        JSON.stringify(canonicalRootPaths(server.ftpConfig.roots)),
+        customization.libraryLayout ?? "auto",
+        JSON.stringify({
+          movies: content.movies,
+          series: content.series,
+          anime: content.anime,
+          uncategorized: content.uncategorized !== false,
+        }),
+        input.enabled === false ? 0 : 1,
+        input.autoLinkImports === false ? 0 : 1,
+        serverId,
+        now,
+        now,
+      );
+    return { group: this.getSharedIndexGroup(Number(result.lastInsertRowid))!, sharedIndexKey };
+  }
+
+  getSharedIndexGroup(groupId: number): SharedIndexGroup | null {
+    const row = this.db.prepare("select * from shared_index_groups where id = ?").get(groupId) as SharedIndexGroupRow | undefined;
+    return row ? this.sharedIndexGroupFromRow(row) : null;
+  }
+
+  listSharedIndexGroups(): SharedIndexGroup[] {
+    const rows = this.db.prepare("select * from shared_index_groups order by name asc, id asc").all() as SharedIndexGroupRow[];
+    return rows.map((row) => this.sharedIndexGroupFromRow(row));
+  }
+
+  resolveApprovedSharedIndexKey(profileId: number, serverId: number, sharedIndexKey: string): SharedIndexGroup | null {
+    const server = this.getFtpServer(profileId, serverId);
+    if (!server.ftpConfig) return null;
+    const row = this.db
+      .prepare(
+        `
+        select *
+        from shared_index_groups
+        where shared_index_key_hash = ?
+          and enabled = 1
+          and auto_link_imports = 1
+        limit 1
+      `,
+      )
+      .get(hashSharedIndexKey(sharedIndexKey)) as SharedIndexGroupRow | undefined;
+    if (!row) return null;
+    const group = this.sharedIndexGroupFromRow(row);
+    return serverMatchesSharedIndexGroup(server.ftpConfig, group) ? group : null;
+  }
+
+  linkServerToSharedGroup(profileId: number, serverId: number, groupId: number, sharedIndexKey?: string) {
+    const server = this.getFtpServer(profileId, serverId);
+    const group = this.getSharedIndexGroup(groupId);
+    if (!server.ftpConfig || !group || !serverMatchesSharedIndexGroup(server.ftpConfig, group)) {
+      throw new Error("FTP server does not match shared index group");
+    }
+    const result = this.db
+      .prepare(
+        `
+        update profile_ftp_servers
+        set shared_index_group_id = ?,
+            shared_index_key_hash = ?,
+            scan_interval_minutes = 0,
+            next_scheduled_scan_at = null,
+            pending_scan_after = null,
+            updated_at = ?
+        where profile_id = ? and id = ?
+      `,
+      )
+      .run(groupId, sharedIndexKey ? hashSharedIndexKey(sharedIndexKey) : null, new Date().toISOString(), profileId, serverId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
+    return this.getFtpServer(profileId, serverId);
+  }
+
+  unlinkServerFromSharedGroup(profileId: number, serverId: number) {
+    const result = this.db
+      .prepare(
+        `
+        update profile_ftp_servers
+        set shared_index_group_id = null,
+            shared_index_key_hash = null,
+            scan_interval_minutes = 0,
+            next_scheduled_scan_at = null,
+            updated_at = ?
+        where profile_id = ? and id = ?
+      `,
+      )
+      .run(new Date().toISOString(), profileId, serverId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
+    return this.getFtpServer(profileId, serverId);
+  }
+
   listAdminProfileSummaries(environmentAdminBrowserUids: ReadonlySet<string> = new Set()): AdminProfileList {
     const rows = this.db
       .prepare(
@@ -899,6 +1053,40 @@ export class ProfileService {
         ok: row.last_ftp_test_ok === null ? null : Boolean(row.last_ftp_test_ok),
       },
       pendingScanAfter: row.pending_scan_after,
+      sharedIndex: row.shared_index_group_id ? this.sharedIndexLink(row.shared_index_group_id) : null,
+    };
+  }
+
+  private sharedIndexLink(groupId: number): SharedIndexLink | null {
+    const row = this.db.prepare("select id, name, key_hint from shared_index_groups where id = ?").get(groupId) as
+      | { id: number; name: string; key_hint: string }
+      | undefined;
+    return row ? { id: row.id, name: row.name, keyHint: row.key_hint } : null;
+  }
+
+  private sharedIndexGroupFromRow(row: SharedIndexGroupRow): SharedIndexGroup {
+    const linked = this.db.prepare("select count(*) as count from profile_ftp_servers where shared_index_group_id = ?").get(row.id) as {
+      count: number;
+    };
+    return {
+      id: row.id,
+      keyHint: row.key_hint,
+      name: row.name,
+      host: row.host,
+      port: row.port,
+      tlsMode: row.tls_mode,
+      allowInvalidCertificate: Boolean(row.allow_invalid_certificate),
+      rootPaths: parseJsonArray(row.root_paths_json),
+      libraryLayout: row.library_layout,
+      catalogContentTypes: parseCatalogContentTypes(row.catalog_content_json),
+      enabled: Boolean(row.enabled),
+      autoLinkImports: Boolean(row.auto_link_imports),
+      masterProfileFtpServerId: row.master_profile_ftp_server_id,
+      indexedMediaCount: row.indexed_media_count,
+      lastIndexedAt: row.last_indexed_at,
+      linkedServers: linked.count,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     };
   }
 }
@@ -923,4 +1111,50 @@ type FtpServerRow = {
   scan_interval_minutes: number;
   next_scheduled_scan_at: string | null;
   pending_scan_after: string | null;
+  shared_index_group_id: number | null;
+  shared_index_key_hash: string | null;
 };
+
+type SharedIndexGroupRow = {
+  id: number;
+  key_hint: string;
+  name: string;
+  shared_index_key_hash: string;
+  host: string;
+  port: number;
+  tls_mode: FtpConfig["tlsMode"];
+  allow_invalid_certificate: number;
+  root_paths_json: string;
+  library_layout: LibraryLayout;
+  catalog_content_json: string;
+  enabled: number;
+  auto_link_imports: number;
+  master_profile_ftp_server_id: number | null;
+  indexed_media_count: number;
+  last_indexed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function parseJsonArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseCatalogContentTypes(value: string): CatalogContentTypes {
+  try {
+    const parsed = JSON.parse(value) as Partial<CatalogContentTypes>;
+    return {
+      movies: parsed.movies !== false,
+      series: parsed.series !== false,
+      anime: parsed.anime === true,
+      uncategorized: parsed.uncategorized !== false,
+    };
+  } catch {
+    return { movies: true, series: true, anime: false, uncategorized: true };
+  }
+}
