@@ -218,6 +218,45 @@ describe("schema", () => {
     expect(() => migrate(db)).not.toThrow();
   });
 
+  it("migrates legacy scan jobs before creating shared target indexes", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      create table scan_jobs (
+        id integer primary key autoincrement,
+        profile_id integer not null,
+        status text not null check (status in ('queued', 'running', 'succeeded', 'failed', 'skipped', 'cancelled')),
+        trigger text not null check (trigger in ('manual', 'scheduled')),
+        progress_percent integer not null default 0,
+        entries_seen integer not null default 0,
+        files_seen integer not null default 0,
+        directories_seen integer not null default 0,
+        current_path text,
+        estimated_seconds_remaining integer,
+        message text,
+        error text,
+        queued_at text not null,
+        started_at text,
+        finished_at text
+      );
+      insert into scan_jobs (profile_id, status, trigger, progress_percent, queued_at)
+      values (1, 'queued', 'manual', 0, '2026-05-17T00:00:00.000Z');
+    `);
+
+    expect(() => migrate(db)).not.toThrow();
+    const columns = db.prepare("pragma table_info(scan_jobs)").all() as { name: string }[];
+    const indexes = db.prepare("select name from sqlite_master where type = 'index' and name = 'idx_scan_jobs_target_status'").all() as {
+      name: string;
+    }[];
+    const row = db.prepare("select target_kind, shared_index_group_id from scan_jobs where id = 1").get() as {
+      target_kind: string;
+      shared_index_group_id: number | null;
+    };
+
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["target_kind", "shared_index_group_id", "ftp_server_id"]));
+    expect(indexes).toEqual([{ name: "idx_scan_jobs_target_status" }]);
+    expect(row).toEqual({ target_kind: "profile_server", shared_index_group_id: null });
+  });
+
   it("allows halted scan jobs to be stored as cancelled", () => {
     const db = createDb();
     const profileId = insertProfile(db);

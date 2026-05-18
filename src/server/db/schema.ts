@@ -247,7 +247,6 @@ ${CATALOG_ENRICHMENT_COLUMNS}
     );
 
     create index if not exists idx_scan_jobs_profile_status on scan_jobs(profile_id, status);
-    create index if not exists idx_scan_jobs_target_status on scan_jobs(target_kind, shared_index_group_id, profile_id, ftp_server_id, status);
     create index if not exists idx_scan_jobs_status_queued on scan_jobs(status, queued_at);
     create index if not exists idx_scan_directory_snapshots_profile_server on scan_directory_snapshots(profile_id, ftp_server_id);
     create index if not exists idx_catalog_enrichment_status on catalog_enrichment(profile_id, ftp_server_id, status, next_attempt_at);
