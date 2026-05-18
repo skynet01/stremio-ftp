@@ -540,6 +540,78 @@ export class MediaRepository {
     };
   }
 
+  aggregateCountsForProfileWithSharedIndexes(profileId: number, sharedIndexGroupIds: number[]) {
+    const uniqueSharedIndexGroupIds = [...new Set(sharedIndexGroupIds)].filter((id) => Number.isInteger(id) && id > 0);
+    if (!uniqueSharedIndexGroupIds.length) return this.aggregateCountsForProfile(profileId);
+
+    const placeholders = uniqueSharedIndexGroupIds.map(() => "?").join(", ");
+    const totalRow = this.db
+      .prepare(
+        `
+        select
+          (
+            select count(*)
+            from media_files mf
+            left join profile_ftp_servers s on s.id = mf.ftp_server_id
+            where mf.profile_id = ?
+              and (mf.ftp_server_id is null or s.shared_index_group_id is null)
+          ) +
+          (
+            select count(*)
+            from shared_media_files sm
+            where sm.shared_index_group_id in (${placeholders})
+          ) as total
+      `,
+      )
+      .get(profileId, ...uniqueSharedIndexGroupIds) as { total: number };
+
+    const counts = this.db
+      .prepare(
+        `
+        with library_files as (
+          select mf.catalog_kind, mf.imdb_id, mf.parsed_title, mf.parsed_year, mf.confidence
+          from media_files mf
+          left join profile_ftp_servers s on s.id = mf.ftp_server_id
+          where mf.profile_id = ?
+            and (mf.ftp_server_id is null or s.shared_index_group_id is null)
+            and mf.parsed_title is not null
+          union all
+          select sm.catalog_kind, sm.imdb_id, sm.parsed_title, sm.parsed_year, sm.confidence
+          from shared_media_files sm
+          where sm.shared_index_group_id in (${placeholders})
+            and sm.parsed_title is not null
+        )
+        select
+          sum(case when category = 'movie' and needs_review = 0 then 1 else 0 end) as movies,
+          sum(case when category = 'series' and needs_review = 0 then 1 else 0 end) as series,
+          sum(case when category = 'anime' and needs_review = 0 then 1 else 0 end) as anime,
+          sum(case when needs_review = 1 then 1 else 0 end) as uncategorized
+        from (
+          select
+            catalog_kind as category,
+            case when max(confidence) <= 70 and max(case when imdb_id is not null then 1 else 0 end) = 0 then 1 else 0 end as needs_review
+          from library_files
+          group by
+            catalog_kind,
+            case
+              when imdb_id is not null then imdb_id
+              when catalog_kind = 'movie' then parsed_title || '|' || coalesce(parsed_year, '')
+              else parsed_title
+            end
+        )
+      `,
+      )
+      .get(profileId, ...uniqueSharedIndexGroupIds) as { movies: number | null; series: number | null; anime: number | null; uncategorized: number | null };
+
+    return {
+      total: totalRow.total,
+      movies: counts.movies ?? 0,
+      series: counts.series ?? 0,
+      anime: counts.anime ?? 0,
+      uncategorized: counts.uncategorized ?? 0,
+    };
+  }
+
   directorySnapshotMatchesModifiedAt(profileId: number, ftpServerId: number | null | undefined, dirPath: string, modifiedAt: string) {
     const row = this.db
       .prepare(

@@ -13,6 +13,7 @@ import {
   loadAdminProfiles,
   rescanAdminSharedIndexGroup,
   rotateAdminSharedIndexKey,
+  scheduleAdminSharedIndexGroup,
   setAdminProfileEnabled,
   unlinkAdminSharedIndexServer,
   updateAdminSharedIndexGroup,
@@ -22,14 +23,14 @@ import {
   type AdminProfileSummary,
   type AdminSharedIndexGroup,
 } from "../api.js";
-import { Notice, formatScanTime, StatusBadge, type StatusTone } from "./ui.js";
+import { Notice, formatNextScan, formatScanTime, StatusBadge, type StatusTone } from "./ui.js";
 
 type AdminDashboardProps = {
   browserUid: string;
   passphrase: string;
 };
 
-type AdminSortKey = "browserUid" | "admin" | "servers" | "indexed" | "lastScanAt" | "state";
+type AdminSortKey = "browserUid" | "admin" | "servers" | "indexed" | "lastManifestAccessedAt" | "state";
 type AdminSort = {
   key: AdminSortKey;
   direction: "asc" | "desc";
@@ -86,6 +87,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [serverModalProfileId, setServerModalProfileId] = useState<number | null>(null);
   const [serverLinkSelections, setServerLinkSelections] = useState<Record<string, string>>({});
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const [editingSharedScheduleId, setEditingSharedScheduleId] = useState<number | null>(null);
 
   async function refreshProfiles() {
     setLoading(true);
@@ -258,6 +260,20 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       setMessage(active ? `Shared scan halted for ${group.name}.` : `Shared scan queued for ${group.name}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to update shared scan.");
+    } finally {
+      setBusySharedGroupId(null);
+    }
+  }
+
+  async function updateSharedSchedule(group: AdminSharedIndexGroup, intervalMinutes: number) {
+    setBusySharedGroupId(group.id);
+    try {
+      const result = await scheduleAdminSharedIndexGroup({ browserUid, passphrase, groupId: group.id, intervalMinutes });
+      setSharedGroups((current) => upsertSharedGroup(current, result.group));
+      setEditingSharedScheduleId(null);
+      setMessage(intervalMinutes > 0 ? `${group.name} shared scan schedule saved.` : `${group.name} automatic scans disabled.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update shared scan schedule.");
     } finally {
       setBusySharedGroupId(null);
     }
@@ -575,6 +591,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
             <table className="admin-profile-table">
               <thead>
                 <tr>
+                  <SortHeader label="Admin" sortKey="admin" sort={sort} onSort={updateSort} />
                   <th scope="col" className="admin-select-header">
                     <input
                       type="checkbox"
@@ -585,10 +602,9 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                     />
                   </th>
                   <SortHeader label="Recovery UID" sortKey="browserUid" sort={sort} onSort={updateSort} />
-                  <SortHeader label="Admin" sortKey="admin" sort={sort} onSort={updateSort} />
                   <SortHeader label="Servers" sortKey="servers" sort={sort} onSort={updateSort} />
                   <SortHeader label="Indexed" sortKey="indexed" sort={sort} onSort={updateSort} />
-                  <SortHeader label="Last scan" sortKey="lastScanAt" sort={sort} onSort={updateSort} />
+                  <SortHeader label="Last used" sortKey="lastManifestAccessedAt" sort={sort} onSort={updateSort} />
                   <SortHeader label="State" sortKey="state" sort={sort} onSort={updateSort} />
                   <th scope="col">Actions</th>
                 </tr>
@@ -596,6 +612,9 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
               <tbody>
                 {visibleProfiles.map((profile) => (
                   <tr key={profile.id}>
+                    <td data-label="Admin">
+                      <AdminState profile={profile} />
+                    </td>
                     <td data-label="Select" className="admin-select-cell">
                       <input
                         type="checkbox"
@@ -619,9 +638,6 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                         <code>{truncateUid(profile.browserUid)}</code>
                       </button>
                     </td>
-                    <td data-label="Admin">
-                      <AdminState profile={profile} />
-                    </td>
                     <td data-label="Servers">
                       <button type="button" className="admin-server-cell admin-server-cell-button" onClick={() => setServerModalProfileId(profile.id)}>
                         <span>{profile.configuredFtpServers}/{profile.ftpServers}</span>
@@ -633,7 +649,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                       </button>
                     </td>
                     <td data-label="Indexed">{profile.indexedItems}</td>
-                    <td data-label="Last scan">{formatScanTime(profile.lastScanAt)}</td>
+                    <td data-label="Last used">{formatScanTime(profile.lastManifestAccessedAt)}</td>
                     <td data-label="State">
                       <ProfileStateBadge profile={profile} />
                     </td>
@@ -699,6 +715,9 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
         onRotate={requestRotateSharedKey}
         onDelete={requestDeleteSharedGroup}
         onScan={runSharedScan}
+        editingScheduleId={editingSharedScheduleId}
+        onToggleScheduleEditor={(group) => setEditingSharedScheduleId((current) => (current === group.id ? null : group.id))}
+        onSchedule={updateSharedSchedule}
       />
       {serverModalProfile ? (
         <ProfileServersDialog
@@ -889,7 +908,7 @@ function groupMatchScore(bucket: ServerBucket, value: string) {
 function nextSharedScanLabel(group: AdminSharedIndexGroup) {
   if (group.scanStatus.status === "queued") return formatScanTime(group.scanStatus.queuedAt);
   if (group.scanStatus.status === "running") return "Running now";
-  return "Not scheduled";
+  return formatNextScan(group.scanSchedule.nextScheduledScanAt);
 }
 
 function ModalPortal({ children }: { children: ReactNode }) {
@@ -908,6 +927,9 @@ function SharedIndexAdminSection({
   onRotate,
   onDelete,
   onScan,
+  editingScheduleId,
+  onToggleScheduleEditor,
+  onSchedule,
 }: {
   groups: AdminSharedIndexGroup[];
   createForm: { profileId: string; serverId: string; name: string; keyHint: string };
@@ -919,6 +941,9 @@ function SharedIndexAdminSection({
   onRotate: (group: AdminSharedIndexGroup) => void;
   onDelete: (group: AdminSharedIndexGroup) => void;
   onScan: (group: AdminSharedIndexGroup) => void;
+  editingScheduleId: number | null;
+  onToggleScheduleEditor: (group: AdminSharedIndexGroup) => void;
+  onSchedule: (group: AdminSharedIndexGroup, intervalMinutes: number) => void;
 }) {
   return (
     <section className="admin-shared-index-section" aria-labelledby="admin-shared-index-heading">
@@ -986,21 +1011,6 @@ function SharedIndexAdminSection({
                     >
                       {group.enabled ? "Enabled" : "Disabled"}
                     </button>
-                    <button
-                      type="button"
-                      className={`icon-button admin-icon-toggle ${group.autoLinkImports ? "is-on" : ""}`}
-                      aria-pressed={group.autoLinkImports}
-                      title={group.autoLinkImports ? "Auto-link imports on" : "Auto-link imports off"}
-                      aria-label={`${group.autoLinkImports ? "Disable" : "Enable"} auto-link imports for ${group.name}`}
-                      disabled={busyGroupId === group.id}
-                      onClick={() => onUpdate(group, { autoLinkImports: !group.autoLinkImports })}
-                    >
-                      <Link2 size={15} aria-hidden="true" />
-                    </button>
-                    <button type="button" className="admin-rekey-button" title="Rekey shared index" aria-label={`Rotate key for ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onRotate(group)}>
-                      <KeyRound size={15} aria-hidden="true" />
-                      <span>Rekey</span>
-                    </button>
                     {!group.enabled ? (
                       <button type="button" className="icon-button danger-button" title={active ? "Halt shared scan before deleting" : "Delete group"} aria-label={`Delete ${group.name}`} disabled={busyGroupId === group.id || !canDelete} onClick={() => onDelete(group)}>
                         <Trash2 size={15} aria-hidden="true" />
@@ -1018,8 +1028,28 @@ function SharedIndexAdminSection({
                 </div>
                 <div className="admin-shared-detail">
                   <span>Next scan</span>
-                  <strong>{nextSharedScanLabel(group)}</strong>
+                  <button type="button" className="admin-shared-detail-button" onClick={() => onToggleScheduleEditor(group)}>
+                    {nextSharedScanLabel(group)}
+                  </button>
                 </div>
+                {editingScheduleId === group.id ? (
+                  <label className="admin-shared-schedule-editor">
+                    <span>Scan interval</span>
+                    <select
+                      aria-label={`Scan interval for ${group.name}`}
+                      value={String(group.scanSchedule.intervalMinutes)}
+                      disabled={busyGroupId === group.id || !group.masterServer}
+                      onChange={(event) => onSchedule(group, Number(event.currentTarget.value))}
+                    >
+                      <option value="0">Manual only</option>
+                      <option value="360">Every 6 hours</option>
+                      <option value="720">Every 12 hours</option>
+                      <option value="1440">Daily</option>
+                      <option value="4320">Every 3 days</option>
+                      <option value="10080">Weekly</option>
+                    </select>
+                  </label>
+                ) : null}
                 <div className="admin-shared-detail">
                   <span>Master</span>
                   <strong>{group.masterServer ? `${truncateUid(group.masterServer.browserUid)} / ${group.masterServer.serverName}` : "None"}</strong>
@@ -1036,6 +1066,21 @@ function SharedIndexAdminSection({
                   </button>
                 ) : null}
                 <div className="admin-shared-actions">
+                  <button
+                    type="button"
+                    className={`icon-button admin-icon-toggle ${group.autoLinkImports ? "is-on" : ""}`}
+                    aria-pressed={group.autoLinkImports}
+                    title={group.autoLinkImports ? "Auto-link imports on" : "Auto-link imports off"}
+                    aria-label={`${group.autoLinkImports ? "Disable" : "Enable"} auto-link imports for ${group.name}`}
+                    disabled={busyGroupId === group.id}
+                    onClick={() => onUpdate(group, { autoLinkImports: !group.autoLinkImports })}
+                  >
+                    <Link2 size={15} aria-hidden="true" />
+                  </button>
+                  <button type="button" className="admin-rekey-button" title="Rekey shared index" aria-label={`Rotate key for ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onRotate(group)}>
+                    <KeyRound size={15} aria-hidden="true" />
+                    <span>Rekey</span>
+                  </button>
                   <button type="button" className={`icon-button ${active ? "danger-button" : ""}`} title={active ? "Halt shared scan" : "Rescan shared index"} aria-label={active ? `Halt scan for ${group.name}` : `Rescan ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onScan(group)}>
                     {active ? <CircleStop size={15} aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
                   </button>
@@ -1091,7 +1136,7 @@ function ProfileServersDialog({
                 <th scope="col">Server</th>
                 <th scope="col">Host</th>
                 <th scope="col">Items</th>
-                <th scope="col">Last index</th>
+                <th scope="col">Last scan</th>
                 <th scope="col">Status</th>
                 <th scope="col">Action</th>
               </tr>
@@ -1109,7 +1154,7 @@ function ProfileServersDialog({
                     </td>
                     <td data-label="Host">{server.host ?? "Not configured"}</td>
                     <td data-label="Items">{serverIndexCount(server)}</td>
-                    <td data-label="Last index">{formatScanTime(server.sharedIndex ? server.sharedIndex.lastIndexedAt : server.lastIndexedAt)}</td>
+                    <td data-label="Last scan">{formatScanTime(server.sharedIndex ? server.sharedIndex.lastIndexedAt : server.lastIndexedAt)}</td>
                     <td data-label="Status">
                       <StatusBadge tone={serverStatusTone(status)}>{status}</StatusBadge>
                       {server.sharedIndex ? <span>{server.sharedIndex.name}</span> : null}
@@ -1423,8 +1468,8 @@ function profileSortValue(profile: AdminProfileSummary, key: AdminSortKey) {
       return profile.configuredFtpServers;
     case "indexed":
       return profile.indexedItems;
-    case "lastScanAt":
-      return profile.lastScanAt ? Date.parse(profile.lastScanAt) : 0;
+    case "lastManifestAccessedAt":
+      return profile.lastManifestAccessedAt ? Date.parse(profile.lastManifestAccessedAt) : 0;
     case "state":
       return profileStateLabel(profile);
   }

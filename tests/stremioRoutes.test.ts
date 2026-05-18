@@ -89,6 +89,7 @@ describe("stremio routes", () => {
     expect(response.body.id).toMatch(/^community\.stremio-ftp\.[a-f0-9]{12}$/);
     expect(otherResponse.body.id).toMatch(/^community\.stremio-ftp\.[a-f0-9]{12}$/);
     expect(otherResponse.body.id).not.toBe(response.body.id);
+    expect(db.prepare("select last_manifest_accessed_at from profiles where id = ?").pluck().get(created.profileId)).toEqual(expect.any(String));
     expect(response.header["access-control-allow-origin"]).toBe("*");
     expect(response.header["cross-origin-resource-policy"]).toBe("cross-origin");
   });

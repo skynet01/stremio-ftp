@@ -181,6 +181,7 @@ export type SaveServerRequest = ServerRequest & {
   ftpConfig: FtpConfigRequest;
   customization: Omit<AddonCustomization, "addonName" | "addonLogoUrl" | "addonDescription" | "streamNameTemplate" | "streamDescriptionTemplate">;
   sharedIndexKey?: string;
+  unlinkSharedIndex?: boolean;
 };
 
 export type AuthenticatedCustomizationRequest = CreateProfileRequest & {
@@ -247,6 +248,7 @@ export type AdminProfileSummary = {
   }>;
   indexedItems: number;
   lastScanAt: string | null;
+  lastManifestAccessedAt: string | null;
   activeScans: number;
   pendingScans: number;
   manifestUrl: string | null;
@@ -349,6 +351,7 @@ export type AdminSharedIndexGroup = {
   updatedAt: string;
   linkedServers: AdminSharedIndexLinkedServer[];
   masterServer: AdminSharedIndexMasterServer;
+  scanSchedule: ScanSchedule;
   scanStatus: ScanStatus;
 };
 
@@ -366,6 +369,10 @@ export type AdminSharedIndexKeyResponse = AdminSharedIndexGroupResponse & {
 
 export type AdminSharedIndexScanResponse = AdminSharedIndexGroupResponse & {
   scanStatus: ScanStatus;
+};
+
+export type AdminSharedIndexScheduleResponse = AdminSharedIndexGroupResponse & {
+  scanSchedule: ScanSchedule;
 };
 
 async function readJson<T extends object>(response: Response): Promise<T> {
@@ -732,6 +739,21 @@ export async function deleteAdminSharedIndexGroup(request: CreateProfileRequest 
     body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
   });
   return readJson<{ ok: true }>(response);
+}
+
+export async function scheduleAdminSharedIndexGroup(
+  request: CreateProfileRequest & { groupId: number; intervalMinutes: number },
+): Promise<AdminSharedIndexScheduleResponse> {
+  const response = await fetch(`/api/admin/shared-index-groups/${request.groupId}/schedule`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      browserUid: request.browserUid,
+      passphrase: request.passphrase,
+      intervalMinutes: request.intervalMinutes,
+    }),
+  });
+  return readJson<AdminSharedIndexScheduleResponse>(response);
 }
 
 export async function linkAdminSharedIndexServer(

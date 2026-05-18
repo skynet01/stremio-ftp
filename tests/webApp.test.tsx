@@ -17,6 +17,7 @@ import {
   loadAdminProfiles,
   loadCustomization,
   loadFtpSettings,
+  loadServers,
   loadScanStatus,
   loadSetupStatus,
   rescanIndex,
@@ -25,6 +26,7 @@ import {
   rotateAdminSharedIndexKey,
   saveCustomization,
   saveFtpSettings,
+  saveFtpServer,
   saveScanSchedule,
   saveSetupToken,
   setAdminProfileEnabled,
@@ -53,6 +55,7 @@ vi.mock("../src/web/api", () => ({
   loadAdminProfiles: vi.fn(),
   loadCustomization: vi.fn(),
   loadFtpSettings: vi.fn(),
+  loadServers: vi.fn(),
   loadScanStatus: vi.fn(),
   loadSetupStatus: vi.fn(),
   rescanIndex: vi.fn(),
@@ -61,6 +64,7 @@ vi.mock("../src/web/api", () => ({
   rotateAdminSharedIndexKey: vi.fn(),
   saveCustomization: vi.fn(),
   saveFtpSettings: vi.fn(),
+  saveFtpServer: vi.fn(),
   saveScanSchedule: vi.fn(),
   saveSetupToken: vi.fn(),
   setAdminProfileEnabled: vi.fn(),
@@ -88,6 +92,7 @@ const loadAdminSharedIndexGroupsMock = vi.mocked(loadAdminSharedIndexGroups);
 const loadAdminProfilesMock = vi.mocked(loadAdminProfiles);
 const loadCustomizationMock = vi.mocked(loadCustomization);
 const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
+const loadServersMock = vi.mocked(loadServers);
 const loadScanStatusMock = vi.mocked(loadScanStatus);
 const loadSetupStatusMock = vi.mocked(loadSetupStatus);
 const rescanIndexMock = vi.mocked(rescanIndex);
@@ -96,6 +101,7 @@ const rescanAdminProfileMock = vi.mocked(rescanAdminProfile);
 const rotateAdminSharedIndexKeyMock = vi.mocked(rotateAdminSharedIndexKey);
 const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
+const saveFtpServerMock = vi.mocked(saveFtpServer);
 const saveScanScheduleMock = vi.mocked(saveScanSchedule);
 const saveSetupTokenMock = vi.mocked(saveSetupToken);
 const setAdminProfileEnabledMock = vi.mocked(setAdminProfileEnabled);
@@ -174,6 +180,7 @@ describe("App", () => {
     });
     loadCustomizationMock.mockReset();
     loadFtpSettingsMock.mockReset();
+    loadServersMock.mockReset();
     loadScanStatusMock.mockReset();
     loadSetupStatusMock.mockReset();
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: true });
@@ -183,6 +190,7 @@ describe("App", () => {
     rotateAdminSharedIndexKeyMock.mockReset();
     saveCustomizationMock.mockReset();
     saveFtpSettingsMock.mockReset();
+    saveFtpServerMock.mockReset();
     saveScanScheduleMock.mockReset();
     saveSetupTokenMock.mockReset();
     setAdminProfileEnabledMock.mockReset();
@@ -259,7 +267,7 @@ describe("App", () => {
           Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
-    expect(screen.getByLabelText("TMDB API key")).toBeTruthy();
+    expect(screen.getByLabelText("TMDB API key")).toHaveAttribute("placeholder", "Add your own TMDB key for better matching");
     expect(screen.getByLabelText("Library layout")).toBeTruthy();
     expect(screen.getByLabelText("Stream delivery")).toBeTruthy();
     const catalogsGroup = screen.getByRole("group", { name: "Catalogs" });
@@ -949,6 +957,106 @@ describe("App", () => {
     expect(screen.getByText("Last scan May 02, 2026, 3:45 PM")).toBeTruthy();
   });
 
+  it("confirms before unlinking a shared index server when FTP identity changes", async () => {
+    window.localStorage.setItem("stremio-ftp-recovery-uid", "browser-uid");
+    window.localStorage.setItem("stremio-ftp-passphrase", "passphrase");
+    window.localStorage.setItem("stremio-ftp-manifest-url", "https://addon.example.test/u/token/manifest.json");
+    window.localStorage.setItem("stremio-ftp-stremio-install-url", "stremio://addon.example.test/u/token/manifest.json");
+    const linkedServer = {
+      id: 20,
+      name: "Server 1",
+      ftpConfig: {
+        host: "sputnik.whatbox.ca",
+        port: 21,
+        username: "user",
+        password: "",
+        passwordConfigured: true,
+        tlsMode: "explicit" as const,
+        allowInvalidCertificate: false,
+        roots: ["/Media"],
+      },
+      customization: {
+        addonName: "Stremio FTP Addon",
+        addonLogoUrl: "",
+        addonDescription: "Stream movies and series episodes from your own FTP server.",
+        catalogEnabled: false,
+        ...defaultCatalogOptions,
+      },
+      indexStatus: { lastScanAt: "2026-05-02T22:45:00.000Z", mediaItems: 42 },
+      scanStatus: { ...idleScanStatus, mediaItems: 42 },
+      scanSchedule: manualScanSchedule,
+      connectionStatus: { lastTestedAt: null, ok: null },
+      pendingScanAfter: null,
+      sharedIndex: {
+        id: 5,
+        name: "Sputnik Main",
+        keyHint: "sputnik-main",
+        linked: true,
+        message: "Scanning handled by shared master index.",
+      },
+    };
+    loadServersMock.mockResolvedValue({
+      customization: linkedServer.customization,
+      servers: [linkedServer],
+      globalStats: {
+        totalItems: 42,
+        movies: 40,
+        series: 2,
+        anime: 0,
+        uncategorized: 0,
+        servers: 1,
+        activeScans: 0,
+        pendingScans: 0,
+        lastCompletedScanAt: "2026-05-02T22:45:00.000Z",
+        lastCompletedScanNewItems: null,
+        status: "ready",
+      },
+    });
+    saveFtpServerMock
+      .mockRejectedValueOnce(new Error("Changing this server's FTP host, port, TLS, certificate, or root paths will unlink it from the shared index group."))
+      .mockResolvedValueOnce({
+        server: {
+          ...linkedServer,
+          ftpConfig: { ...linkedServer.ftpConfig, roots: ["/Private"] },
+          sharedIndex: null,
+        },
+        globalStats: {
+          totalItems: 42,
+          movies: 40,
+          series: 2,
+          anime: 0,
+          uncategorized: 0,
+          servers: 1,
+          activeScans: 0,
+          pendingScans: 1,
+          lastCompletedScanAt: "2026-05-02T22:45:00.000Z",
+          lastCompletedScanNewItems: null,
+          status: "working",
+        },
+      });
+    rescanIndexMock.mockResolvedValue({
+      scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual", message: "Waiting for scan worker." },
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<App />);
+
+    await screen.findByText("Sputnik Main");
+    fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/Private" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save FTP settings" }));
+
+    await waitFor(() => expect(saveFtpServerMock).toHaveBeenCalledTimes(2));
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("Linked servers use one shared scan result"));
+    expect(saveFtpServerMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        serverId: 20,
+        ftpConfig: expect.objectContaining({ roots: ["/Private"] }),
+      }),
+    );
+    expect(saveFtpServerMock).toHaveBeenNthCalledWith(2, expect.objectContaining({ serverId: 20, unlinkSharedIndex: true }));
+  });
+
   it("confirms and queues a force reindex from the Rescan All dropdown", async () => {
     createProfileMock.mockResolvedValue({
       profileId: 1,
@@ -1389,6 +1497,7 @@ describe("App", () => {
           ],
           indexedItems: 44,
           lastScanAt: null,
+          lastManifestAccessedAt: "2026-05-17T01:00:00.000Z",
           activeScans: 0,
           pendingScans: 1,
           manifestUrl: null,
@@ -1416,6 +1525,7 @@ describe("App", () => {
           ],
           indexedItems: 3,
           lastScanAt: "2026-05-16T00:00:00.000Z",
+          lastManifestAccessedAt: "2026-05-16T02:00:00.000Z",
           activeScans: 0,
           pendingScans: 0,
           manifestUrl: null,
@@ -1443,6 +1553,7 @@ describe("App", () => {
           ],
           indexedItems: 5,
           lastScanAt: null,
+          lastManifestAccessedAt: null,
           activeScans: 0,
           pendingScans: 0,
           manifestUrl: null,
@@ -1474,6 +1585,7 @@ describe("App", () => {
       updatedAt: "2026-05-16T00:00:00.000Z",
       linkedServers: [],
       masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", serverId: 9, serverName: "Server 1" },
+      scanSchedule: { intervalMinutes: 360, nextScheduledScanAt: "2026-05-16T06:00:00.000Z" },
       scanStatus: { ...idleScanStatus },
     };
     const disabledGroup = {
@@ -1529,8 +1641,8 @@ describe("App", () => {
     expect(within(linkedRow).getByText("Linked")).toBeTruthy();
     const autoLinkedRow = screen.getByRole("button", { name: "Copy recovery UID auto80d7-4971-4919-8f4e-ab80aa2de852" }).closest("tr")!;
     expect(within(autoLinkedRow).getByText("Auto-L")).toBeTruthy();
-    expect(screen.getAllByText("Last scan").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("May 15, 2026, 5:00 PM").length).toBeGreaterThan(0);
+    expect(screen.getByRole("columnheader", { name: /Last used/ })).toBeTruthy();
+    expect(screen.getAllByText("May 16, 2026, 6:00 PM").length).toBeGreaterThan(0);
     expect(screen.queryByLabelText("Profile ID for Sputnik Main")).toBeNull();
     expect(screen.queryByLabelText("Server ID for Sputnik Main")).toBeNull();
     expect(screen.queryByRole("button", { name: "Link server to Sputnik Main" })).toBeNull();
@@ -1540,6 +1652,7 @@ describe("App", () => {
     const serverDialog = await screen.findByRole("dialog", { name: "bf1f80d7-4971-4" });
     expect(within(serverDialog).getByText("Auto-L")).toBeTruthy();
     expect(within(serverDialog).getByText("Unlinked")).toBeTruthy();
+    expect(within(serverDialog).getByText("May 15, 2026, 5:00 PM")).toBeTruthy();
     fireEvent.click(within(serverDialog).getByRole("button", { name: "Unlink" }));
     await waitFor(() =>
       expect(unlinkAdminSharedIndexServerMock).toHaveBeenCalledWith({
@@ -1700,6 +1813,7 @@ describe("App", () => {
           configuredFtpServers: 1,
           indexedItems: 44,
           lastScanAt: null,
+          lastManifestAccessedAt: null,
           activeScans: 0,
           pendingScans: 0,
           manifestUrl: null,
@@ -1718,6 +1832,7 @@ describe("App", () => {
           configuredFtpServers: 1,
           indexedItems: 3,
           lastScanAt: null,
+          lastManifestAccessedAt: null,
           activeScans: 0,
           pendingScans: 0,
           manifestUrl: null,
@@ -1822,6 +1937,7 @@ describe("App", () => {
           configuredFtpServers: 2,
           indexedItems: 0,
           lastScanAt: null,
+          lastManifestAccessedAt: null,
           activeScans: 1,
           pendingScans: 1,
           manifestUrl: null,

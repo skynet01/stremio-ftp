@@ -1339,6 +1339,54 @@ input:-webkit-autofill:active {
   white-space: nowrap;
 }
 
+.admin-shared-detail-button {
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--cream);
+  background: transparent;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-shared-detail-button:hover,
+.admin-shared-detail-button:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.admin-shared-schedule-editor {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid rgba(168, 224, 99, 0.18);
+  border-radius: 8px;
+  background: rgba(168, 224, 99, 0.045);
+}
+
+.admin-shared-schedule-editor span {
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.admin-shared-schedule-editor select {
+  min-height: 34px;
+  margin: 0;
+}
+
 .admin-shared-key {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
@@ -1479,7 +1527,7 @@ input:-webkit-autofill:active {
 .admin-server-dialog {
   width: fit-content;
   min-width: min(920px, calc(100vw - 36px));
-  max-width: min(1120px, calc(100vw - 36px));
+  max-width: min(1240px, calc(100vw - 36px));
   max-height: min(74vh, 680px);
 }
 
@@ -1667,17 +1715,17 @@ input:-webkit-autofill:active {
 
 .admin-profile-table th:nth-child(1),
 .admin-profile-table td:nth-child(1) {
-  width: 38px;
+  width: 58px;
 }
 
 .admin-profile-table th:nth-child(2),
 .admin-profile-table td:nth-child(2) {
-  width: 142px;
+  width: 38px;
 }
 
 .admin-profile-table th:nth-child(3),
 .admin-profile-table td:nth-child(3) {
-  width: 58px;
+  width: 142px;
 }
 
 .admin-profile-table th:nth-child(4),
@@ -1893,7 +1941,8 @@ input:-webkit-autofill:active {
 
 .admin-state-stack {
   display: inline-flex !important;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 5px;
   margin-top: 0 !important;
 }
@@ -1946,17 +1995,17 @@ input:-webkit-autofill:active {
 
 .admin-server-dialog-table th:nth-child(3),
 .admin-server-dialog-table td:nth-child(3) {
-  width: 74px;
+  width: 86px;
 }
 
 .admin-server-dialog-table th:nth-child(4),
 .admin-server-dialog-table td:nth-child(4) {
-  width: 148px;
+  width: 188px;
 }
 
 .admin-server-dialog-table th:nth-child(5),
 .admin-server-dialog-table td:nth-child(5) {
-  width: 142px;
+  width: 192px;
 }
 
 .admin-server-dialog-table th:nth-child(6),

@@ -286,7 +286,9 @@ export class ScanQueue {
         nextScheduledScanAt:
           schedule.intervalMinutes > 0 ? new Date(new Date(nowIso).getTime() + schedule.intervalMinutes * 60_000).toISOString() : null,
       });
-      this.enqueueProfileScan(profileId, "scheduled", serverId);
+      const server = this.profileService.getFtpServer(profileId, serverId);
+      if (server.sharedIndex) this.enqueueSharedIndexScan(server.sharedIndex.id, "scheduled");
+      else this.enqueueProfileScan(profileId, "scheduled", serverId);
     }
   }
 

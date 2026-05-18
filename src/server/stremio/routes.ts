@@ -20,6 +20,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
   router.get("/u/:installToken/manifest.json", (req, res) => {
     const installToken = stringParam(req.params.installToken);
     const profileId = profiles.profileIdForInstallToken(installToken);
+    if (profileId) profiles.markManifestAccess(profileId);
     res.setHeader("Cache-Control", "no-store");
     res.json(profileId ? tokenManifest(manifestCustomization(profiles, profileId, config.proxyStreamsDisabled, config.adminBrowserUids), installToken) : publicManifest());
   });

@@ -171,6 +171,7 @@ describe("admin routes", () => {
           pendingScans: 0,
           manifestUrl: null,
           stremioInstallUrl: null,
+          lastManifestAccessedAt: null,
           lastCountryCode: "CA",
           adminEnabled: false,
           adminSource: null,
@@ -238,6 +239,17 @@ describe("admin routes", () => {
     const token = String(response.body.manifestUrl).match(/\/u\/([^/]+)\/manifest\.json$/)?.[1];
     expect(token).toBeTruthy();
     await request(app).get(`/u/${token}/manifest.json`).expect(200);
+
+    const listed = await request(app)
+      .post("/api/admin/profiles")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(listed.body.profiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: user.body.profileId, lastManifestAccessedAt: expect.any(String) }),
+      ]),
+    );
   });
 
   it("queues a profile rescan for a super admin", async () => {
@@ -422,10 +434,19 @@ describe("admin routes", () => {
       host: "sputnik.whatbox.ca",
       linkedServerCount: 1,
       masterServer: { profileId: master.body.profileId, browserUid: "master-uid", serverId: masterServerId, serverName: "Server 1" },
+      scanSchedule: { intervalMinutes: 0, nextScheduledScanAt: null },
       scanStatus: expect.objectContaining({ status: "idle" }),
     });
 
     const groupId = created.body.group.id;
+    const scheduled = await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/schedule`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", intervalMinutes: 360 })
+      .expect(200);
+    expect(scheduled.body.group.scanSchedule.intervalMinutes).toBe(360);
+    expect(scheduled.body.scanSchedule).toEqual({ intervalMinutes: 360, nextScheduledScanAt: expect.any(String) });
+
     const profileList = await request(app)
       .post("/api/admin/profiles")
       .set("x-setup-token", "setup-secret-123")

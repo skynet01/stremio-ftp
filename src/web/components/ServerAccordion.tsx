@@ -170,6 +170,7 @@ export function ServerAccordion({
         {servers.map((server, index) => {
           const expanded = expandedServerId === server.id;
           const active = scanIsActive(server.scanStatus);
+          const linked = Boolean(server.sharedIndex);
           const badge = serverBadge(server);
           const triggerId = `server-trigger-${server.id}`;
           const bodyId = `server-panel-${server.id}`;
@@ -488,7 +489,13 @@ export function ServerAccordion({
                         Halt scan
                       </button>
                     ) : (
-                      <button type="button" className="secondary-button server-scan-action" disabled={!profileReady} onClick={() => onRefreshServer(server.id)}>
+                      <button
+                        type="button"
+                        className="secondary-button server-scan-action"
+                        disabled={!profileReady || linked}
+                        title={linked ? "Linked servers are scanned through their shared index group." : undefined}
+                        onClick={() => onRefreshServer(server.id)}
+                      >
                         <RefreshCw size={17} aria-hidden={true} />
                         Rescan
                       </button>

@@ -301,7 +301,7 @@ function LibrarySettings({
               id="catalogTmdbApiKey"
               className={filledClass(catalogTmdbApiKey)}
               value={catalogTmdbApiKey}
-              placeholder="Use server default"
+              placeholder="Add your own TMDB key for better matching"
               onChange={(event) => onCatalogTmdbApiKeyChange(event.currentTarget.value)}
               onBlur={onCommitCatalogTmdbApiKey}
             />,

@@ -108,6 +108,7 @@ describe("schema", () => {
         "stream_description_template",
         "admin_enabled",
         "last_country_code",
+        "last_manifest_accessed_at",
       ]),
     );
     expect(scanColumns.map((column) => column.name)).toEqual(

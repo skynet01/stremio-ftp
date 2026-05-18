@@ -135,6 +135,7 @@ export type AdminProfileSummary = {
   configuredFtpServers: number;
   indexedItems: number;
   lastScanAt: string | null;
+  lastManifestAccessedAt: string | null;
   pendingScans: number;
 };
 
@@ -161,7 +162,17 @@ export type FtpServerInput = {
   ftpConfig?: FtpConfig;
   customization?: Partial<AddonCustomization>;
   sharedIndexKey?: string;
+  unlinkSharedIndex?: boolean;
 };
+
+export class SharedIndexUnlinkRequiredError extends Error {
+  constructor(public readonly sharedIndexName: string) {
+    super(
+      "Changing this server's FTP host, port, TLS, certificate, or root paths will unlink it from the shared index group. Linked servers use the master shared index, avoid duplicate indexing, and share scan results across profiles. Unlink only if this server needs its own folder path or separate FTP target.",
+    );
+    this.name = "SharedIndexUnlinkRequiredError";
+  }
+}
 
 export const DEFAULT_ADDON_CUSTOMIZATION: AddonCustomization = {
   addonName: "Stremio FTP Addon",
@@ -722,6 +733,36 @@ export class ProfileService {
       : null;
   }
 
+  sharedIndexGroupScanSchedule(groupId: number): ScanSchedule {
+    const row = this.db
+      .prepare(
+        `
+        select s.scan_interval_minutes, s.next_scheduled_scan_at
+        from shared_index_groups g
+        join profile_ftp_servers s on s.id = g.master_profile_ftp_server_id
+        where g.id = ?
+      `,
+      )
+      .get(groupId) as { scan_interval_minutes: number; next_scheduled_scan_at: string | null } | undefined;
+    return { intervalMinutes: row?.scan_interval_minutes ?? 0, nextScheduledScanAt: row?.next_scheduled_scan_at ?? null };
+  }
+
+  saveSharedIndexGroupScanSchedule(groupId: number, schedule: ScanSchedule): ScanSchedule {
+    const row = this.db
+      .prepare(
+        `
+        select s.profile_id, s.id
+        from shared_index_groups g
+        join profile_ftp_servers s on s.id = g.master_profile_ftp_server_id
+        where g.id = ?
+      `,
+      )
+      .get(groupId) as { profile_id: number; id: number } | undefined;
+    if (!row) throw new Error("Set a master server before scheduling shared scans");
+    this.saveFtpServerScanSchedule(row.profile_id, row.id, schedule);
+    return this.sharedIndexGroupScanSchedule(groupId);
+  }
+
   updateSharedIndexGroup(
     groupId: number,
     input: { name?: string; keyHint?: string; enabled?: boolean; autoLinkImports?: boolean },
@@ -778,11 +819,11 @@ export class ProfileService {
     if (!group || !server.ftpConfig || !serverMatchesSharedIndexGroup(server.ftpConfig, group)) {
       throw new Error("FTP server does not match shared index group");
     }
-    this.linkServerToSharedGroup(profileId, serverId, groupId);
     const result = this.db
       .prepare("update shared_index_groups set master_profile_ftp_server_id = ?, updated_at = ? where id = ?")
       .run(serverId, new Date().toISOString(), groupId);
     if (result.changes === 0) throw new ProfileNotFoundError();
+    this.linkServerToSharedGroup(profileId, serverId, groupId);
     return this.getSharedIndexGroup(groupId)!;
   }
 
@@ -818,14 +859,14 @@ export class ProfileService {
         update profile_ftp_servers
         set shared_index_group_id = ?,
             shared_index_key_hash = ?,
-            scan_interval_minutes = 0,
-            next_scheduled_scan_at = null,
+            scan_interval_minutes = case when id = (select master_profile_ftp_server_id from shared_index_groups where id = ?) then scan_interval_minutes else 0 end,
+            next_scheduled_scan_at = case when id = (select master_profile_ftp_server_id from shared_index_groups where id = ?) then next_scheduled_scan_at else null end,
             pending_scan_after = null,
             updated_at = ?
         where profile_id = ? and id = ?
       `,
       )
-      .run(groupId, sharedIndexKey ? hashSharedIndexKey(sharedIndexKey) : null, new Date().toISOString(), profileId, serverId);
+      .run(groupId, sharedIndexKey ? hashSharedIndexKey(sharedIndexKey) : null, groupId, groupId, new Date().toISOString(), profileId, serverId);
     if (result.changes === 0) throw new ProfileNotFoundError();
     return this.getFtpServer(profileId, serverId);
   }
@@ -906,6 +947,7 @@ export class ProfileService {
           p.updated_at,
           p.last_unlocked_at,
           p.last_country_code,
+          p.last_manifest_accessed_at,
           p.admin_enabled,
           count(s.id) as ftp_servers,
           coalesce(sum(case when s.encrypted_ftp_config is not null then 1 else 0 end), 0) as configured_ftp_servers,
@@ -925,6 +967,7 @@ export class ProfileService {
       updated_at: string;
       last_unlocked_at: string | null;
       last_country_code: string | null;
+      last_manifest_accessed_at: string | null;
       admin_enabled: number;
       ftp_servers: number;
       configured_ftp_servers: number;
@@ -948,6 +991,7 @@ export class ProfileService {
         configuredFtpServers: row.configured_ftp_servers,
         indexedItems: row.indexed_items,
         lastScanAt: row.last_scan_at,
+        lastManifestAccessedAt: row.last_manifest_accessed_at,
         pendingScans: row.pending_scans,
       };
     });
@@ -1049,6 +1093,14 @@ export class ProfileService {
   }
 
   saveFtpServer(profileId: number, serverId: number, input: FtpServerInput) {
+    if (input.ftpConfig) {
+      const server = this.getFtpServer(profileId, serverId);
+      const group = server.sharedIndex ? this.getSharedIndexGroup(server.sharedIndex.id) : null;
+      if (group && !serverMatchesSharedIndexGroup(input.ftpConfig, group)) {
+        if (!input.unlinkSharedIndex) throw new SharedIndexUnlinkRequiredError(group.name);
+        this.unlinkServerFromSharedGroup(profileId, serverId);
+      }
+    }
     if (input.ftpConfig) this.saveFtpServerConfig(profileId, serverId, input.ftpConfig);
     if (input.customization) this.saveFtpServerCustomization(profileId, serverId, input.customization, true);
     if (input.name !== undefined) this.renameFtpServer(profileId, serverId, input.name);
@@ -1189,6 +1241,10 @@ export class ProfileService {
       | { profile_id: number }
       | undefined;
     return issuedRow?.profile_id ?? null;
+  }
+
+  markManifestAccess(profileId: number, accessedAt = new Date().toISOString()) {
+    this.db.prepare("update profiles set last_manifest_accessed_at = ?, updated_at = ? where id = ?").run(accessedAt, accessedAt, profileId);
   }
 
   private insertDefaultServer(profileId: number, now: string) {

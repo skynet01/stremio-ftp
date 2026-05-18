@@ -33,6 +33,9 @@ const sharedIndexUpdateSchema = adminAuthSchema.extend({
   enabled: z.boolean().optional(),
   autoLinkImports: z.boolean().optional(),
 });
+const sharedIndexScheduleSchema = adminAuthSchema.extend({
+  intervalMinutes: z.number().int().min(0),
+});
 const sharedIndexServerTargetSchema = adminAuthSchema.extend({
   profileId: z.number().int().positive(),
   serverId: z.number().int().positive(),
@@ -200,6 +203,32 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
       const group = service.getSharedIndexGroup(groupId.data);
       if (!group) return res.status(404).json({ error: "Shared index group not found" });
       res.json({ group: sharedIndexGroupView(service, scanQueue, group) });
+    } catch (error) {
+      handleSharedIndexError(error, res);
+    }
+  });
+
+  router.post("/shared-index-groups/:groupId/schedule", async (req, res) => {
+    const groupId = groupIdSchema.safeParse(req.params.groupId);
+    if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
+    const parsed = sharedIndexScheduleSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid shared index schedule request" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (parsed.data.intervalMinutes > 0 && parsed.data.intervalMinutes < config.scanMinRescanIntervalMinutes) {
+      return res.status(400).json({ error: `Rescan frequency must be at least ${config.scanMinRescanIntervalMinutes} minutes.` });
+    }
+
+    try {
+      const nextScheduledScanAt =
+        parsed.data.intervalMinutes > 0 ? new Date(Date.now() + parsed.data.intervalMinutes * 60_000).toISOString() : null;
+      const scanSchedule = service.saveSharedIndexGroupScanSchedule(groupId.data, {
+        intervalMinutes: parsed.data.intervalMinutes,
+        nextScheduledScanAt,
+      });
+      const group = service.getSharedIndexGroup(groupId.data);
+      if (!group) return res.status(404).json({ error: "Shared index group not found" });
+      res.json({ group: sharedIndexGroupView(service, scanQueue, group), scanSchedule });
     } catch (error) {
       handleSharedIndexError(error, res);
     }
@@ -415,6 +444,7 @@ function sharedIndexGroupView(service: ProfileService, scanQueue: ScanQueue, gro
     linkedServerCount: group.linkedServers,
     linkedServers: service.listSharedIndexLinkedServers(group.id),
     masterServer: service.sharedIndexGroupMaster(group.id),
+    scanSchedule: service.sharedIndexGroupScanSchedule(group.id),
     scanStatus: scanQueue.getSharedIndexScanStatus(group.id),
   };
 }

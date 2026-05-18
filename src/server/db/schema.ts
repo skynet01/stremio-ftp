@@ -168,6 +168,7 @@ export function migrate(db: Database.Database) {
       next_scheduled_scan_at text,
       admin_enabled integer not null default 0 check (admin_enabled in (0, 1)),
       last_country_code text,
+      last_manifest_accessed_at text,
       install_token_hash text not null unique,
       created_at text not null,
       updated_at text not null,
@@ -274,6 +275,7 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureProfileColumn(db, "next_scheduled_scan_at", "text");
   ensureProfileColumn(db, "admin_enabled", "integer not null default 0");
   ensureProfileColumn(db, "last_country_code", "text");
+  ensureProfileColumn(db, "last_manifest_accessed_at", "text");
   ensureMediaColumn(db, "catalog_kind", "text not null default 'movie'");
   ensureMediaColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
   ensureFtpServerColumn(db, "catalog_content_uncategorized", "integer not null default 1");

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
+import { MediaRepository } from "../src/server/media/mediaRepository";
 import { ProfileService } from "../src/server/profiles/profileService";
 
 function config(): AppConfig {
@@ -830,7 +831,7 @@ describe("profile routes", () => {
     expect(rejected.body).toEqual({ error: "At least one FTP server is required" });
   });
 
-  it("auto-links saved servers to approved shared indexes and routes rescans to the shared scan", async () => {
+  it("auto-links saved servers to approved shared indexes and reports linked shared stats", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const app = createApp(config(), db, {
@@ -898,31 +899,124 @@ describe("profile routes", () => {
       .post("/api/profile/index/rescan")
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase", serverId })
-      .expect(200);
-    expect(["queued", "running"]).toContain(rescan.body.scanStatus.status);
+      .expect(400);
+    expect(rescan.body).toEqual({ error: "Linked servers are scanned through their shared index group." });
 
-    let loaded = await request(app)
+    const indexedAt = "2026-05-18T12:00:00.000Z";
+    new MediaRepository(db).upsertSharedParsedFile(group.group.id, {
+      ftpPath: "/Shared.Movie.2020.mkv",
+      filename: "Shared.Movie.2020.mkv",
+      normalizedFilename: "shared movie 2020",
+      extension: ".mkv",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "shared movie",
+      parsedYear: 2020,
+      season: null,
+      episode: null,
+      imdbId: "tt1234567",
+      quality: "1080p",
+      confidence: 95,
+      sizeBytes: 1000,
+      modifiedAt: null,
+      lastSeenAt: indexedAt,
+    });
+    service.saveSharedIndexStatus(group.group.id, { lastScanAt: indexedAt, mediaItems: 1 });
+
+    const loaded = await request(app)
       .post("/api/profile/servers/load")
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(200);
-    for (let attempt = 0; attempt < 20 && loaded.body.servers[0].scanStatus.status !== "succeeded"; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      loaded = await request(app)
-        .post("/api/profile/servers/load")
-        .set("x-setup-token", "setup-secret-123")
-        .send({ browserUid: "browser-uid", passphrase: "passphrase" })
-        .expect(200);
-    }
-    expect(loaded.body.servers[0].scanStatus.status).toBe("succeeded");
+    expect(loaded.body.globalStats).toMatchObject({ totalItems: 1, movies: 1, lastCompletedScanAt: indexedAt, status: "ready" });
+    expect(loaded.body.servers[0].scanStatus.status).toBe("idle");
     expect(loaded.body.servers[0].indexStatus.mediaItems).toBe(1);
 
     const schedule = await request(app)
       .post("/api/profile/index/schedule")
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase", serverId, intervalMinutes: 360 })
-      .expect(400);
-    expect(schedule.body.error).toContain("Shared index scans");
+      .expect(200);
+    expect(schedule.body.scanSchedule.intervalMinutes).toBe(360);
+    expect(schedule.body.scanSchedule.nextScheduledScanAt).toEqual(expect.any(String));
+
+    const reloaded = await request(app)
+      .post("/api/profile/servers/load")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(reloaded.body.servers[0].scanSchedule.intervalMinutes).toBe(360);
+  });
+
+  it("requires confirmation before FTP identity changes unlink a shared index server", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    const service = new ProfileService(db, config().encryptionKey);
+
+    const created = await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    const serverId = service.defaultFtpServerId(created.body.profileId);
+    const linkedConfig = {
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "explicit" as const,
+      allowInvalidCertificate: false,
+      roots: ["/media"],
+    };
+    service.saveFtpServerConfig(created.body.profileId, serverId, linkedConfig, false);
+    service.createSharedIndexGroupFromServer(created.body.profileId, serverId, {
+      name: "Sputnik Main",
+      keyHint: "sputnik-main",
+    });
+
+    const incompatibleSave = {
+      browserUid: "browser-uid",
+      passphrase: "passphrase",
+      serverId,
+      name: "Renamed Server",
+      ftpConfig: { ...linkedConfig, roots: ["/private"] },
+      customization: {
+        catalogEnabled: true,
+        catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+        libraryLayout: "auto",
+        streamDeliveryMode: "proxy",
+      },
+    };
+
+    const harmlessSave = await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ ...incompatibleSave, ftpConfig: linkedConfig, name: "Display Name Only" })
+      .expect(200);
+    expect(harmlessSave.body.server.sharedIndex).toMatchObject({ name: "Sputnik Main" });
+    expect(harmlessSave.body.server.name).toBe("Display Name Only");
+
+    const rejected = await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send(incompatibleSave)
+      .expect(409);
+    expect(rejected.body).toMatchObject({
+      requiresSharedIndexUnlink: true,
+      sharedIndexName: "Sputnik Main",
+    });
+    expect(rejected.body.error).toMatch(/avoid duplicate indexing/i);
+    expect(service.getFtpServer(created.body.profileId, serverId).sharedIndex?.name).toBe("Sputnik Main");
+
+    const unlinked = await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ ...incompatibleSave, unlinkSharedIndex: true })
+      .expect(200);
+    expect(unlinked.body.server.sharedIndex).toBeNull();
+    expect(unlinked.body.server.ftpConfig.roots).toEqual(["/private"]);
   });
 
   it("lets database admins bypass the FTP server cap", async () => {

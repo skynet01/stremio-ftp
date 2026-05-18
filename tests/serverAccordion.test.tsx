@@ -179,6 +179,7 @@ describe("ServerAccordion", () => {
     expect(screen.getByText("Scanning handled by shared master index.")).toBeTruthy();
     expect(screen.getByText("sputnik-main")).toBeTruthy();
     expect(screen.getByLabelText("Rescan frequency")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Rescan" })).toBeDisabled();
   });
 
   it("groups library selects and server content separately from catalog toggles", () => {

@@ -59,6 +59,23 @@ describe("GlobalStatusPanel", () => {
     expect(screen.getByText(/Last scan/)).toHaveAttribute("title", "4 new items were pulled during the last update.");
   });
 
+  it("disables global rescan actions when only linked servers are available", () => {
+    render(
+      <GlobalStatusPanel
+        stats={baseStats}
+        scanProgress={null}
+        profileReady={true}
+        scanActive={false}
+        rescanAvailable={false}
+        onRescanAll={() => undefined}
+        onForceReindexAll={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Rescan All" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Rescan all options" })).toBeDisabled();
+  });
+
   it("keeps changelog dates and tags on one mobile row without repeating the page glow", () => {
     const css = readFileSync("src/web/styles.css", "utf8");
 

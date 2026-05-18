@@ -14,6 +14,7 @@ export function GlobalStatusPanel({
   scanProgress,
   profileReady,
   scanActive,
+  rescanAvailable = true,
   onRescanAll,
   onForceReindexAll,
   children,
@@ -22,13 +23,15 @@ export function GlobalStatusPanel({
   scanProgress: GlobalScanProgress | null;
   profileReady: boolean;
   scanActive: boolean;
+  rescanAvailable?: boolean;
   onRescanAll: () => void;
   onForceReindexAll?: () => void;
   children?: ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const actionDisabled = !profileReady || scanActive;
+  const actionDisabled = !profileReady || scanActive || !rescanAvailable;
+  const rescanTitle = !rescanAvailable ? "Linked servers are scanned through their shared index groups." : undefined;
   const lastScanTitle =
     typeof stats.lastCompletedScanNewItems === "number"
       ? `${stats.lastCompletedScanNewItems} new ${stats.lastCompletedScanNewItems === 1 ? "item was" : "items were"} pulled during the last update.`
@@ -61,7 +64,7 @@ export function GlobalStatusPanel({
         <div className="global-status-state">
           <span title={lastScanTitle}>Last scan {formatScanTime(stats.lastCompletedScanAt)}</span>
           <div className="global-rescan-actions" ref={menuRef}>
-            <button type="button" className="secondary-button global-rescan-button" disabled={actionDisabled} onClick={onRescanAll}>
+            <button type="button" className="secondary-button global-rescan-button" disabled={actionDisabled} title={rescanTitle} onClick={onRescanAll}>
               Rescan All
             </button>
             <button
@@ -71,6 +74,7 @@ export function GlobalStatusPanel({
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               aria-controls="global-rescan-menu"
+              title={rescanTitle}
               disabled={actionDisabled || !onForceReindexAll}
               onClick={() => setMenuOpen((open) => !open)}
             >

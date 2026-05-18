@@ -6,7 +6,7 @@ import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import { countryCodeFromRequest } from "../http/requestMetadata.js";
 import { MediaRepository } from "../media/mediaRepository.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
-import { DuplicateProfileError, ProfileService, type FtpServer } from "./profileService.js";
+import { DuplicateProfileError, ProfileService, SharedIndexUnlinkRequiredError, type FtpServer } from "./profileService.js";
 
 const createSchema = z.object({
   browserUid: z.string().min(8),
@@ -70,6 +70,7 @@ const saveServerSchema = serverIdSchema.extend({
     streamDescriptionTemplate: true,
   }),
   sharedIndexKey: z.string().trim().min(1).max(256).optional(),
+  unlinkSharedIndex: z.boolean().optional(),
 });
 
 function urls(baseUrl: string, token: string) {
@@ -253,12 +254,20 @@ export function profileRoutes(
         ftpConfig,
         customization: enforceDeliveryModeFor(parsed.data.browserUid, parsed.data.customization),
         sharedIndexKey: parsed.data.sharedIndexKey,
+        unlinkSharedIndex: parsed.data.unlinkSharedIndex,
       });
       res.json({
         server: serverPayload(service, scanQueue, server),
         globalStats: globalStats(service, scanQueue, unlocked.profileId),
       });
     } catch (error) {
+      if (error instanceof SharedIndexUnlinkRequiredError) {
+        return res.status(409).json({
+          error: error.message,
+          requiresSharedIndexUnlink: true,
+          sharedIndexName: error.sharedIndexName,
+        });
+      }
       res.status(error instanceof Error && error.message.includes("FTP password") ? 400 : 401).json({
         error: error instanceof Error ? error.message : "Invalid passphrase",
       });
@@ -385,13 +394,9 @@ export function profileRoutes(
       if (parsed.data.all) {
         const servers = service
           .listFtpServers(unlocked.profileId)
-          .filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig));
-        if (!servers.length) return res.status(400).json({ error: "FTP settings are not configured" });
-        const scanStatuses = servers.map((server) =>
-          server.sharedIndex
-            ? scanQueue.enqueueSharedIndexScan(server.sharedIndex.id, "manual", scanOptions)
-            : scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id, scanOptions),
-        );
+          .filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig) && !server.sharedIndex);
+        if (!servers.length) return res.status(400).json({ error: "No unlinked FTP servers can be rescanned from this profile." });
+        const scanStatuses = servers.map((server) => scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id, scanOptions));
         return res.json({
           scanStatus: scanStatuses[0],
           scanStatuses,
@@ -404,7 +409,7 @@ export function profileRoutes(
       if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
       if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "Fill in username and password before scanning this server." });
       const server = service.getFtpServer(unlocked.profileId, serverId);
-      if (server.sharedIndex) return res.json({ scanStatus: scanQueue.enqueueSharedIndexScan(server.sharedIndex.id, "manual", scanOptions) });
+      if (server.sharedIndex) return res.status(400).json({ error: "Linked servers are scanned through their shared index group." });
       res.json({ scanStatus: scanQueue.enqueueProfileScan(unlocked.profileId, "manual", serverId, scanOptions) });
     } catch (error) {
       res.status(400).json({ error: ftpErrorMessage(error, "Unable to refresh FTP index") });
@@ -456,7 +461,7 @@ export function profileRoutes(
       }
       const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
       const server = service.getFtpServer(unlocked.profileId, serverId);
-      if (server.sharedIndex) {
+      if (server.sharedIndex && service.getSharedIndexGroup(server.sharedIndex.id)?.masterProfileFtpServerId !== serverId) {
         return res.status(400).json({ error: "Shared index scans are scheduled from the master index." });
       }
       const nextScheduledScanAt =
@@ -505,7 +510,7 @@ function serverPayload(service: ProfileService, scanQueue: ScanQueue, server: Ft
       ? { lastScanAt: sharedGroup.lastIndexedAt, mediaItems: sharedGroup.indexedMediaCount }
       : server.indexStatus,
     scanStatus: sharedScanStatus ?? scanQueue.getServerScanStatus(server.profileId, server.id),
-    scanSchedule: sharedGroup ? { intervalMinutes: 0, nextScheduledScanAt: null } : server.scanSchedule,
+    scanSchedule: sharedGroup ? service.sharedIndexGroupScanSchedule(sharedGroup.id) : server.scanSchedule,
     connectionStatus: server.connectionStatus,
     pendingScanAfter: sharedGroup ? null : server.pendingScanAfter,
     sharedIndex: sharedGroup
@@ -522,14 +527,20 @@ function serverPayload(service: ProfileService, scanQueue: ScanQueue, server: Ft
 
 function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: number) {
   const servers = service.listFtpServers(profileId);
-  const counts = new MediaRepository(service.database).aggregateCountsForProfile(profileId);
-  const statuses = servers.map((server) => scanQueue.getServerScanStatus(profileId, server.id));
+  const linkedGroupIds = [...new Set(servers.map((server) => server.sharedIndex?.id).filter((id): id is number => typeof id === "number"))];
+  const counts = new MediaRepository(service.database).aggregateCountsForProfileWithSharedIndexes(profileId, linkedGroupIds);
+  const statuses = [
+    ...servers.filter((server) => !server.sharedIndex).map((server) => scanQueue.getServerScanStatus(profileId, server.id)),
+    ...linkedGroupIds.map((groupId) => scanQueue.getSharedIndexScanStatus(groupId)),
+  ];
   const activeScans = statuses.filter((status) => status.status === "running").length;
   const queuedScans = statuses.filter((status) => status.status === "queued").length;
-  const pendingScans = queuedScans + servers.filter((server) => server.pendingScanAfter).length;
+  const pendingScans = queuedScans + servers.filter((server) => !server.sharedIndex && server.pendingScanAfter).length;
   const lastCompletedScanAt =
-    servers
-      .map((server) => server.indexStatus.lastScanAt)
+    [
+      ...servers.filter((server) => !server.sharedIndex).map((server) => server.indexStatus.lastScanAt),
+      ...linkedGroupIds.map((groupId) => service.getSharedIndexGroup(groupId)?.lastIndexedAt ?? null),
+    ]
       .filter((value): value is string => Boolean(value))
       .sort()
       .at(-1) ?? null;

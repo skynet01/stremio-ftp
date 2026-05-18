@@ -32,7 +32,7 @@ import { Footer } from "./components/Footer.js";
 import { GlobalStatusPanel, type GlobalScanProgress } from "./components/GlobalStatusPanel.js";
 import { HeroPanel } from "./components/HeroPanel.js";
 import { InstallPanel } from "./components/InstallPanel.js";
-import { ServerAccordion, type ServerForm } from "./components/ServerAccordion.js";
+import { isServerDraft, ServerAccordion, type ServerForm } from "./components/ServerAccordion.js";
 import { SetupTokenPanel } from "./components/SetupTokenPanel.js";
 import { StreamFormatterPanel } from "./components/StreamFormatterPanel.js";
 import { Topbar } from "./components/Topbar.js";
@@ -96,6 +96,7 @@ const SERVER_LIBRARY_SETTING_KEYS = new Set<keyof ServerForm>([
   "libraryLayout",
   "streamDeliveryMode",
 ]);
+const SHARED_INDEX_UNLINK_REQUIRED_FRAGMENT = "will unlink it from the shared index group";
 
 function browserUid() {
   const cryptoApi = globalThis.crypto;
@@ -358,6 +359,7 @@ export function App() {
     () => servers.some((server) => Boolean(server.host) && server.passwordConfigured),
     [servers],
   );
+  const hasRescannableServer = useMemo(() => servers.some((server) => !server.sharedIndex && !isServerDraft(server)), [servers]);
 
   useEffect(() => {
     void loadSetupStatus(recoveryUid)
@@ -705,7 +707,7 @@ export function App() {
         updateServer(targetServerId, { message: "FTP and library settings saved. Refresh the index to find files." });
         return;
       }
-      const result = await saveFtpServer({
+      const serverRequest = {
         browserUid: recoveryUid,
         passphrase,
         serverId: targetServerId,
@@ -718,7 +720,20 @@ export function App() {
           streamDeliveryMode: server.streamDeliveryMode,
         },
         sharedIndexKey: server.sharedIndexKey,
-      });
+      };
+      let result: Awaited<ReturnType<typeof saveFtpServer>>;
+      try {
+        result = await saveFtpServer(serverRequest);
+      } catch (error) {
+        if (!(error instanceof Error) || !server.sharedIndex || !error.message.includes(SHARED_INDEX_UNLINK_REQUIRED_FRAGMENT)) throw error;
+        const confirmed = window.confirm(sharedIndexUnlinkConfirmation(server.sharedIndex.name));
+        if (!confirmed) {
+          updateServer(serverId, { message: "Save cancelled. Server remains linked to the shared index." });
+          return;
+        }
+        updateServer(serverId, { message: "Unlinking from shared index and saving server settings..." });
+        result = await saveFtpServer({ ...serverRequest, unlinkSharedIndex: true });
+      }
       const savedFormBase = { ...serverFormFromPayload(result.server), pendingCreate: false };
       let savedScanStatus = savedFormBase.scanStatus;
       let savedMessage = "Settings saved. Auto-scan will start in about 5 minutes.";
@@ -768,6 +783,10 @@ export function App() {
     const target = servers.find((server) => server.id === serverId);
     if (target?.pendingCreate) {
       updateServer(serverId, { message: "Click Save FTP settings first to scan this server." });
+      return;
+    }
+    if (target?.sharedIndex) {
+      updateServer(serverId, { message: "Linked servers are scanned through their shared index group." });
       return;
     }
     updateServer(serverId, { message: "Queueing FTP index refresh..." });
@@ -1200,6 +1219,7 @@ export function App() {
                 scanProgress={globalScanProgress}
                 profileReady={profileReady}
                 scanActive={anyScanActive}
+                rescanAvailable={hasRescannableServer}
                 onRescanAll={() => void refreshAllServers()}
                 onForceReindexAll={() => void refreshAllServers(true)}
               >
@@ -1210,7 +1230,7 @@ export function App() {
                       id="globalCatalogTmdbApiKey"
                       className={filledClass(catalogTmdbApiKey)}
                       value={catalogTmdbApiKey}
-                      placeholder="Use server default"
+                      placeholder="Add your own TMDB key for better matching"
                       onChange={(event) => setCatalogTmdbApiKey(event.currentTarget.value)}
                       onBlur={(event) => void saveGlobalTmdbApiKey(event.currentTarget.value)}
                     />
@@ -1297,4 +1317,16 @@ function humanizeCooldownMessage(message: string | null) {
   const minutes = totalMinutes % 60;
   const duration = hours && minutes ? `${hours}h ${minutes}m` : hours ? `${hours}h` : `${minutes}m`;
   return `Manual scan cooldown active. Try again in ${duration}.`;
+}
+
+function sharedIndexUnlinkConfirmation(sharedIndexName: string) {
+  return [
+    `This server is linked to the "${sharedIndexName}" master index.`,
+    "",
+    "Linked servers use one shared scan result, which avoids duplicate indexing, keeps updates faster, and lets profiles on the same FTP root share the same indexed library.",
+    "",
+    "Changing FTP host, port, TLS, certificate, or root paths means this server no longer matches that shared index. Saving will unlink it, clear its shared schedule, and it will need to build and scan its own index for the new path.",
+    "",
+    "Unlink only if this profile needs a specific folder path or a different FTP target. Continue?",
+  ].join("\n");
 }
