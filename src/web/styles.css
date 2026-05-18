@@ -637,7 +637,7 @@ textarea:focus-visible,
   width: 100%;
   min-height: 72px;
   display: grid;
-  grid-template-columns: 24px minmax(145px, 0.85fr) minmax(180px, 1fr) minmax(210px, 1fr) auto;
+  grid-template-columns: 24px minmax(150px, 0.75fr) minmax(220px, 0.85fr) minmax(320px, 1.4fr) auto;
   gap: 12px;
   align-items: center;
   padding: 16px 0;
@@ -684,14 +684,32 @@ textarea:focus-visible,
 
 .server-metrics {
   min-width: 0;
-  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+  overflow: visible;
   color: var(--cream-dim);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.68rem;
   letter-spacing: 0.045em;
   line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+}
+
+.server-linked-index {
+  color: oklch(78% 0.13 236);
+  font-weight: 700;
+}
+
+.server-item-count {
+  color: var(--green);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.server-scan-summary {
+  color: var(--cream-dim);
 }
 
 .server-accordion-body {
@@ -1283,7 +1301,10 @@ input:-webkit-autofill:active {
 }
 
 .admin-rekey-button {
-  gap: 6px;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
   color: var(--amber);
   background: rgba(242, 184, 75, 0.08);
 }
@@ -1292,6 +1313,32 @@ input:-webkit-autofill:active {
   margin: 0 0 4px;
   color: var(--accent);
   font-size: 0.96rem;
+}
+
+.admin-shared-title-button {
+  display: inline;
+  max-width: 100%;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: text;
+}
+
+.admin-shared-title-button:hover,
+.admin-shared-title-button:focus-visible {
+  color: var(--cream);
+  outline: none;
+}
+
+.admin-shared-title-input {
+  width: min(100%, 280px);
+  min-height: 34px;
+  padding: 6px 8px;
+  color: var(--cream);
+  font: inherit;
 }
 
 .admin-shared-card p {
@@ -1465,18 +1512,21 @@ input:-webkit-autofill:active {
   font-size: 0.58rem;
 }
 
+.modal-backdrop,
 .admin-bulk-dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  z-index: 60;
   display: grid;
   place-items: center;
   padding: 18px;
   background: rgba(4, 8, 12, 0.72);
+  backdrop-filter: blur(10px);
   overflow: auto;
   overscroll-behavior: contain;
 }
 
+.modal-dialog,
 .admin-bulk-dialog {
   display: grid;
   gap: 16px;
@@ -1490,6 +1540,7 @@ input:-webkit-autofill:active {
   box-shadow: 0 24px 72px rgba(0, 0, 0, 0.36);
 }
 
+.modal-dialog-header,
 .admin-bulk-dialog-header {
   display: flex;
   align-items: flex-start;
@@ -1497,9 +1548,52 @@ input:-webkit-autofill:active {
   gap: 14px;
 }
 
+.modal-dialog h3,
 .admin-bulk-dialog h3 {
   margin: 4px 0 0;
   font-size: 1.1rem;
+}
+
+.confirm-dialog {
+  width: min(540px, 100%);
+  gap: 18px;
+}
+
+.confirm-dialog-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.confirm-dialog-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(116, 210, 255, 0.28);
+  border-radius: 8px;
+  color: var(--accent);
+  background: rgba(116, 210, 255, 0.1);
+}
+
+.confirm-dialog-danger .confirm-dialog-icon {
+  border-color: rgba(255, 122, 122, 0.3);
+  color: var(--danger);
+  background: rgba(255, 122, 122, 0.1);
+}
+
+.confirm-dialog-body {
+  margin: 0;
+  color: var(--cream-dim);
+  line-height: 1.58;
+  white-space: pre-line;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .admin-bulk-result-grid {
@@ -1526,8 +1620,8 @@ input:-webkit-autofill:active {
 
 .admin-server-dialog {
   width: fit-content;
-  min-width: min(920px, calc(100vw - 36px));
-  max-width: min(1240px, calc(100vw - 36px));
+  min-width: min(1040px, calc(100vw - 36px));
+  max-width: min(1380px, calc(100vw - 36px));
   max-height: min(74vh, 680px);
 }
 
@@ -1715,12 +1809,12 @@ input:-webkit-autofill:active {
 
 .admin-profile-table th:nth-child(1),
 .admin-profile-table td:nth-child(1) {
-  width: 58px;
+  width: 38px;
 }
 
 .admin-profile-table th:nth-child(2),
 .admin-profile-table td:nth-child(2) {
-  width: 38px;
+  width: 58px;
 }
 
 .admin-profile-table th:nth-child(3),
@@ -2000,12 +2094,12 @@ input:-webkit-autofill:active {
 
 .admin-server-dialog-table th:nth-child(4),
 .admin-server-dialog-table td:nth-child(4) {
-  width: 188px;
+  width: 224px;
 }
 
 .admin-server-dialog-table th:nth-child(5),
 .admin-server-dialog-table td:nth-child(5) {
-  width: 192px;
+  width: 280px;
 }
 
 .admin-server-dialog-table th:nth-child(6),
@@ -2045,6 +2139,12 @@ input:-webkit-autofill:active {
 .admin-server-dialog-table .badge {
   display: inline-flex;
   margin-top: 0;
+}
+
+.admin-server-dialog-table td[data-label="Status"] span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .admin-server-link-controls {

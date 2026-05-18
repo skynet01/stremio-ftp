@@ -101,6 +101,7 @@ export type FtpServerSettings = {
     name: string;
     keyHint: string;
     linked: boolean;
+    isMaster?: boolean;
     message: string;
   } | null;
 };

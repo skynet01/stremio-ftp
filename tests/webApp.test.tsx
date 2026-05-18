@@ -287,7 +287,7 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Movies")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.40`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.41`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
@@ -1037,16 +1037,16 @@ describe("App", () => {
     rescanIndexMock.mockResolvedValue({
       scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual", message: "Waiting for scan worker." },
     });
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-
     render(<App />);
 
     await screen.findByText("Sputnik Main");
     fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/Private" } });
     fireEvent.click(screen.getByRole("button", { name: "Save FTP settings" }));
 
+    const unlinkDialog = await screen.findByRole("dialog", { name: "Unlink from Sputnik Main?" });
+    expect(within(unlinkDialog).getByText(/Linked servers use one shared scan result/)).toBeTruthy();
+    fireEvent.click(within(unlinkDialog).getByRole("button", { name: "Unlink and save" }));
     await waitFor(() => expect(saveFtpServerMock).toHaveBeenCalledTimes(2));
-    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("Linked servers use one shared scan result"));
     expect(saveFtpServerMock).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -1080,8 +1080,6 @@ describe("App", () => {
         status: "working",
       },
     });
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-
     render(<App />);
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
     const recoveryUidValue = (screen.getByLabelText("Recovery UID") as HTMLInputElement).value;
@@ -1091,7 +1089,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rescan all options" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Force reindex all" }));
 
-    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("clear incremental scan snapshots"));
+    const forceDialog = await screen.findByRole("dialog", { name: "Force reindex all servers?" });
+    expect(within(forceDialog).getByText(/clear incremental scan snapshots/)).toBeTruthy();
+    fireEvent.click(within(forceDialog).getByRole("button", { name: "Force reindex" }));
     await waitFor(() =>
       expect(rescanIndexMock).toHaveBeenCalledWith({
         browserUid: recoveryUidValue,
@@ -1790,6 +1790,64 @@ describe("App", () => {
     await waitFor(() => expect(screen.getAllByLabelText("Admin").length).toBeGreaterThan(0));
   });
 
+  it("renames shared index groups from the title", async () => {
+    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
+    const sharedGroup = {
+      id: 5,
+      keyHint: "sputnik-main",
+      name: "Sputnik Main",
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      tlsMode: "explicit" as const,
+      allowInvalidCertificate: false,
+      rootPaths: ["/media"],
+      libraryLayout: "auto" as const,
+      catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+      enabled: true,
+      autoLinkImports: true,
+      masterProfileFtpServerId: 9,
+      indexedMediaCount: 1200,
+      lastIndexedAt: "2026-05-16T00:00:00.000Z",
+      linkedServerCount: 12,
+      createdAt: "2026-05-16T00:00:00.000Z",
+      updatedAt: "2026-05-16T00:00:00.000Z",
+      linkedServers: [],
+      masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", serverId: 9, serverName: "Server 1" },
+      scanSchedule: { intervalMinutes: 360, nextScheduledScanAt: "2026-05-16T06:00:00.000Z" },
+      scanStatus: { ...idleScanStatus },
+    };
+    loadAdminSharedIndexGroupsMock.mockResolvedValue({ groups: [sharedGroup] });
+    updateAdminSharedIndexGroupMock.mockResolvedValue({ group: { ...sharedGroup, name: "Renamed Pool" } });
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "admin-uid",
+      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
+    });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    await screen.findByRole("heading", { name: "Admin dashboard" });
+    fireEvent.doubleClick(await screen.findByRole("button", { name: "Sputnik Main" }));
+    const renameInput = await screen.findByLabelText("Rename Sputnik Main");
+    fireEvent.change(renameInput, { target: { value: "Renamed Pool" } });
+    fireEvent.keyDown(renameInput, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(updateAdminSharedIndexGroupMock).toHaveBeenCalledWith({
+        browserUid: expect.any(String),
+        passphrase: "passphrase",
+        groupId: 5,
+        name: "Renamed Pool",
+        enabled: true,
+        autoLinkImports: true,
+      }),
+    );
+    expect(await screen.findByRole("button", { name: "Renamed Pool" })).toBeTruthy();
+  });
+
   it("performs bulk admin actions for selected profiles", async () => {
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
     loadAdminProfilesMock.mockResolvedValue({
@@ -1867,8 +1925,6 @@ describe("App", () => {
       stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
     });
     saveCustomizationMock.mockResolvedValue({ ok: true });
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-
     render(<App />);
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
@@ -1903,6 +1959,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close bulk action status" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+    const deleteSelectedDialog = await screen.findByRole("dialog", { name: "Delete 2 selected profiles?" });
+    fireEvent.click(within(deleteSelectedDialog).getByRole("button", { name: "Delete selected" }));
     await waitFor(() =>
       expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
         browserUid: expect.any(String),
@@ -1911,7 +1969,6 @@ describe("App", () => {
         action: "delete",
       }),
     );
-    expect(confirmSpy).toHaveBeenCalledWith("Delete 2 selected profiles? This removes their FTP servers, indexed files, and manifest URLs.");
   });
 
   it("halts selected admin scans when selected profiles are already scanning", async () => {

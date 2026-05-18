@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { CircleStop, Copy, Crown, KeyRound, Link2, RefreshCw, Search, ShieldCheck, Trash2, User, X } from "lucide-react";
 import {
@@ -23,6 +23,7 @@ import {
   type AdminProfileSummary,
   type AdminSharedIndexGroup,
 } from "../api.js";
+import { useConfirmDialog } from "./ConfirmDialog.js";
 import { Notice, formatNextScan, formatScanTime, StatusBadge, type StatusTone } from "./ui.js";
 
 type AdminDashboardProps = {
@@ -59,14 +60,6 @@ type BulkLinkResult = {
   }>;
 };
 
-type ConfirmDialogState = {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  danger?: boolean;
-  onConfirm: () => void;
-};
-
 export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) {
   const [data, setData] = useState<AdminProfileListResponse | null>(null);
   const [message, setMessage] = useState("Loading admin profile list...");
@@ -86,8 +79,8 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [revealedSharedKey, setRevealedSharedKey] = useState<{ groupId: number; key: string } | null>(null);
   const [serverModalProfileId, setServerModalProfileId] = useState<number | null>(null);
   const [serverLinkSelections, setServerLinkSelections] = useState<Record<string, string>>({});
-  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [editingSharedScheduleId, setEditingSharedScheduleId] = useState<number | null>(null);
+  const { confirm, confirmDialog } = useConfirmDialog();
 
   async function refreshProfiles() {
     setLoading(true);
@@ -137,18 +130,18 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
-  function requestRefreshUnlinkedIndexes(targetProfiles: AdminProfileSummary[], label: string) {
+  async function requestRefreshUnlinkedIndexes(targetProfiles: AdminProfileSummary[], label: string) {
     const serverCount = targetProfiles.reduce((sum, profile) => sum + unlinkedConfiguredServers(profile).length, 0);
     if (!serverCount) {
       setMessage("No unlinked configured servers need a refresh.");
       return;
     }
-    setConfirmDialog({
+    const confirmed = await confirm({
       title: `Refresh ${serverCount} unlinked server${serverCount === 1 ? "" : "s"}?`,
       body: "This queues FTP rescans only for unlinked configured servers. Linked servers continue to use their shared index groups.",
       confirmLabel: "Refresh unlinked",
-      onConfirm: () => void refreshUnlinkedIndexes(targetProfiles, label),
     });
+    if (confirmed) await refreshUnlinkedIndexes(targetProfiles, label);
   }
 
   useEffect(() => {
@@ -180,13 +173,14 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
-  async function updateSharedGroup(group: AdminSharedIndexGroup, patch: Partial<Pick<AdminSharedIndexGroup, "enabled" | "autoLinkImports">>) {
+  async function updateSharedGroup(group: AdminSharedIndexGroup, patch: Partial<Pick<AdminSharedIndexGroup, "name" | "enabled" | "autoLinkImports">>) {
     setBusySharedGroupId(group.id);
     try {
       const updated = await updateAdminSharedIndexGroup({
         browserUid,
         passphrase,
         groupId: group.id,
+        name: patch.name ?? group.name,
         enabled: patch.enabled ?? group.enabled,
         autoLinkImports: patch.autoLinkImports ?? group.autoLinkImports,
       });
@@ -214,14 +208,14 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
-  function requestRotateSharedKey(group: AdminSharedIndexGroup) {
-    setConfirmDialog({
+  async function requestRotateSharedKey(group: AdminSharedIndexGroup) {
+    const confirmed = await confirm({
       title: `Rotate key for ${group.name}?`,
       body: "Existing import files with the current shared index key will stop auto-linking. Linked servers stay linked.",
       confirmLabel: "Rotate key",
       danger: true,
-      onConfirm: () => void rotateSharedKey(group),
     });
+    if (confirmed) await rotateSharedKey(group);
   }
 
   async function deleteSharedGroup(group: AdminSharedIndexGroup) {
@@ -239,14 +233,14 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
-  function requestDeleteSharedGroup(group: AdminSharedIndexGroup) {
-    setConfirmDialog({
+  async function requestDeleteSharedGroup(group: AdminSharedIndexGroup) {
+    const confirmed = await confirm({
       title: `Delete ${group.name}?`,
       body: "This removes the disabled shared index group and its shared index data. Profile servers linked to it will become unlinked.",
       confirmLabel: "Delete group",
       danger: true,
-      onConfirm: () => void deleteSharedGroup(group),
     });
+    if (confirmed) await deleteSharedGroup(group);
   }
 
   async function runSharedScan(group: AdminSharedIndexGroup) {
@@ -305,11 +299,16 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   }
 
   function requestRescanProfile(profile: AdminProfileSummary) {
-    requestRefreshUnlinkedIndexes([profile], truncateUid(profile.browserUid));
+    void requestRefreshUnlinkedIndexes([profile], truncateUid(profile.browserUid));
   }
 
   async function removeProfile(profile: AdminProfileSummary) {
-    const confirmed = window.confirm(`Delete profile ${profile.browserUid}? This removes its FTP servers, indexed files, and manifest URLs.`);
+    const confirmed = await confirm({
+      title: `Delete ${truncateUid(profile.browserUid)}?`,
+      body: `This removes profile ${profile.browserUid}, its FTP servers, indexed files, and manifest URLs.`,
+      confirmLabel: "Delete profile",
+      danger: true,
+    });
     if (!confirmed) return;
     setBusyProfileId(profile.id);
     try {
@@ -357,7 +356,12 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     const profileIds = selectedProfiles.map((profile) => profile.id);
     if (!profileIds.length) return;
     if (action === "delete") {
-      const confirmed = window.confirm(`Delete ${profileIds.length} selected profiles? This removes their FTP servers, indexed files, and manifest URLs.`);
+      const confirmed = await confirm({
+        title: `Delete ${profileIds.length} selected profile${profileIds.length === 1 ? "" : "s"}?`,
+        body: "This removes their FTP servers, indexed files, and manifest URLs.",
+        confirmLabel: "Delete selected",
+        danger: true,
+      });
       if (!confirmed) return;
     }
 
@@ -531,7 +535,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
             <RefreshCw size={16} aria-hidden="true" />
             Reload
           </button>
-          <button type="button" className="secondary-button" disabled={bulkBusy || loading} onClick={() => requestRefreshUnlinkedIndexes(profilesWithUnlinkedServers(profiles), "all non-empty profiles")}>
+          <button type="button" className="secondary-button" disabled={bulkBusy || loading} onClick={() => void requestRefreshUnlinkedIndexes(profilesWithUnlinkedServers(profiles), "all non-empty profiles")}>
             <RefreshCw size={16} aria-hidden="true" />
             Refresh unlinked
           </button>
@@ -591,7 +595,6 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
             <table className="admin-profile-table">
               <thead>
                 <tr>
-                  <SortHeader label="Admin" sortKey="admin" sort={sort} onSort={updateSort} />
                   <th scope="col" className="admin-select-header">
                     <input
                       type="checkbox"
@@ -601,6 +604,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                       onChange={(event) => toggleVisibleSelection(event.target.checked)}
                     />
                   </th>
+                  <SortHeader label="Admin" sortKey="admin" sort={sort} onSort={updateSort} />
                   <SortHeader label="Recovery UID" sortKey="browserUid" sort={sort} onSort={updateSort} />
                   <SortHeader label="Servers" sortKey="servers" sort={sort} onSort={updateSort} />
                   <SortHeader label="Indexed" sortKey="indexed" sort={sort} onSort={updateSort} />
@@ -612,9 +616,6 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
               <tbody>
                 {visibleProfiles.map((profile) => (
                   <tr key={profile.id}>
-                    <td data-label="Admin">
-                      <AdminState profile={profile} />
-                    </td>
                     <td data-label="Select" className="admin-select-cell">
                       <input
                         type="checkbox"
@@ -623,6 +624,9 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                         checked={selectedProfileIds.has(profile.id)}
                         onChange={(event) => toggleProfileSelection(profile.id, event.target.checked)}
                       />
+                    </td>
+                    <td data-label="Admin">
+                      <AdminState profile={profile} />
                     </td>
                     <td data-label="Recovery UID">
                       <button
@@ -744,7 +748,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
         />
       ) : null}
       {bulkResult ? <BulkActionDialog result={bulkResult} profiles={profiles} onClose={() => setBulkResult(null)} /> : null}
-      {confirmDialog ? <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} /> : null}
+      {confirmDialog}
     </section>
   );
 }
@@ -937,7 +941,7 @@ function SharedIndexAdminSection({
   revealedKey: { groupId: number; key: string } | null;
   onCreateFormChange: (patch: Partial<typeof createForm>) => void;
   onCreate: () => void;
-  onUpdate: (group: AdminSharedIndexGroup, patch: Partial<Pick<AdminSharedIndexGroup, "enabled" | "autoLinkImports">>) => void;
+  onUpdate: (group: AdminSharedIndexGroup, patch: Partial<Pick<AdminSharedIndexGroup, "name" | "enabled" | "autoLinkImports">>) => void;
   onRotate: (group: AdminSharedIndexGroup) => void;
   onDelete: (group: AdminSharedIndexGroup) => void;
   onScan: (group: AdminSharedIndexGroup) => void;
@@ -945,6 +949,37 @@ function SharedIndexAdminSection({
   onToggleScheduleEditor: (group: AdminSharedIndexGroup) => void;
   onSchedule: (group: AdminSharedIndexGroup, intervalMinutes: number) => void;
 }) {
+  const [editingNameId, setEditingNameId] = useState<number | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const skipNameBlurRef = useRef(false);
+
+  function startEditingName(group: AdminSharedIndexGroup) {
+    if (busyGroupId === group.id) return;
+    skipNameBlurRef.current = false;
+    setEditingNameId(group.id);
+    setDraftName(group.name);
+  }
+
+  function cancelEditingName() {
+    setEditingNameId(null);
+    setDraftName("");
+  }
+
+  function commitEditingName(group: AdminSharedIndexGroup) {
+    const nextName = draftName.trim();
+    cancelEditingName();
+    if (!nextName || nextName === group.name) return;
+    onUpdate(group, { name: nextName });
+  }
+
+  function handleNameBlur(group: AdminSharedIndexGroup) {
+    if (skipNameBlurRef.current) {
+      skipNameBlurRef.current = false;
+      return;
+    }
+    commitEditingName(group);
+  }
+
   return (
     <section className="admin-shared-index-section" aria-labelledby="admin-shared-index-heading">
       <div className="admin-subsection-header">
@@ -992,11 +1027,45 @@ function SharedIndexAdminSection({
           {groups.map((group) => {
             const active = group.scanStatus.status === "queued" || group.scanStatus.status === "running";
             const canDelete = !group.enabled && !active;
+            const editingName = editingNameId === group.id;
             return (
               <article className="admin-shared-card" key={group.id}>
                 <div className="admin-shared-card-header">
                   <div>
-                    <h4>{group.name}</h4>
+                    <h4>
+                      {editingName ? (
+                        <input
+                          className="admin-shared-title-input"
+                          aria-label={`Rename ${group.name}`}
+                          value={draftName}
+                          autoFocus
+                          disabled={busyGroupId === group.id}
+                          onChange={(event) => setDraftName(event.currentTarget.value)}
+                          onBlur={() => handleNameBlur(group)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              skipNameBlurRef.current = true;
+                              commitEditingName(group);
+                            }
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              skipNameBlurRef.current = true;
+                              cancelEditingName();
+                            }
+                          }}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="admin-shared-title-button"
+                          title="Rename shared index group"
+                          onDoubleClick={() => startEditingName(group)}
+                        >
+                          {group.name}
+                        </button>
+                      )}
+                    </h4>
                     <p>
                       {group.host}:{group.port} - {group.rootPaths.join(", ")}
                     </p>
@@ -1077,9 +1146,8 @@ function SharedIndexAdminSection({
                   >
                     <Link2 size={15} aria-hidden="true" />
                   </button>
-                  <button type="button" className="admin-rekey-button" title="Rekey shared index" aria-label={`Rotate key for ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onRotate(group)}>
+                  <button type="button" className="icon-button admin-rekey-button" title="Rekey shared index" aria-label={`Rotate key for ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onRotate(group)}>
                     <KeyRound size={15} aria-hidden="true" />
-                    <span>Rekey</span>
                   </button>
                   <button type="button" className={`icon-button ${active ? "danger-button" : ""}`} title={active ? "Halt shared scan" : "Rescan shared index"} aria-label={active ? `Halt scan for ${group.name}` : `Rescan ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onScan(group)}>
                     {active ? <CircleStop size={15} aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
@@ -1190,40 +1258,6 @@ function ProfileServersDialog({
               })}
             </tbody>
           </table>
-        </div>
-      </div>
-      </div>
-    </ModalPortal>
-  );
-}
-
-function ConfirmDialog({ dialog, onClose }: { dialog: ConfirmDialogState; onClose: () => void }) {
-  function confirm() {
-    dialog.onConfirm();
-    onClose();
-  }
-
-  return (
-    <ModalPortal>
-      <div className="admin-bulk-dialog-backdrop">
-      <div className="admin-bulk-dialog admin-confirm-dialog" role="dialog" aria-modal={true} aria-labelledby="admin-confirm-dialog-heading">
-        <div className="admin-bulk-dialog-header">
-          <div>
-            <span className="section-label">Confirm</span>
-            <h3 id="admin-confirm-dialog-heading">{dialog.title}</h3>
-          </div>
-          <button type="button" className="icon-button" aria-label="Close confirmation" onClick={onClose}>
-            <X size={16} aria-hidden="true" />
-          </button>
-        </div>
-        <p>{dialog.body}</p>
-        <div className="admin-confirm-actions">
-          <button type="button" className={`secondary-button ${dialog.danger ? "danger-button" : ""}`} onClick={confirm}>
-            {dialog.confirmLabel}
-          </button>
-          <button type="button" className="secondary-button" onClick={onClose}>
-            Cancel
-          </button>
         </div>
       </div>
       </div>

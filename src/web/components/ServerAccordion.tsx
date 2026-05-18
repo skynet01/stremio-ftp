@@ -44,6 +44,7 @@ export type ServerForm = {
     name: string;
     keyHint: string;
     linked: boolean;
+    isMaster?: boolean;
     message: string;
   } | null;
   message: string;
@@ -59,18 +60,29 @@ export function isServerDraft(server: ServerForm): boolean {
   return false;
 }
 
-function serverSummary(server: ServerForm) {
-  const prefix = server.sharedIndex ? `${server.sharedIndex.name} shared index - ` : "";
-  if (server.scanStatus.status === "queued") return `${prefix}Queued for indexing`;
+function serverHostLabel(server: ServerForm) {
+  const host = server.host.trim();
+  if (!host) return "No host configured";
+  const port = server.port.trim();
+  return port ? `${host}:${port}` : host;
+}
+
+function serverSummaryTokens(server: ServerForm) {
+  const linkedLabel = server.sharedIndex ? `${server.sharedIndex.name} shared index` : null;
+  if (server.scanStatus.status === "queued") return { linkedLabel, statusLabel: "Queued for indexing" };
   if (server.scanStatus.status === "running") {
     const path = server.scanStatus.currentPath ? ` - ${server.scanStatus.currentPath}` : "";
-    return `${prefix}${server.scanStatus.progressPercent}% ${scanModeLabel(server.scanStatus).toLowerCase()}${path}`;
+    return { linkedLabel, statusLabel: `${server.scanStatus.progressPercent}% ${scanModeLabel(server.scanStatus).toLowerCase()}${path}` };
   }
   if (server.scanStatus.status === "failed") {
     const reason = server.scanStatus.error || server.scanStatus.message || "Scan failed";
-    return server.pendingScanAfter ? `${prefix}${reason} - retry pending` : `${prefix}${reason}`;
+    return { linkedLabel, statusLabel: server.pendingScanAfter ? `${reason} - retry pending` : reason };
   }
-  return `${prefix}${server.indexStatus.mediaItems} items - Last scan ${formatCompactScanTime(server.indexStatus.lastScanAt)}`;
+  return {
+    linkedLabel,
+    itemLabel: `${server.indexStatus.mediaItems.toLocaleString()} items`,
+    statusLabel: `Last scan ${formatCompactScanTime(server.indexStatus.lastScanAt)}`,
+  };
 }
 
 function formatCompactScanTime(lastScanAt: string | null) {
@@ -170,8 +182,9 @@ export function ServerAccordion({
         {servers.map((server, index) => {
           const expanded = expandedServerId === server.id;
           const active = scanIsActive(server.scanStatus);
-          const linked = Boolean(server.sharedIndex);
+          const linkedNonMaster = Boolean(server.sharedIndex && !server.sharedIndex.isMaster);
           const badge = serverBadge(server);
+          const summary = serverSummaryTokens(server);
           const triggerId = `server-trigger-${server.id}`;
           const bodyId = `server-panel-${server.id}`;
           return (
@@ -186,8 +199,16 @@ export function ServerAccordion({
               >
                 <ChevronRight size={18} aria-hidden={true} />
                 <span className="server-title">{server.name || `Server ${index + 1}`}</span>
-                <span className="server-subtitle">{server.host || "No host configured"}</span>
-                <span className="server-metrics">{serverSummary(server)}</span>
+                <span className="server-subtitle">{serverHostLabel(server)}</span>
+                <span className="server-metrics">
+                  {summary.linkedLabel ? (
+                    <span className="server-linked-index">{summary.linkedLabel}</span>
+                  ) : null}
+                  {summary.itemLabel ? (
+                    <span className="server-item-count">{summary.itemLabel}</span>
+                  ) : null}
+                  <span className="server-scan-summary">{summary.statusLabel}</span>
+                </span>
                 <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
               </button>
               {expanded ? (
@@ -398,7 +419,7 @@ export function ServerAccordion({
                       <h3>Index status</h3>
                       {server.sharedIndex ? (
                         <div className="shared-index-banner">
-                          <StatusBadge tone="green">Shared</StatusBadge>
+                          <StatusBadge tone={server.sharedIndex.isMaster ? "blue" : "green"}>{server.sharedIndex.isMaster ? "Master" : "Shared"}</StatusBadge>
                           <div>
                             <strong>{server.sharedIndex.name}</strong>
                             <span>{server.sharedIndex.message}</span>
@@ -441,7 +462,7 @@ export function ServerAccordion({
                             id={`scanInterval-${server.id}`}
                             className={filledClass(server.scanSchedule.intervalMinutes)}
                             value={String(server.scanSchedule.intervalMinutes)}
-                            disabled={!profileReady || Boolean(server.sharedIndex)}
+                            disabled={!profileReady || linkedNonMaster}
                             onChange={(event) => onUpdateScanSchedule(server.id, Number(event.currentTarget.value))}
                           >
                             <option value="0">Manual only</option>
@@ -474,9 +495,7 @@ export function ServerAccordion({
                       aria-label="Delete server"
                       title="Delete server"
                       disabled={!profileReady || servers.length <= 1}
-                      onClick={() => {
-                        if (window.confirm(`Delete ${server.name || `Server ${index + 1}`}?`)) onDeleteServer(server.id);
-                      }}
+                      onClick={() => onDeleteServer(server.id)}
                     >
                       <Trash2 size={17} aria-hidden={true} />
                     </button>
@@ -492,8 +511,8 @@ export function ServerAccordion({
                       <button
                         type="button"
                         className="secondary-button server-scan-action"
-                        disabled={!profileReady || linked}
-                        title={linked ? "Linked servers are scanned through their shared index group." : undefined}
+                        disabled={!profileReady || linkedNonMaster}
+                        title={linkedNonMaster ? "Linked servers are scanned through their shared index group." : undefined}
                         onClick={() => onRefreshServer(server.id)}
                       >
                         <RefreshCw size={17} aria-hidden={true} />

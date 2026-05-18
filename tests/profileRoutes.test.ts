@@ -899,8 +899,8 @@ describe("profile routes", () => {
       .post("/api/profile/index/rescan")
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase", serverId })
-      .expect(400);
-    expect(rescan.body).toEqual({ error: "Linked servers are scanned through their shared index group." });
+      .expect(200);
+    expect(rescan.body.scanStatus.status).toMatch(/queued|running/);
 
     const indexedAt = "2026-05-18T12:00:00.000Z";
     new MediaRepository(db).upsertSharedParsedFile(group.group.id, {
@@ -929,7 +929,7 @@ describe("profile routes", () => {
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(200);
     expect(loaded.body.globalStats).toMatchObject({ totalItems: 1, movies: 1, lastCompletedScanAt: indexedAt, status: "ready" });
-    expect(loaded.body.servers[0].scanStatus.status).toBe("idle");
+    expect(["idle", "succeeded"]).toContain(loaded.body.servers[0].scanStatus.status);
     expect(loaded.body.servers[0].indexStatus.mediaItems).toBe(1);
 
     const schedule = await request(app)
@@ -954,13 +954,13 @@ describe("profile routes", () => {
     const app = createApp(config(), db);
     const service = new ProfileService(db, config().encryptionKey);
 
-    const created = await request(app)
+    const master = await request(app)
       .post("/api/profile")
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(201);
 
-    const serverId = service.defaultFtpServerId(created.body.profileId);
+    const masterServerId = service.defaultFtpServerId(master.body.profileId);
     const linkedConfig = {
       host: "sputnik.whatbox.ca",
       port: 21,
@@ -970,14 +970,39 @@ describe("profile routes", () => {
       allowInvalidCertificate: false,
       roots: ["/media"],
     };
-    service.saveFtpServerConfig(created.body.profileId, serverId, linkedConfig, false);
-    service.createSharedIndexGroupFromServer(created.body.profileId, serverId, {
+    service.saveFtpServerConfig(master.body.profileId, masterServerId, linkedConfig, false);
+    const group = service.createSharedIndexGroupFromServer(master.body.profileId, masterServerId, {
       name: "Sputnik Main",
       keyHint: "sputnik-main",
     });
 
+    const linked = await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "linked-browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const serverId = service.defaultFtpServerId(linked.body.profileId);
+    await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "linked-browser-uid",
+        passphrase: "passphrase",
+        serverId,
+        name: "Linked Server",
+        sharedIndexKey: group.sharedIndexKey,
+        ftpConfig: linkedConfig,
+        customization: {
+          catalogEnabled: true,
+          catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+          libraryLayout: "auto",
+          streamDeliveryMode: "proxy",
+        },
+      })
+      .expect(200);
+
     const incompatibleSave = {
-      browserUid: "browser-uid",
+      browserUid: "linked-browser-uid",
       passphrase: "passphrase",
       serverId,
       name: "Renamed Server",
@@ -1008,7 +1033,7 @@ describe("profile routes", () => {
       sharedIndexName: "Sputnik Main",
     });
     expect(rejected.body.error).toMatch(/avoid duplicate indexing/i);
-    expect(service.getFtpServer(created.body.profileId, serverId).sharedIndex?.name).toBe("Sputnik Main");
+    expect(service.getFtpServer(linked.body.profileId, serverId).sharedIndex?.name).toBe("Sputnik Main");
 
     const unlinked = await request(app)
       .post("/api/profile/servers/save")
@@ -1017,6 +1042,188 @@ describe("profile routes", () => {
       .expect(200);
     expect(unlinked.body.server.sharedIndex).toBeNull();
     expect(unlinked.body.server.ftpConfig.roots).toEqual(["/private"]);
+  });
+
+  it("lets a shared index master update roots and propagates them to linked servers", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    const service = new ProfileService(db, config().encryptionKey);
+    const linkedConfig = {
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "explicit" as const,
+      allowInvalidCertificate: false,
+      roots: ["/media"],
+    };
+
+    const master = await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "master-browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const masterServerId = service.defaultFtpServerId(master.body.profileId);
+    service.saveFtpServerConfig(master.body.profileId, masterServerId, linkedConfig, false);
+    const group = service.createSharedIndexGroupFromServer(master.body.profileId, masterServerId, {
+      name: "Sputnik Main",
+      keyHint: "sputnik-main",
+    });
+
+    const linked = await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "linked-browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const linkedServerId = service.defaultFtpServerId(linked.body.profileId);
+    await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "linked-browser-uid",
+        passphrase: "passphrase",
+        serverId: linkedServerId,
+        name: "Linked Server",
+        sharedIndexKey: group.sharedIndexKey,
+        ftpConfig: linkedConfig,
+        customization: {
+          catalogEnabled: true,
+          catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+          libraryLayout: "auto",
+          streamDeliveryMode: "proxy",
+        },
+      })
+      .expect(200);
+
+    const saved = await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "master-browser-uid",
+        passphrase: "passphrase",
+        serverId: masterServerId,
+        name: "Master Server",
+        ftpConfig: { ...linkedConfig, roots: ["/private", "/media/new"] },
+        customization: {
+          catalogEnabled: true,
+          catalogContentTypes: { movies: true, series: false, anime: true, uncategorized: false },
+          libraryLayout: "folders",
+          streamDeliveryMode: "proxy",
+        },
+      })
+      .expect(200);
+
+    expect(saved.body.server.sharedIndex).toMatchObject({ name: "Sputnik Main", isMaster: true });
+    expect(saved.body.server.ftpConfig.roots).toEqual(["/media/new", "/private"]);
+    expect(service.getSharedIndexGroup(group.group.id)).toMatchObject({
+      rootPaths: ["/media/new", "/private"],
+      libraryLayout: "folders",
+      catalogContentTypes: { movies: true, series: false, anime: true, uncategorized: false },
+    });
+    expect(service.getFtpServer(linked.body.profileId, linkedServerId).ftpConfig?.roots).toEqual(["/media/new", "/private"]);
+  });
+
+  it("rejects shared index master FTP identity changes with a shared index warning", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    const service = new ProfileService(db, config().encryptionKey);
+
+    const created = await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const serverId = service.defaultFtpServerId(created.body.profileId);
+    const linkedConfig = {
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "explicit" as const,
+      allowInvalidCertificate: false,
+      roots: ["/media"],
+    };
+    service.saveFtpServerConfig(created.body.profileId, serverId, linkedConfig, false);
+    const group = service.createSharedIndexGroupFromServer(created.body.profileId, serverId, {
+      name: "Sputnik Main",
+      keyHint: "sputnik-main",
+    });
+
+    const rejected = await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        serverId,
+        name: "Master Server",
+        ftpConfig: { ...linkedConfig, host: "newhost.whatbox.ca" },
+        customization: {
+          catalogEnabled: true,
+          catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+          libraryLayout: "auto",
+          streamDeliveryMode: "proxy",
+        },
+      })
+      .expect(409);
+
+    expect(rejected.body).toMatchObject({
+      invalidatesSharedIndex: true,
+      sharedIndexName: "Sputnik Main",
+    });
+    expect(rejected.body.error).toMatch(/master source/i);
+    expect(service.getFtpServer(created.body.profileId, serverId).sharedIndex?.name).toBe("Sputnik Main");
+  });
+
+  it("rejects deleting a shared index master server", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    const service = new ProfileService(db, config().encryptionKey);
+
+    const created = await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const serverId = service.defaultFtpServerId(created.body.profileId);
+    service.saveFtpServerConfig(
+      created.body.profileId,
+      serverId,
+      {
+        host: "sputnik.whatbox.ca",
+        port: 21,
+        username: "user",
+        password: "secret",
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/media"],
+      },
+      false,
+    );
+    const group = service.createSharedIndexGroupFromServer(created.body.profileId, serverId, {
+      name: "Sputnik Main",
+      keyHint: "sputnik-main",
+    });
+    await request(app)
+      .post("/api/profile/servers")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    const rejected = await request(app)
+      .post("/api/profile/servers/delete")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", serverId })
+      .expect(409);
+
+    expect(rejected.body).toMatchObject({
+      invalidatesSharedIndex: true,
+      sharedIndexName: "Sputnik Main",
+    });
+    expect(service.getSharedIndexGroup(group.group.id)?.masterProfileFtpServerId).toBe(serverId);
   });
 
   it("lets database admins bypass the FTP server cap", async () => {

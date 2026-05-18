@@ -95,7 +95,23 @@ describe("shared index groups", () => {
     expect(service.getFtpServerConfig(profileId, serverId)?.password).toBe("secret");
   });
 
-  it("clears the master reference when a linked master server is deleted", async () => {
+  it("syncs master server renames only when the shared group still uses the old server name", async () => {
+    const { service, profileId, serverId } = await serviceWithServer();
+    const serverName = service.getFtpServer(profileId, serverId).name;
+    const synced = service.createSharedIndexGroupFromServer(profileId, serverId, {
+      name: serverName,
+      keyHint: "server-name",
+    });
+
+    service.saveFtpServer(profileId, serverId, { name: "Master Pool" });
+    expect(service.getSharedIndexGroup(synced.group.id)?.name).toBe("Master Pool");
+
+    service.updateSharedIndexGroup(synced.group.id, { name: "Custom Pool" });
+    service.saveFtpServer(profileId, serverId, { name: "Display Name Only" });
+    expect(service.getSharedIndexGroup(synced.group.id)?.name).toBe("Custom Pool");
+  });
+
+  it("prevents deleting a linked master server", async () => {
     const { service, profileId, serverId } = await serviceWithServer();
     service.createFtpServer(profileId, { name: "Replacement" });
     const created = service.createSharedIndexGroupFromServer(profileId, serverId, {
@@ -103,8 +119,8 @@ describe("shared index groups", () => {
       keyHint: "sputnik-main",
     });
 
-    service.deleteFtpServer(profileId, serverId);
+    expect(() => service.deleteFtpServer(profileId, serverId)).toThrow(/master source/);
 
-    expect(service.getSharedIndexGroup(created.group.id)?.masterProfileFtpServerId).toBeNull();
+    expect(service.getSharedIndexGroup(created.group.id)?.masterProfileFtpServerId).toBe(serverId);
   });
 });

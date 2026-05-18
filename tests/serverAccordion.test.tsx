@@ -67,6 +67,7 @@ describe("ServerAccordion", () => {
 
     expect(screen.getByText("Retry pending")).toBeTruthy();
     expect(screen.getByText(/Server sent FIN packet unexpectedly, closing connection/)).toBeTruthy();
+    expect(screen.getByText("ftp.example.test:21")).toBeTruthy();
   });
 
   it("clears uncategorized when Stremio catalogs are turned off", () => {
@@ -176,10 +177,49 @@ describe("ServerAccordion", () => {
     );
 
     expect(screen.getByText("Sputnik Main")).toBeTruthy();
+    expect(screen.getByText("Sputnik Main shared index")).toHaveClass("server-linked-index");
+    expect(screen.getByText("549 items")).toHaveClass("server-item-count");
     expect(screen.getByText("Scanning handled by shared master index.")).toBeTruthy();
     expect(screen.getByText("sputnik-main")).toBeTruthy();
     expect(screen.getByLabelText("Rescan frequency")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Rescan" })).toBeDisabled();
+  });
+
+  it("allows shared index masters to schedule and rescan", () => {
+    render(
+      <ServerAccordion
+        servers={[
+          {
+            ...failedServer,
+            sharedIndex: {
+              id: 5,
+              name: "Sputnik Main",
+              keyHint: "sputnik-main",
+              linked: true,
+              isMaster: true,
+              message: "This server is the shared index master.",
+            },
+            scanStatus: { ...failedServer.scanStatus, status: "idle", error: null, message: null, progressPercent: 0 },
+            pendingScanAfter: null,
+          },
+        ]}
+        expandedServerId={failedServer.id}
+        profileReady={true}
+        onToggle={vi.fn()}
+        onAddServer={vi.fn()}
+        onDeleteServer={vi.fn()}
+        onServerChange={vi.fn()}
+        onSaveServer={vi.fn()}
+        onTestServer={vi.fn()}
+        onRefreshServer={vi.fn()}
+        onCancelServer={vi.fn()}
+        onUpdateScanSchedule={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Master")).toBeTruthy();
+    expect(screen.getByLabelText("Rescan frequency")).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Rescan" })).not.toBeDisabled();
   });
 
   it("groups library selects and server content separately from catalog toggles", () => {
@@ -221,10 +261,8 @@ describe("ServerAccordion", () => {
     expect(within(catalogsGroup).queryByLabelText("Anime")).toBeNull();
   });
 
-  it("confirms before deleting a server", () => {
+  it("requests deletion through the parent action", () => {
     const onDeleteServer = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm");
-    confirmSpy.mockReturnValueOnce(false).mockReturnValueOnce(true);
     render(
       <ServerAccordion
         servers={[failedServer, { ...failedServer, id: 13, name: "Endeavour" }]}
@@ -243,9 +281,6 @@ describe("ServerAccordion", () => {
     );
 
     const deleteButton = screen.getByRole("button", { name: "Delete server" });
-    fireEvent.click(deleteButton);
-    expect(onDeleteServer).not.toHaveBeenCalled();
-
     fireEvent.click(deleteButton);
     expect(onDeleteServer).toHaveBeenCalledWith(failedServer.id);
   });

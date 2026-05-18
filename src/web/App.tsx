@@ -28,6 +28,7 @@ import {
 import { APP_CHANGELOG } from "./changelog.js";
 import { AdminDashboard } from "./components/AdminDashboard.js";
 import { ChangelogDrawer } from "./components/ChangelogDrawer.js";
+import { useConfirmDialog } from "./components/ConfirmDialog.js";
 import { Footer } from "./components/Footer.js";
 import { GlobalStatusPanel, type GlobalScanProgress } from "./components/GlobalStatusPanel.js";
 import { HeroPanel } from "./components/HeroPanel.js";
@@ -351,6 +352,7 @@ export function App() {
   const [importedSettings, setImportedSettings] = useState<ImportSummary | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [exportStripCredentials, setExportStripCredentials] = useState(true);
+  const { confirm, confirmDialog } = useConfirmDialog();
   const profileReady = profileState === "created" || profileState === "unlocked";
   const currentYear = new Date().getFullYear();
   const anyScanActive = useMemo(() => servers.some((server) => scanIsActive(server.scanStatus)), [servers]);
@@ -359,7 +361,10 @@ export function App() {
     () => servers.some((server) => Boolean(server.host) && server.passwordConfigured),
     [servers],
   );
-  const hasRescannableServer = useMemo(() => servers.some((server) => !server.sharedIndex && !isServerDraft(server)), [servers]);
+  const hasRescannableServer = useMemo(
+    () => servers.some((server) => (!server.sharedIndex || server.sharedIndex.isMaster) && !isServerDraft(server)),
+    [servers],
+  );
 
   useEffect(() => {
     void loadSetupStatus(recoveryUid)
@@ -726,7 +731,12 @@ export function App() {
         result = await saveFtpServer(serverRequest);
       } catch (error) {
         if (!(error instanceof Error) || !server.sharedIndex || !error.message.includes(SHARED_INDEX_UNLINK_REQUIRED_FRAGMENT)) throw error;
-        const confirmed = window.confirm(sharedIndexUnlinkConfirmation(server.sharedIndex.name));
+        const confirmed = await confirm({
+          title: `Unlink from ${server.sharedIndex.name}?`,
+          body: sharedIndexUnlinkConfirmation(server.sharedIndex.name),
+          confirmLabel: "Unlink and save",
+          danger: true,
+        });
         if (!confirmed) {
           updateServer(serverId, { message: "Save cancelled. Server remains linked to the shared index." });
           return;
@@ -737,7 +747,7 @@ export function App() {
       const savedFormBase = { ...serverFormFromPayload(result.server), pendingCreate: false };
       let savedScanStatus = savedFormBase.scanStatus;
       let savedMessage = "Settings saved. Auto-scan will start in about 5 minutes.";
-      if (!result.server.draft) {
+      if (!result.server.draft && (!result.server.sharedIndex || result.server.sharedIndex.isMaster)) {
         try {
           const rescan = await rescanIndex({ browserUid: recoveryUid, passphrase, serverId: targetServerId });
           savedScanStatus = rescan.scanStatus;
@@ -785,7 +795,7 @@ export function App() {
       updateServer(serverId, { message: "Click Save FTP settings first to scan this server." });
       return;
     }
-    if (target?.sharedIndex) {
+    if (target?.sharedIndex && !target.sharedIndex.isMaster) {
       updateServer(serverId, { message: "Linked servers are scanned through their shared index group." });
       return;
     }
@@ -800,9 +810,12 @@ export function App() {
 
   async function refreshAllServers(force = false) {
     if (force) {
-      const confirmed = window.confirm(
-        "Force reindex will clear incremental scan snapshots and reparse every configured FTP server. Continue?",
-      );
+      const confirmed = await confirm({
+        title: "Force reindex all servers?",
+        body: "Force reindex will clear incremental scan snapshots and reparse every configured FTP server.",
+        confirmLabel: "Force reindex",
+        danger: true,
+      });
       if (!confirmed) return;
     }
     try {
@@ -838,6 +851,13 @@ export function App() {
       setExpandedServerId((current) => (current === serverId ? null : current));
       return;
     }
+    const confirmed = await confirm({
+      title: `Delete ${target?.name || "server"}?`,
+      body: "This removes the FTP server, its indexed files, scan schedule, and local server settings.",
+      confirmLabel: "Delete server",
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       const result = await deleteFtpServer({ browserUid: recoveryUid, passphrase, serverId });
       const forms = result.servers.map(serverFormFromPayload);
@@ -984,7 +1004,12 @@ export function App() {
   }
 
   async function handleDeleteProfile() {
-    const confirmed = window.confirm("Delete this profile? This permanently removes its FTP servers, indexed files, and manifest token. This cannot be undone.");
+    const confirmed = await confirm({
+      title: "Delete this profile?",
+      body: "This permanently removes its FTP servers, indexed files, and manifest token. This cannot be undone.",
+      confirmLabel: "Delete profile",
+      danger: true,
+    });
     if (!confirmed) return;
     try {
       await deleteProfile({ browserUid: recoveryUid, passphrase });
@@ -1286,6 +1311,7 @@ export function App() {
       )}
       <Footer appVersion={APP_VERSION} currentYear={currentYear} githubUrl={GITHUB_URL} onOpenChangelog={() => setChangelogOpen(true)} />
       {changelogOpen ? <ChangelogDrawer appVersion={APP_VERSION} entries={changelogEntries} onClose={() => setChangelogOpen(false)} /> : null}
+      {confirmDialog}
     </main>
   );
 }

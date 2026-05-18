@@ -6,7 +6,14 @@ import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import { countryCodeFromRequest } from "../http/requestMetadata.js";
 import { MediaRepository } from "../media/mediaRepository.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
-import { DuplicateProfileError, ProfileService, SharedIndexUnlinkRequiredError, type FtpServer } from "./profileService.js";
+import {
+  DuplicateProfileError,
+  ProfileService,
+  SharedIndexMasterDeleteError,
+  SharedIndexMasterIdentityChangeError,
+  SharedIndexUnlinkRequiredError,
+  type FtpServer,
+} from "./profileService.js";
 
 const createSchema = z.object({
   browserUid: z.string().min(8),
@@ -268,6 +275,13 @@ export function profileRoutes(
           sharedIndexName: error.sharedIndexName,
         });
       }
+      if (error instanceof SharedIndexMasterIdentityChangeError) {
+        return res.status(409).json({
+          error: error.message,
+          invalidatesSharedIndex: true,
+          sharedIndexName: error.sharedIndexName,
+        });
+      }
       res.status(error instanceof Error && error.message.includes("FTP password") ? 400 : 401).json({
         error: error instanceof Error ? error.message : "Invalid passphrase",
       });
@@ -286,6 +300,13 @@ export function profileRoutes(
         globalStats: globalStats(service, scanQueue, unlocked.profileId),
       });
     } catch (error) {
+      if (error instanceof SharedIndexMasterDeleteError) {
+        return res.status(409).json({
+          error: error.message,
+          invalidatesSharedIndex: true,
+          sharedIndexName: error.sharedIndexName,
+        });
+      }
       res.status(error instanceof Error && error.message.includes("At least one") ? 400 : 401).json({
         error: error instanceof Error ? error.message : "Invalid passphrase",
       });
@@ -394,9 +415,13 @@ export function profileRoutes(
       if (parsed.data.all) {
         const servers = service
           .listFtpServers(unlocked.profileId)
-          .filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig) && !server.sharedIndex);
-        if (!servers.length) return res.status(400).json({ error: "No unlinked FTP servers can be rescanned from this profile." });
-        const scanStatuses = servers.map((server) => scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id, scanOptions));
+          .filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig) && (!server.sharedIndex || isSharedIndexMaster(service, server)));
+        if (!servers.length) return res.status(400).json({ error: "No FTP servers can be rescanned from this profile." });
+        const scanStatuses = servers.map((server) =>
+          server.sharedIndex
+            ? scanQueue.enqueueSharedIndexScan(server.sharedIndex.id, "manual", scanOptions)
+            : scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id, scanOptions),
+        );
         return res.json({
           scanStatus: scanStatuses[0],
           scanStatuses,
@@ -409,8 +434,14 @@ export function profileRoutes(
       if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
       if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "Fill in username and password before scanning this server." });
       const server = service.getFtpServer(unlocked.profileId, serverId);
-      if (server.sharedIndex) return res.status(400).json({ error: "Linked servers are scanned through their shared index group." });
-      res.json({ scanStatus: scanQueue.enqueueProfileScan(unlocked.profileId, "manual", serverId, scanOptions) });
+      if (server.sharedIndex && !isSharedIndexMaster(service, server)) {
+        return res.status(400).json({ error: "Linked servers are scanned through their shared index group." });
+      }
+      res.json({
+        scanStatus: server.sharedIndex
+          ? scanQueue.enqueueSharedIndexScan(server.sharedIndex.id, "manual", scanOptions)
+          : scanQueue.enqueueProfileScan(unlocked.profileId, "manual", serverId, scanOptions),
+      });
     } catch (error) {
       res.status(400).json({ error: ftpErrorMessage(error, "Unable to refresh FTP index") });
     }
@@ -461,7 +492,7 @@ export function profileRoutes(
       }
       const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
       const server = service.getFtpServer(unlocked.profileId, serverId);
-      if (server.sharedIndex && service.getSharedIndexGroup(server.sharedIndex.id)?.masterProfileFtpServerId !== serverId) {
+      if (server.sharedIndex && !isSharedIndexMaster(service, server)) {
         return res.status(400).json({ error: "Shared index scans are scheduled from the master index." });
       }
       const nextScheduledScanAt =
@@ -489,6 +520,7 @@ function serverPayload(service: ProfileService, scanQueue: ScanQueue, server: Ft
   const draft = ftpConfig ? isDraftFtpConfig(ftpConfig) : false;
   const sharedGroup = server.sharedIndex ? service.getSharedIndexGroup(server.sharedIndex.id) : null;
   const sharedScanStatus = sharedGroup ? scanQueue.getSharedIndexScanStatus(sharedGroup.id) : null;
+  const sharedMaster = Boolean(sharedGroup && sharedGroup.masterProfileFtpServerId === server.id);
   return {
     id: server.id,
     name: server.name,
@@ -519,10 +551,15 @@ function serverPayload(service: ProfileService, scanQueue: ScanQueue, server: Ft
           name: sharedGroup.name,
           keyHint: sharedGroup.keyHint,
           linked: true,
-          message: "Scanning handled by shared master index.",
+          isMaster: sharedMaster,
+          message: sharedMaster ? "This server is the shared index master." : "Scanning handled by shared master index.",
         }
       : null,
   };
+}
+
+function isSharedIndexMaster(service: ProfileService, server: FtpServer) {
+  return Boolean(server.sharedIndex && service.getSharedIndexGroup(server.sharedIndex.id)?.masterProfileFtpServerId === server.id);
 }
 
 function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: number) {
