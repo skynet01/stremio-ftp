@@ -1452,6 +1452,8 @@ describe("App", () => {
     expect(screen.getByText("12")).toBeTruthy();
     expect(screen.getByText("Master")).toBeTruthy();
     expect(screen.getByText("bf1f80d7-4971-4 / Server 1")).toBeTruthy();
+    expect(screen.getAllByText("Last scan").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("May 15, 2026, 5:00 PM").length).toBeGreaterThan(0);
     expect(screen.queryByLabelText("Profile ID for Sputnik Main")).toBeNull();
     expect(screen.queryByLabelText("Server ID for Sputnik Main")).toBeNull();
     expect(screen.queryByRole("button", { name: "Link server to Sputnik Main" })).toBeNull();

@@ -749,12 +749,12 @@ function SharedIndexAdminSection({
                 <dl className="status-list admin-shared-stats">
                   <SummaryStat label="Linked" value={group.linkedServerCount} />
                   <SummaryStat label="Items" value={group.indexedMediaCount} />
-                  <div>
-                    <dt>Last scan</dt>
-                    <dd>{formatScanTime(group.lastIndexedAt)}</dd>
-                  </div>
                 </dl>
-                <div className="admin-shared-master">
+                <div className="admin-shared-detail">
+                  <span>Last scan</span>
+                  <strong>{formatScanTime(group.lastIndexedAt)}</strong>
+                </div>
+                <div className="admin-shared-detail">
                   <span>Master</span>
                   <strong>{group.masterServer ? `${truncateUid(group.masterServer.browserUid)} / ${group.masterServer.serverName}` : "None"}</strong>
                 </div>

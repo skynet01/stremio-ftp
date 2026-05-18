@@ -1227,11 +1227,11 @@ input:-webkit-autofill:active {
 }
 
 .admin-shared-stats {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.admin-shared-master {
+.admin-shared-detail {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -1243,7 +1243,7 @@ input:-webkit-autofill:active {
   background: rgba(255, 255, 255, 0.025);
 }
 
-.admin-shared-master span {
+.admin-shared-detail span {
   color: var(--muted);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.58rem;
@@ -1252,7 +1252,7 @@ input:-webkit-autofill:active {
   text-transform: uppercase;
 }
 
-.admin-shared-master strong {
+.admin-shared-detail strong {
   min-width: 0;
   overflow: hidden;
   color: var(--cream);
