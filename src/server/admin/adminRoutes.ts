@@ -4,7 +4,7 @@ import type { AppConfig } from "../config.js";
 import { countryCodeFromRequest } from "../http/requestMetadata.js";
 import type { ProfileScanStatus } from "../scanner/scanQueue.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
-import { ProfileNotFoundError, ProfileService, type FtpServer } from "../profiles/profileService.js";
+import { ProfileNotFoundError, ProfileService, type FtpServer, type SharedIndexGroup } from "../profiles/profileService.js";
 
 const adminAuthSchema = z.object({
   browserUid: z.string().min(8),
@@ -18,6 +18,25 @@ const bulkAdminSchema = adminAuthSchema.extend({
   action: z.enum(["delete", "rescan", "cancel_scan", "convert_to_proxy"]),
 });
 const profileIdSchema = z.coerce.number().int().positive();
+const groupIdSchema = z.coerce.number().int().positive();
+const sharedIndexCreateSchema = adminAuthSchema.extend({
+  profileId: z.number().int().positive(),
+  serverId: z.number().int().positive(),
+  name: z.string().trim().min(1).max(120),
+  keyHint: z.string().trim().min(1).max(48).optional(),
+  enabled: z.boolean().optional(),
+  autoLinkImports: z.boolean().optional(),
+});
+const sharedIndexUpdateSchema = adminAuthSchema.extend({
+  name: z.string().trim().min(1).max(120).optional(),
+  keyHint: z.string().trim().min(1).max(48).optional(),
+  enabled: z.boolean().optional(),
+  autoLinkImports: z.boolean().optional(),
+});
+const sharedIndexServerTargetSchema = adminAuthSchema.extend({
+  profileId: z.number().int().positive(),
+  serverId: z.number().int().positive(),
+});
 
 function urls(baseUrl: string, token: string) {
   const manifestUrl = `${baseUrl}/u/${token}/manifest.json`;
@@ -75,6 +94,151 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
       },
       profiles,
     });
+  });
+
+  router.post("/shared-index-groups", async (req, res) => {
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    res.json({ groups: service.listSharedIndexGroups().map((group) => sharedIndexGroupView(service, scanQueue, group)) });
+  });
+
+  router.post("/shared-index-groups/create", async (req, res) => {
+    const parsed = sharedIndexCreateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid shared index group request" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    try {
+      const created = service.createSharedIndexGroupFromServer(parsed.data.profileId, parsed.data.serverId, {
+        name: parsed.data.name,
+        keyHint: parsed.data.keyHint,
+        enabled: parsed.data.enabled,
+        autoLinkImports: parsed.data.autoLinkImports,
+      });
+      res.json({ group: sharedIndexGroupView(service, scanQueue, created.group), sharedIndexKey: created.sharedIndexKey });
+    } catch (error) {
+      handleSharedIndexError(error, res);
+    }
+  });
+
+  router.post("/shared-index-groups/:groupId/update", async (req, res) => {
+    const groupId = groupIdSchema.safeParse(req.params.groupId);
+    if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
+    const parsed = sharedIndexUpdateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid shared index group request" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    try {
+      const group = service.updateSharedIndexGroup(groupId.data, {
+        name: parsed.data.name,
+        keyHint: parsed.data.keyHint,
+        enabled: parsed.data.enabled,
+        autoLinkImports: parsed.data.autoLinkImports,
+      });
+      res.json({ group: sharedIndexGroupView(service, scanQueue, group) });
+    } catch (error) {
+      handleSharedIndexError(error, res);
+    }
+  });
+
+  router.post("/shared-index-groups/:groupId/rotate-key", async (req, res) => {
+    const groupId = groupIdSchema.safeParse(req.params.groupId);
+    if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    try {
+      const rotated = service.rotateSharedIndexGroupKey(groupId.data);
+      res.json({ group: sharedIndexGroupView(service, scanQueue, rotated.group), sharedIndexKey: rotated.sharedIndexKey });
+    } catch (error) {
+      handleSharedIndexError(error, res);
+    }
+  });
+
+  router.post("/shared-index-groups/:groupId/link-server", async (req, res) => {
+    const groupId = groupIdSchema.safeParse(req.params.groupId);
+    if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
+    const parsed = sharedIndexServerTargetSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid shared index server request" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    try {
+      service.linkServerToSharedGroup(parsed.data.profileId, parsed.data.serverId, groupId.data);
+      const group = service.getSharedIndexGroup(groupId.data);
+      if (!group) return res.status(404).json({ error: "Shared index group not found" });
+      res.json({ group: sharedIndexGroupView(service, scanQueue, group) });
+    } catch (error) {
+      handleSharedIndexError(error, res);
+    }
+  });
+
+  router.post("/shared-index-groups/:groupId/unlink-server", async (req, res) => {
+    const groupId = groupIdSchema.safeParse(req.params.groupId);
+    if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
+    const parsed = sharedIndexServerTargetSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid shared index server request" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    try {
+      const server = service.getFtpServer(parsed.data.profileId, parsed.data.serverId);
+      if (!server.sharedIndex || server.sharedIndex.id !== groupId.data) return res.status(400).json({ error: "Server is not linked to this shared index group" });
+      service.unlinkServerFromSharedGroup(parsed.data.profileId, parsed.data.serverId);
+      const group = service.getSharedIndexGroup(groupId.data);
+      if (!group) return res.status(404).json({ error: "Shared index group not found" });
+      res.json({ group: sharedIndexGroupView(service, scanQueue, group) });
+    } catch (error) {
+      handleSharedIndexError(error, res);
+    }
+  });
+
+  router.post("/shared-index-groups/:groupId/master", async (req, res) => {
+    const groupId = groupIdSchema.safeParse(req.params.groupId);
+    if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
+    const parsed = sharedIndexServerTargetSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid shared index server request" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    try {
+      const group = service.setSharedIndexGroupMaster(groupId.data, parsed.data.profileId, parsed.data.serverId);
+      res.json({ group: sharedIndexGroupView(service, scanQueue, group) });
+    } catch (error) {
+      handleSharedIndexError(error, res);
+    }
+  });
+
+  router.post("/shared-index-groups/:groupId/rescan", async (req, res) => {
+    const groupId = groupIdSchema.safeParse(req.params.groupId);
+    if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    try {
+      const group = service.getSharedIndexGroup(groupId.data);
+      if (!group) return res.status(404).json({ error: "Shared index group not found" });
+      res.json({ group: sharedIndexGroupView(service, scanQueue, group), scanStatus: scanQueue.enqueueSharedIndexScan(groupId.data, "manual") });
+    } catch (error) {
+      handleSharedIndexError(error, res);
+    }
+  });
+
+  router.post("/shared-index-groups/:groupId/cancel-scan", async (req, res) => {
+    const groupId = groupIdSchema.safeParse(req.params.groupId);
+    if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    try {
+      const group = service.getSharedIndexGroup(groupId.data);
+      if (!group) return res.status(404).json({ error: "Shared index group not found" });
+      res.json({ group: sharedIndexGroupView(service, scanQueue, group), scanStatus: scanQueue.cancelSharedIndexScan(groupId.data) });
+    } catch (error) {
+      handleSharedIndexError(error, res);
+    }
   });
 
   router.post("/profiles/:profileId/manifest-token", async (req, res) => {
@@ -212,4 +376,20 @@ function scanSummary(
     skipped: skippedProfiles + scans.filter(({ scanStatus }) => scanStatus.status === "skipped").length,
     failed: scans.filter(({ scanStatus }) => scanStatus.status === "failed").length,
   };
+}
+
+function sharedIndexGroupView(service: ProfileService, scanQueue: ScanQueue, group: SharedIndexGroup) {
+  return {
+    ...group,
+    linkedServerCount: group.linkedServers,
+    linkedServers: service.listSharedIndexLinkedServers(group.id),
+    masterServer: service.sharedIndexGroupMaster(group.id),
+    scanStatus: scanQueue.getSharedIndexScanStatus(group.id),
+  };
+}
+
+function handleSharedIndexError(error: unknown, res: { status(code: number): { json(body: object): unknown } }) {
+  if (error instanceof ProfileNotFoundError) return res.status(404).json({ error: "Profile or FTP server not found" });
+  if (error instanceof Error) return res.status(400).json({ error: error.message });
+  throw error;
 }

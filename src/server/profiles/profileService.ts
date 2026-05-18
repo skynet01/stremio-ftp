@@ -105,6 +105,20 @@ export type SharedIndexGroup = {
   updatedAt: string;
 };
 
+export type SharedIndexGroupMaster = {
+  profileId: number;
+  browserUid: string;
+  serverId: number;
+  serverName: string;
+} | null;
+
+export type SharedIndexLinkedServer = {
+  profileId: number;
+  browserUid: string;
+  serverId: number;
+  serverName: string;
+};
+
 export type AdminProfileSummary = {
   id: number;
   browserUid: string;
@@ -648,7 +662,9 @@ export class ProfileService {
         now,
         now,
       );
-    return { group: this.getSharedIndexGroup(Number(result.lastInsertRowid))!, sharedIndexKey };
+    const groupId = Number(result.lastInsertRowid);
+    this.linkServerToSharedGroup(profileId, serverId, groupId, sharedIndexKey);
+    return { group: this.getSharedIndexGroup(groupId)!, sharedIndexKey };
   }
 
   getSharedIndexGroup(groupId: number): SharedIndexGroup | null {
@@ -659,6 +675,103 @@ export class ProfileService {
   listSharedIndexGroups(): SharedIndexGroup[] {
     const rows = this.db.prepare("select * from shared_index_groups order by name asc, id asc").all() as SharedIndexGroupRow[];
     return rows.map((row) => this.sharedIndexGroupFromRow(row));
+  }
+
+  listSharedIndexLinkedServers(groupId: number): SharedIndexLinkedServer[] {
+    const rows = this.db
+      .prepare(
+        `
+        select p.id as profile_id, p.browser_uid, s.id as server_id, s.name as server_name
+        from profile_ftp_servers s
+        join profiles p on p.id = s.profile_id
+        where s.shared_index_group_id = ?
+        order by p.browser_uid asc, s.name asc, s.id asc
+      `,
+      )
+      .all(groupId) as Array<{ profile_id: number; browser_uid: string; server_id: number; server_name: string }>;
+    return rows.map((row) => ({
+      profileId: row.profile_id,
+      browserUid: row.browser_uid,
+      serverId: row.server_id,
+      serverName: row.server_name,
+    }));
+  }
+
+  sharedIndexGroupMaster(groupId: number): SharedIndexGroupMaster {
+    const row = this.db
+      .prepare(
+        `
+        select p.id as profile_id, p.browser_uid, s.id as server_id, s.name as server_name
+        from shared_index_groups g
+        join profile_ftp_servers s on s.id = g.master_profile_ftp_server_id
+        join profiles p on p.id = s.profile_id
+        where g.id = ?
+      `,
+      )
+      .get(groupId) as { profile_id: number; browser_uid: string; server_id: number; server_name: string } | undefined;
+    return row
+      ? {
+          profileId: row.profile_id,
+          browserUid: row.browser_uid,
+          serverId: row.server_id,
+          serverName: row.server_name,
+        }
+      : null;
+  }
+
+  updateSharedIndexGroup(
+    groupId: number,
+    input: { name?: string; keyHint?: string; enabled?: boolean; autoLinkImports?: boolean },
+  ): SharedIndexGroup {
+    const existing = this.getSharedIndexGroup(groupId);
+    if (!existing) throw new ProfileNotFoundError();
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare(
+        `
+        update shared_index_groups
+        set name = ?,
+            key_hint = ?,
+            enabled = ?,
+            auto_link_imports = ?,
+            updated_at = ?
+        where id = ?
+      `,
+      )
+      .run(
+        input.name?.trim() || existing.name,
+        input.keyHint?.trim() || existing.keyHint,
+        input.enabled === undefined ? (existing.enabled ? 1 : 0) : input.enabled ? 1 : 0,
+        input.autoLinkImports === undefined ? (existing.autoLinkImports ? 1 : 0) : input.autoLinkImports ? 1 : 0,
+        now,
+        groupId,
+      );
+    if (result.changes === 0) throw new ProfileNotFoundError();
+    return this.getSharedIndexGroup(groupId)!;
+  }
+
+  rotateSharedIndexGroupKey(groupId: number): { group: SharedIndexGroup; sharedIndexKey: string } {
+    if (!this.getSharedIndexGroup(groupId)) throw new ProfileNotFoundError();
+    const sharedIndexKey = generateSharedIndexKey();
+    const result = this.db
+      .prepare("update shared_index_groups set shared_index_key_hash = ?, updated_at = ? where id = ?")
+      .run(hashSharedIndexKey(sharedIndexKey), new Date().toISOString(), groupId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
+    return { group: this.getSharedIndexGroup(groupId)!, sharedIndexKey };
+  }
+
+  setSharedIndexGroupMaster(groupId: number, profileId: number, serverId: number): SharedIndexGroup {
+    const group = this.getSharedIndexGroup(groupId);
+    const server = this.getFtpServer(profileId, serverId);
+    if (!group || !server.ftpConfig || !serverMatchesSharedIndexGroup(server.ftpConfig, group)) {
+      throw new Error("FTP server does not match shared index group");
+    }
+    this.linkServerToSharedGroup(profileId, serverId, groupId);
+    const result = this.db
+      .prepare("update shared_index_groups set master_profile_ftp_server_id = ?, updated_at = ? where id = ?")
+      .run(serverId, new Date().toISOString(), groupId);
+    if (result.changes === 0) throw new ProfileNotFoundError();
+    return this.getSharedIndexGroup(groupId)!;
   }
 
   resolveApprovedSharedIndexKey(profileId: number, serverId: number, sharedIndexKey: string): SharedIndexGroup | null {
@@ -706,6 +819,7 @@ export class ProfileService {
   }
 
   unlinkServerFromSharedGroup(profileId: number, serverId: number) {
+    const now = new Date().toISOString();
     const result = this.db
       .prepare(
         `
@@ -718,8 +832,18 @@ export class ProfileService {
         where profile_id = ? and id = ?
       `,
       )
-      .run(new Date().toISOString(), profileId, serverId);
+      .run(now, profileId, serverId);
     if (result.changes === 0) throw new ProfileNotFoundError();
+    this.db
+      .prepare(
+        `
+        update shared_index_groups
+        set master_profile_ftp_server_id = null,
+            updated_at = ?
+        where master_profile_ftp_server_id = ?
+      `,
+      )
+      .run(now, serverId);
     return this.getFtpServer(profileId, serverId);
   }
 

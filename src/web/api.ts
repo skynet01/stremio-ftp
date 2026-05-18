@@ -298,6 +298,60 @@ export type AdminProfileAdminResponse = {
   adminSource: "environment" | "database" | null;
 };
 
+export type AdminSharedIndexLinkedServer = {
+  profileId: number;
+  browserUid: string;
+  serverId: number;
+  serverName: string;
+};
+
+export type AdminSharedIndexMasterServer = AdminSharedIndexLinkedServer | null;
+
+export type AdminSharedIndexGroup = {
+  id: number;
+  keyHint: string;
+  name: string;
+  host: string;
+  port: number;
+  tlsMode: FtpConfigRequest["tlsMode"];
+  allowInvalidCertificate: boolean;
+  rootPaths: string[];
+  libraryLayout: "auto" | "folders" | "flat";
+  catalogContentTypes: {
+    movies: boolean;
+    series: boolean;
+    anime: boolean;
+    uncategorized?: boolean;
+  };
+  enabled: boolean;
+  autoLinkImports: boolean;
+  masterProfileFtpServerId: number | null;
+  indexedMediaCount: number;
+  lastIndexedAt: string | null;
+  linkedServerCount: number;
+  createdAt: string;
+  updatedAt: string;
+  linkedServers: AdminSharedIndexLinkedServer[];
+  masterServer: AdminSharedIndexMasterServer;
+  scanStatus: ScanStatus;
+};
+
+export type AdminSharedIndexGroupListResponse = {
+  groups: AdminSharedIndexGroup[];
+};
+
+export type AdminSharedIndexGroupResponse = {
+  group: AdminSharedIndexGroup;
+};
+
+export type AdminSharedIndexKeyResponse = AdminSharedIndexGroupResponse & {
+  sharedIndexKey: string;
+};
+
+export type AdminSharedIndexScanResponse = AdminSharedIndexGroupResponse & {
+  scanStatus: ScanStatus;
+};
+
 async function readJson<T extends object>(response: Response): Promise<T> {
   const text = await response.text();
   let body: T | ApiError | undefined;
@@ -593,4 +647,130 @@ export async function setAdminProfileEnabled(
     body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase, adminEnabled: request.adminEnabled }),
   });
   return readJson<AdminProfileAdminResponse>(response);
+}
+
+export async function loadAdminSharedIndexGroups(request: CreateProfileRequest): Promise<AdminSharedIndexGroupListResponse> {
+  const response = await fetch("/api/admin/shared-index-groups", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<AdminSharedIndexGroupListResponse>(response);
+}
+
+export async function createAdminSharedIndexGroup(
+  request: CreateProfileRequest & {
+    profileId: number;
+    serverId: number;
+    name: string;
+    keyHint?: string;
+    enabled?: boolean;
+    autoLinkImports?: boolean;
+  },
+): Promise<AdminSharedIndexKeyResponse> {
+  const response = await fetch("/api/admin/shared-index-groups/create", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<AdminSharedIndexKeyResponse>(response);
+}
+
+export async function updateAdminSharedIndexGroup(
+  request: CreateProfileRequest & {
+    groupId: number;
+    name?: string;
+    keyHint?: string;
+    enabled?: boolean;
+    autoLinkImports?: boolean;
+  },
+): Promise<AdminSharedIndexGroupResponse> {
+  const response = await fetch(`/api/admin/shared-index-groups/${request.groupId}/update`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      browserUid: request.browserUid,
+      passphrase: request.passphrase,
+      name: request.name,
+      keyHint: request.keyHint,
+      enabled: request.enabled,
+      autoLinkImports: request.autoLinkImports,
+    }),
+  });
+  return readJson<AdminSharedIndexGroupResponse>(response);
+}
+
+export async function rotateAdminSharedIndexKey(request: CreateProfileRequest & { groupId: number }): Promise<AdminSharedIndexKeyResponse> {
+  const response = await fetch(`/api/admin/shared-index-groups/${request.groupId}/rotate-key`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
+  });
+  return readJson<AdminSharedIndexKeyResponse>(response);
+}
+
+export async function linkAdminSharedIndexServer(
+  request: CreateProfileRequest & { groupId: number; profileId: number; serverId: number },
+): Promise<AdminSharedIndexGroupResponse> {
+  const response = await fetch(`/api/admin/shared-index-groups/${request.groupId}/link-server`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      browserUid: request.browserUid,
+      passphrase: request.passphrase,
+      profileId: request.profileId,
+      serverId: request.serverId,
+    }),
+  });
+  return readJson<AdminSharedIndexGroupResponse>(response);
+}
+
+export async function unlinkAdminSharedIndexServer(
+  request: CreateProfileRequest & { groupId: number; profileId: number; serverId: number },
+): Promise<AdminSharedIndexGroupResponse> {
+  const response = await fetch(`/api/admin/shared-index-groups/${request.groupId}/unlink-server`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      browserUid: request.browserUid,
+      passphrase: request.passphrase,
+      profileId: request.profileId,
+      serverId: request.serverId,
+    }),
+  });
+  return readJson<AdminSharedIndexGroupResponse>(response);
+}
+
+export async function setAdminSharedIndexMaster(
+  request: CreateProfileRequest & { groupId: number; profileId: number; serverId: number },
+): Promise<AdminSharedIndexGroupResponse> {
+  const response = await fetch(`/api/admin/shared-index-groups/${request.groupId}/master`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      browserUid: request.browserUid,
+      passphrase: request.passphrase,
+      profileId: request.profileId,
+      serverId: request.serverId,
+    }),
+  });
+  return readJson<AdminSharedIndexGroupResponse>(response);
+}
+
+export async function rescanAdminSharedIndexGroup(request: CreateProfileRequest & { groupId: number }): Promise<AdminSharedIndexScanResponse> {
+  const response = await fetch(`/api/admin/shared-index-groups/${request.groupId}/rescan`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
+  });
+  return readJson<AdminSharedIndexScanResponse>(response);
+}
+
+export async function cancelAdminSharedIndexScan(request: CreateProfileRequest & { groupId: number }): Promise<AdminSharedIndexScanResponse> {
+  const response = await fetch(`/api/admin/shared-index-groups/${request.groupId}/cancel-scan`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
+  });
+  return readJson<AdminSharedIndexScanResponse>(response);
 }

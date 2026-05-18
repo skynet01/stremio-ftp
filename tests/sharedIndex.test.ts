@@ -50,7 +50,7 @@ describe("shared index groups", () => {
     expect(row.shared_index_key_hash).not.toContain(created.sharedIndexKey);
 
     const listed = service.listSharedIndexGroups();
-    expect(listed[0]).toMatchObject({ id: created.group.id, name: "Sputnik Main", linkedServers: 0 });
+    expect(listed[0]).toMatchObject({ id: created.group.id, name: "Sputnik Main", linkedServers: 1 });
     expect(JSON.stringify(listed)).not.toContain(created.sharedIndexKey);
     expect(JSON.stringify(listed)).not.toContain("secret");
   });

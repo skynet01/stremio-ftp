@@ -385,4 +385,116 @@ describe("admin routes", () => {
       .expect(200);
     expect(response.body.profiles.map((profile: { browserUid: string }) => profile.browserUid)).not.toContain("user-uid");
   });
+
+  it("manages shared index groups without returning FTP credentials", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config({ scanGlobalConcurrency: 0 }), db);
+    await createProfile(app, "admin-uid");
+    const master = await createProfile(app, "master-uid");
+    const linked = await createProfile(app, "linked-uid");
+    const other = await createProfile(app, "other-uid");
+    await saveDefaultFtp(app, "master-uid", "sputnik.whatbox.ca");
+    await saveDefaultFtp(app, "linked-uid", "sputnik.whatbox.ca");
+    await saveDefaultFtp(app, "other-uid", "different.whatbox.ca");
+
+    const masterServerId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(master.body.profileId) as number;
+    const linkedServerId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(linked.body.profileId) as number;
+    const otherServerId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(other.body.profileId) as number;
+
+    const created = await request(app)
+      .post("/api/admin/shared-index-groups/create")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "admin-uid",
+        passphrase: "passphrase",
+        profileId: master.body.profileId,
+        serverId: masterServerId,
+        name: "Sputnik Main",
+        keyHint: "sputnik-main",
+      })
+      .expect(200);
+    expect(created.body.sharedIndexKey).toHaveLength(43);
+    expect(JSON.stringify(created.body)).not.toContain("secret");
+    expect(created.body.group).toMatchObject({
+      name: "Sputnik Main",
+      keyHint: "sputnik-main",
+      host: "sputnik.whatbox.ca",
+      linkedServerCount: 1,
+      masterServer: { profileId: master.body.profileId, browserUid: "master-uid", serverId: masterServerId, serverName: "Server 1" },
+      scanStatus: expect.objectContaining({ status: "idle" }),
+    });
+
+    const groupId = created.body.group.id;
+    await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/link-server`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: other.body.profileId, serverId: otherServerId })
+      .expect(400);
+
+    const linkedResponse = await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/link-server`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: linked.body.profileId, serverId: linkedServerId })
+      .expect(200);
+    expect(linkedResponse.body.group.linkedServerCount).toBe(2);
+    expect(linkedResponse.body.group.linkedServers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ profileId: master.body.profileId, serverId: masterServerId }),
+        expect.objectContaining({ profileId: linked.body.profileId, serverId: linkedServerId }),
+      ]),
+    );
+
+    const listed = await request(app)
+      .post("/api/admin/shared-index-groups")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(listed.body.groups).toHaveLength(1);
+    expect(JSON.stringify(listed.body)).not.toContain(created.body.sharedIndexKey);
+    expect(JSON.stringify(listed.body)).not.toContain("secret");
+
+    const updated = await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/update`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", name: "Sputnik Updated", autoLinkImports: false })
+      .expect(200);
+    expect(updated.body.group).toMatchObject({ name: "Sputnik Updated", autoLinkImports: false });
+
+    const rotated = await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/rotate-key`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(rotated.body.sharedIndexKey).toHaveLength(43);
+    expect(rotated.body.sharedIndexKey).not.toBe(created.body.sharedIndexKey);
+
+    const masterChanged = await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/master`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: linked.body.profileId, serverId: linkedServerId })
+      .expect(200);
+    expect(masterChanged.body.group.masterServer).toMatchObject({ profileId: linked.body.profileId, serverId: linkedServerId });
+
+    const rescanned = await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/rescan`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(rescanned.body.scanStatus).toEqual(expect.objectContaining({ status: "queued", trigger: "manual" }));
+
+    const cancelled = await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/cancel-scan`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(cancelled.body.scanStatus).toEqual(expect.objectContaining({ status: "cancelled" }));
+
+    const unlinked = await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/unlink-server`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: linked.body.profileId, serverId: linkedServerId })
+      .expect(200);
+    expect(unlinked.body.group).toMatchObject({ linkedServerCount: 1, masterServer: null });
+  });
 });

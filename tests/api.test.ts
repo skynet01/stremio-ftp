@@ -132,6 +132,79 @@ describe("web API setup token handling", () => {
       }),
     );
   });
+
+  it("posts shared index admin actions with auth bodies", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ groups: [] }))
+      .mockResolvedValueOnce(jsonResponse({ group: { id: 3 }, sharedIndexKey: "key" }))
+      .mockResolvedValueOnce(jsonResponse({ group: { id: 3 } }))
+      .mockResolvedValueOnce(jsonResponse({ group: { id: 3 }, sharedIndexKey: "rotated" }))
+      .mockResolvedValueOnce(jsonResponse({ group: { id: 3 } }))
+      .mockResolvedValueOnce(jsonResponse({ group: { id: 3 } }))
+      .mockResolvedValueOnce(jsonResponse({ group: { id: 3 } }))
+      .mockResolvedValueOnce(jsonResponse({ group: { id: 3 }, scanStatus: { status: "queued" } }))
+      .mockResolvedValueOnce(jsonResponse({ group: { id: 3 }, scanStatus: { status: "cancelled" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const {
+      cancelAdminSharedIndexScan,
+      createAdminSharedIndexGroup,
+      linkAdminSharedIndexServer,
+      loadAdminSharedIndexGroups,
+      rescanAdminSharedIndexGroup,
+      rotateAdminSharedIndexKey,
+      saveSetupToken,
+      setAdminSharedIndexMaster,
+      unlinkAdminSharedIndexServer,
+      updateAdminSharedIndexGroup,
+    } = await import("../src/web/api");
+    saveSetupToken("setup-secret-123");
+    const auth = { browserUid: "admin-uid", passphrase: "passphrase" };
+
+    await loadAdminSharedIndexGroups(auth);
+    await createAdminSharedIndexGroup({ ...auth, profileId: 7, serverId: 9, name: "Sputnik", keyHint: "sputnik" });
+    await updateAdminSharedIndexGroup({ ...auth, groupId: 3, name: "Sputnik 2", autoLinkImports: false });
+    await rotateAdminSharedIndexKey({ ...auth, groupId: 3 });
+    await linkAdminSharedIndexServer({ ...auth, groupId: 3, profileId: 7, serverId: 9 });
+    await unlinkAdminSharedIndexServer({ ...auth, groupId: 3, profileId: 7, serverId: 9 });
+    await setAdminSharedIndexMaster({ ...auth, groupId: 3, profileId: 7, serverId: 9 });
+    await rescanAdminSharedIndexGroup({ ...auth, groupId: 3 });
+    await cancelAdminSharedIndexScan({ ...auth, groupId: 3 });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/shared-index-groups", expect.objectContaining({ method: "POST", body: JSON.stringify(auth) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/admin/shared-index-groups/create",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ ...auth, profileId: 7, serverId: 9, name: "Sputnik", keyHint: "sputnik" }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/admin/shared-index-groups/3/update",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ...auth, name: "Sputnik 2", keyHint: undefined, enabled: undefined, autoLinkImports: false }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/admin/shared-index-groups/3/rotate-key", expect.objectContaining({ method: "POST", body: JSON.stringify(auth) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/admin/shared-index-groups/3/link-server",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ ...auth, profileId: 7, serverId: 9 }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/admin/shared-index-groups/3/unlink-server",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ ...auth, profileId: 7, serverId: 9 }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/api/admin/shared-index-groups/3/master",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ ...auth, profileId: 7, serverId: 9 }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(8, "/api/admin/shared-index-groups/3/rescan", expect.objectContaining({ method: "POST", body: JSON.stringify(auth) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(9, "/api/admin/shared-index-groups/3/cancel-scan", expect.objectContaining({ method: "POST", body: JSON.stringify(auth) }));
+  });
 });
 
 function jsonResponse(body: object, status = 200) {
