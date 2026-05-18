@@ -79,6 +79,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
         id: server.id,
         name: server.name,
         host: server.ftpConfig?.host ?? null,
+        indexedItems: server.indexStatus.mediaItems,
         lastIndexedAt: server.indexStatus.lastScanAt,
         sharedIndex: server.sharedIndex,
       }));
@@ -86,6 +87,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
       const queuedScans = scanStatuses.filter((scanStatus) => scanStatus.status === "queued").length;
       return {
         ...profile,
+        superAdminEnabled: config.superAdminBrowserUids.has(profile.browserUid),
         ftpServerDetails,
         activeScans,
         pendingScans: profile.pendingScans + queuedScans,
@@ -382,7 +384,7 @@ function bulkScanTargets(service: ProfileService, profileIds: number[]) {
 }
 
 function configuredFtpServers(service: ProfileService, profileId: number): FtpServer[] {
-  return service.listFtpServers(profileId).filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig));
+  return service.listFtpServers(profileId).filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig) && !server.sharedIndex);
 }
 
 function skippedProfileCount(service: ProfileService, profileIds: number[]) {

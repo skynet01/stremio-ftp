@@ -84,6 +84,7 @@ export type SharedIndexLink = {
   keyHint: string;
   autoLinked: boolean;
   lastIndexedAt: string | null;
+  indexedMediaCount: number;
 };
 
 export type SharedIndexGroup = {
@@ -1239,10 +1240,12 @@ export class ProfileService {
   }
 
   private sharedIndexLink(groupId: number): SharedIndexLink | null {
-    const row = this.db.prepare("select id, name, key_hint, last_indexed_at from shared_index_groups where id = ?").get(groupId) as
-      | { id: number; name: string; key_hint: string; last_indexed_at: string | null }
+    const row = this.db.prepare("select id, name, key_hint, indexed_media_count, last_indexed_at from shared_index_groups where id = ?").get(groupId) as
+      | { id: number; name: string; key_hint: string; indexed_media_count: number; last_indexed_at: string | null }
       | undefined;
-    return row ? { id: row.id, name: row.name, keyHint: row.key_hint, autoLinked: false, lastIndexedAt: row.last_indexed_at } : null;
+    return row
+      ? { id: row.id, name: row.name, keyHint: row.key_hint, autoLinked: false, indexedMediaCount: row.indexed_media_count, lastIndexedAt: row.last_indexed_at }
+      : null;
   }
 
   private sharedIndexGroupFromRow(row: SharedIndexGroupRow): SharedIndexGroup {

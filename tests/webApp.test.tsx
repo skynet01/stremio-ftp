@@ -1572,6 +1572,7 @@ describe("App", () => {
     expect(within(bulkLinkDialog).getByText("Sputnik")).toBeTruthy();
     expect(within(bulkLinkDialog).getByText("Tamarind")).toBeTruthy();
     expect(screen.getByLabelText("Shared index group for Sputnik")).toHaveValue("5");
+    linkAdminSharedIndexServerMock.mockRejectedValueOnce(new Error("FTP server does not match shared index group"));
     fireEvent.click(within(bulkLinkDialog).getByRole("button", { name: "Link server buckets" }));
     await waitFor(() =>
       expect(linkAdminSharedIndexServerMock).toHaveBeenCalledWith({
@@ -1582,6 +1583,7 @@ describe("App", () => {
         serverId: 9,
       }),
     );
+    expect(await within(bulkLinkDialog).findByText("FTP server does not match shared index group")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Rescan Sputnik Main" }));
     await waitFor(() =>
       expect(rescanAdminSharedIndexGroupMock).toHaveBeenCalledWith({
@@ -1639,12 +1641,16 @@ describe("App", () => {
     expect(screen.queryByRole("columnheader", { name: "Country" })).toBeNull();
     expect(screen.getAllByText("44").length).toBeGreaterThan(0);
     expect(loadAdminProfilesMock).toHaveBeenCalledWith(expect.objectContaining({ passphrase: "passphrase" }));
+    bulkAdminProfilesMock.mockResolvedValueOnce({ action: "rescan", profileIds: [2], scans: [], summary: { profiles: 1, servers: 1, queued: 1, skipped: 0 } });
     fireEvent.click(screen.getByRole("button", { name: "Rescan bf1f80d7-4971-4919-8f4e-ab80aa2de852" }));
+    const profileRefreshDialog = await screen.findByRole("dialog", { name: "Refresh 1 unlinked server?" });
+    fireEvent.click(within(profileRefreshDialog).getByRole("button", { name: "Refresh unlinked" }));
     await waitFor(() =>
-      expect(rescanAdminProfileMock).toHaveBeenCalledWith({
+      expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
         browserUid: expect.any(String),
         passphrase: "passphrase",
-        profileId: 2,
+        profileIds: [2],
+        action: "rescan",
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Sort by Indexed" }));
@@ -1668,7 +1674,7 @@ describe("App", () => {
         adminEnabled: true,
       }),
     );
-    await waitFor(() => expect(screen.getAllByText("Admin").length).toBeGreaterThan(1));
+    await waitFor(() => expect(screen.getAllByLabelText("Admin").length).toBeGreaterThan(0));
   });
 
   it("performs bulk admin actions for selected profiles", async () => {

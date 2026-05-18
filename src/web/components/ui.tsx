@@ -1,7 +1,7 @@
 import { createElement as h, type ReactNode } from "react";
 import type { ConnectionStatus, ScanStatus } from "../api.js";
 
-export type StatusTone = "green" | "amber" | "red" | "gray";
+export type StatusTone = "green" | "amber" | "red" | "gray" | "blue" | "purple";
 
 export function StatusBadge({ tone, children }: { tone: StatusTone; children?: ReactNode }) {
   return h("span", { className: `badge badge-${tone}` }, children);

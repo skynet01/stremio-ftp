@@ -227,18 +227,21 @@ export type AdminProfileSummary = {
   lastCountryCode: string | null;
   adminEnabled: boolean;
   adminSource: "environment" | "database" | null;
+  superAdminEnabled?: boolean;
   ftpServers: number;
   configuredFtpServers: number;
   ftpServerDetails?: Array<{
     id: number;
     name: string;
     host: string | null;
+    indexedItems?: number;
     lastIndexedAt: string | null;
     sharedIndex: {
       id: number;
       name: string;
       keyHint: string;
       autoLinked: boolean;
+      indexedMediaCount?: number;
       lastIndexedAt: string | null;
     } | null;
   }>;
