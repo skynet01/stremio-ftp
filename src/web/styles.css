@@ -1194,7 +1194,7 @@ input:-webkit-autofill:active {
 
 .admin-shared-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
@@ -1476,7 +1476,21 @@ input:-webkit-autofill:active {
 
 .admin-server-cell {
   display: grid;
-  gap: 2px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-server-option-list {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.admin-server-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -1487,6 +1501,12 @@ input:-webkit-autofill:active {
   font-size: 0.62rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.admin-server-bulk-actions select {
+  width: min(260px, 100%);
+  min-height: 34px;
+  margin: 0;
 }
 
 .admin-select-header,

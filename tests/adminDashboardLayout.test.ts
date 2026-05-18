@@ -29,7 +29,8 @@ describe("admin dashboard table layout", () => {
     const css = readFileSync("src/web/styles.css", "utf8");
 
     expect(css).toMatch(/\.admin-shared-create\s*{[^}]*grid-template-columns:\s*minmax\(74px,\s*0\.45fr\)[^}]*auto;/s);
-    expect(css).toMatch(/\.admin-shared-grid\s*{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(min\(100%,\s*360px\),\s*1fr\)\);/s);
+    expect(css).toMatch(/\.admin-shared-grid\s*{[^}]*grid-template-columns:\s*1fr;/s);
+    expect(css).toMatch(/\.admin-server-option\s*{[^}]*grid-template-columns:\s*18px\s+minmax\(0,\s*1fr\);/s);
     expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.admin-shared-create,\s*[\s\S]*\.admin-shared-card-header,\s*[\s\S]*\.admin-shared-stats\s*{[^}]*grid-template-columns:\s*1fr;/);
   });
 });

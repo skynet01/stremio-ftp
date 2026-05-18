@@ -1367,6 +1367,10 @@ describe("App", () => {
           lastUnlockedAt: null,
           ftpServers: 2,
           configuredFtpServers: 1,
+          ftpServerDetails: [
+            { id: 9, name: "Sputnik", host: "sputnik.whatbox.ca", sharedIndex: null },
+            { id: 10, name: "Tamarind", host: "tamarind.whatbox.ca", sharedIndex: null },
+          ],
           indexedItems: 44,
           lastScanAt: null,
           activeScans: 0,
@@ -1385,6 +1389,7 @@ describe("App", () => {
           lastUnlockedAt: null,
           ftpServers: 1,
           configuredFtpServers: 1,
+          ftpServerDetails: [{ id: 12, name: "Whatbox", host: "whatbox.example.test", sharedIndex: null }],
           indexedItems: 3,
           lastScanAt: "2026-05-16T00:00:00.000Z",
           activeScans: 0,
@@ -1427,6 +1432,7 @@ describe("App", () => {
       group: { ...sharedGroup, scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } },
       scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" },
     });
+    linkAdminSharedIndexServerMock.mockResolvedValue({ group: { ...sharedGroup, linkedServerCount: 13 } });
     bulkAdminProfilesMock.mockResolvedValue({ action: "convert_to_proxy", profileIds: [2, 3], converted: 2 });
     createProfileMock.mockResolvedValue({
       profileId: 1,
@@ -1444,6 +1450,18 @@ describe("App", () => {
     await screen.findByRole("heading", { name: "Shared index groups" });
     expect(screen.getByText("Sputnik Main")).toBeTruthy();
     expect(screen.getByText("12")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select server 9 from bf1f80d7-4971-4919-8f4e-ab80aa2de852" }));
+    fireEvent.change(screen.getByLabelText("Shared index group for selected servers"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Assign selected servers" }));
+    await waitFor(() =>
+      expect(linkAdminSharedIndexServerMock).toHaveBeenCalledWith({
+        browserUid: expect.any(String),
+        passphrase: "passphrase",
+        groupId: 5,
+        profileId: 2,
+        serverId: 9,
+      }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Rescan Sputnik Main" }));
     await waitFor(() =>
       expect(rescanAdminSharedIndexGroupMock).toHaveBeenCalledWith({

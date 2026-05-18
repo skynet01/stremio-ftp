@@ -43,6 +43,8 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<AdminBulkProfilesResponse | null>(null);
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<number>>(() => new Set());
+  const [selectedServerKeys, setSelectedServerKeys] = useState<Set<string>>(() => new Set());
+  const [bulkSharedGroupId, setBulkSharedGroupId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sort, setSort] = useState<AdminSort | null>(null);
   const [sharedGroups, setSharedGroups] = useState<AdminSharedIndexGroup[]>([]);
@@ -58,6 +60,10 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       const loaded = await loadAdminProfiles({ browserUid, passphrase });
       setData(loaded);
       setSelectedProfileIds((current) => new Set([...current].filter((profileId) => loaded.profiles.some((profile) => profile.id === profileId))));
+      const availableServerKeys = new Set(
+        loaded.profiles.flatMap((profile) => profile.ftpServerDetails?.map((server) => serverKey(profile.id, server.id)) ?? []),
+      );
+      setSelectedServerKeys((current) => new Set([...current].filter((key) => availableServerKeys.has(key))));
       setMessage(loaded.profiles.length ? "Admin profile list loaded." : "No profiles are set up yet.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load admin profiles.");
@@ -295,6 +301,36 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
+  async function assignSelectedServersToSharedGroup() {
+    const groupId = Number(bulkSharedGroupId);
+    const targets = [...selectedServerKeys].map(parseServerKey).filter((target): target is { profileId: number; serverId: number } => Boolean(target));
+    const group = sharedGroups.find((candidate) => candidate.id === groupId);
+    if (!group || !targets.length) return;
+
+    setBulkBusy(true);
+    try {
+      let assigned = 0;
+      let failed = 0;
+      let updatedGroup: AdminSharedIndexGroup | null = null;
+      for (const target of targets) {
+        try {
+          const result = await linkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId: target.profileId, serverId: target.serverId });
+          updatedGroup = result.group;
+          assigned += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+
+      if (updatedGroup) setSharedGroups((current) => upsertSharedGroup(current, updatedGroup));
+      if (assigned > 0) setSelectedServerKeys(new Set());
+      setMessage(`${assigned} server${assigned === 1 ? "" : "s"} assigned to ${group.name}${failed ? `; ${failed} failed identity checks.` : "."}`);
+      await refreshAdminData();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   function updateSort(key: AdminSortKey) {
     setSort((current) => (current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }));
   }
@@ -304,6 +340,16 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       const next = new Set(current);
       if (selected) next.add(profileId);
       else next.delete(profileId);
+      return next;
+    });
+  }
+
+  function toggleServerSelection(profileId: number, serverId: number, selected: boolean) {
+    setSelectedServerKeys((current) => {
+      const next = new Set(current);
+      const key = serverKey(profileId, serverId);
+      if (selected) next.add(key);
+      else next.delete(key);
       return next;
     });
   }
@@ -330,6 +376,13 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
           profile.adminEnabled ? "admin" : "user",
           profile.adminSource ?? "",
           String(profile.id),
+          ...(profile.ftpServerDetails?.flatMap((server) => [
+            String(server.id),
+            server.name,
+            server.host ?? "",
+            server.sharedIndex?.name ?? "",
+            server.sharedIndex?.keyHint ?? "",
+          ]) ?? []),
         ]
           .join(" ")
           .toLowerCase()
@@ -401,6 +454,30 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
               </button>
             </div>
           ) : null}
+          {selectedServerKeys.size ? (
+            <div className="admin-bulk-actions admin-server-bulk-actions" aria-label="Bulk server actions">
+              <span>{selectedServerKeys.size} server{selectedServerKeys.size === 1 ? "" : "s"} selected</span>
+              <select
+                aria-label="Shared index group for selected servers"
+                value={bulkSharedGroupId}
+                onChange={(event) => setBulkSharedGroupId(event.target.value)}
+              >
+                <option value="">Choose shared group</option>
+                {sharedGroups.map((group) => (
+                  <option value={group.id} key={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="secondary-button" disabled={bulkBusy || !bulkSharedGroupId} onClick={() => void assignSelectedServersToSharedGroup()}>
+                <Link2 size={15} aria-hidden="true" />
+                Assign selected servers
+              </button>
+              <button type="button" className="secondary-button" disabled={bulkBusy} onClick={() => setSelectedServerKeys(new Set())}>
+                Clear
+              </button>
+            </div>
+          ) : null}
           <div className="admin-profile-table-wrap">
             <table className="admin-profile-table">
               <thead>
@@ -457,10 +534,24 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                       <div className="admin-server-cell">
                         <span>{profile.configuredFtpServers}/{profile.ftpServers}</span>
                         {profile.ftpServerDetails?.length ? (
-                          <span className="admin-server-id-list">
-                            {profile.ftpServerDetails.slice(0, 2).map((server) => `#${server.id} ${server.host ?? server.name}`).join(", ")}
-                            {profile.ftpServerDetails.length > 2 ? " ..." : ""}
-                          </span>
+                          <div className="admin-server-option-list">
+                            {profile.ftpServerDetails.map((server) => (
+                              <label className="admin-server-option" htmlFor={`admin-server-${profile.id}-${server.id}`} key={server.id}>
+                                <input
+                                  id={`admin-server-${profile.id}-${server.id}`}
+                                  type="checkbox"
+                                  className="admin-profile-select"
+                                  aria-label={`Select server ${server.id} from ${profile.browserUid}`}
+                                  checked={selectedServerKeys.has(serverKey(profile.id, server.id))}
+                                  onChange={(event) => toggleServerSelection(profile.id, server.id, event.target.checked)}
+                                />
+                                <span className="admin-server-id-list">
+                                  #{server.id} {server.host ?? server.name}
+                                  {server.sharedIndex ? ` -> ${server.sharedIndex.name}` : ""}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
                         ) : null}
                       </div>
                     </td>
@@ -561,6 +652,15 @@ function upsertSharedGroup(groups: AdminSharedIndexGroup[], group: AdminSharedIn
     ? groups.map((candidate) => (candidate.id === group.id ? group : candidate))
     : [...groups, group];
   return next.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+}
+
+function serverKey(profileId: number, serverId: number) {
+  return `${profileId}:${serverId}`;
+}
+
+function parseServerKey(key: string) {
+  const [profileId, serverId] = key.split(":").map(Number);
+  return profileId && serverId ? { profileId, serverId } : null;
 }
 
 function SharedIndexAdminSection({
