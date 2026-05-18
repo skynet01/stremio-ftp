@@ -1187,14 +1187,13 @@ input:-webkit-autofill:active {
   background: rgba(255, 255, 255, 0.025);
 }
 
-.admin-shared-create input,
-.admin-shared-target-row input {
+.admin-shared-create input {
   min-height: 36px;
 }
 
 .admin-shared-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1228,8 +1227,41 @@ input:-webkit-autofill:active {
 }
 
 .admin-shared-stats {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.admin-shared-master {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.admin-shared-master span {
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.admin-shared-master strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cream);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .admin-shared-key {
@@ -1261,12 +1293,6 @@ input:-webkit-autofill:active {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.admin-shared-target-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
 }
 
 .admin-profile-search {
@@ -2498,6 +2524,12 @@ input:-webkit-autofill:active {
   }
 }
 
+@media (max-width: 1160px) {
+  .admin-shared-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 860px) {
   .app-shell {
     width: min(100vw - 24px, 620px);
@@ -2551,6 +2583,10 @@ input:-webkit-autofill:active {
   .admin-shared-create,
   .admin-shared-card-header,
   .admin-shared-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-shared-grid {
     grid-template-columns: 1fr;
   }
 

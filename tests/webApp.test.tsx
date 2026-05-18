@@ -1450,6 +1450,13 @@ describe("App", () => {
     await screen.findByRole("heading", { name: "Shared index groups" });
     expect(screen.getByText("Sputnik Main")).toBeTruthy();
     expect(screen.getByText("12")).toBeTruthy();
+    expect(screen.getByText("Master")).toBeTruthy();
+    expect(screen.getByText("bf1f80d7-4971-4 / Server 1")).toBeTruthy();
+    expect(screen.queryByLabelText("Profile ID for Sputnik Main")).toBeNull();
+    expect(screen.queryByLabelText("Server ID for Sputnik Main")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Link server to Sputnik Main" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Set master for Sputnik Main" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unlink server from Sputnik Main" })).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select bf1f80d7-4971-4919-8f4e-ab80aa2de852" }));
     fireEvent.click(screen.getByRole("button", { name: "Bulk link servers" }));
     const bulkLinkDialog = await screen.findByRole("dialog", { name: "Link selected servers" });
