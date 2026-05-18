@@ -233,10 +233,13 @@ export type AdminProfileSummary = {
     id: number;
     name: string;
     host: string | null;
+    lastIndexedAt: string | null;
     sharedIndex: {
       id: number;
       name: string;
       keyHint: string;
+      autoLinked: boolean;
+      lastIndexedAt: string | null;
     } | null;
   }>;
   indexedItems: number;
@@ -717,6 +720,15 @@ export async function rotateAdminSharedIndexKey(request: CreateProfileRequest & 
     body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
   });
   return readJson<AdminSharedIndexKeyResponse>(response);
+}
+
+export async function deleteAdminSharedIndexGroup(request: CreateProfileRequest & { groupId: number }): Promise<{ ok: true }> {
+  const response = await fetch(`/api/admin/shared-index-groups/${request.groupId}/delete`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ browserUid: request.browserUid, passphrase: request.passphrase }),
+  });
+  return readJson<{ ok: true }>(response);
 }
 
 export async function linkAdminSharedIndexServer(

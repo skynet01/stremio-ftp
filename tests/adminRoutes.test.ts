@@ -426,6 +426,26 @@ describe("admin routes", () => {
     });
 
     const groupId = created.body.group.id;
+    const profileList = await request(app)
+      .post("/api/admin/profiles")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(profileList.body.profiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: master.body.profileId,
+          ftpServerDetails: expect.arrayContaining([
+            expect.objectContaining({
+              id: masterServerId,
+              lastIndexedAt: null,
+              sharedIndex: expect.objectContaining({ id: groupId, autoLinked: false, lastIndexedAt: null }),
+            }),
+          ]),
+        }),
+      ]),
+    );
+
     await request(app)
       .post(`/api/admin/shared-index-groups/${groupId}/link-server`)
       .set("x-setup-token", "setup-secret-123")
@@ -483,6 +503,24 @@ describe("admin routes", () => {
       .expect(200);
     expect(rescanned.body.scanStatus).toEqual(expect.objectContaining({ status: "queued", trigger: "manual" }));
 
+    await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/delete`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(400);
+
+    await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/update`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", enabled: false })
+      .expect(200);
+
+    await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/delete`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(409);
+
     const cancelled = await request(app)
       .post(`/api/admin/shared-index-groups/${groupId}/cancel-scan`)
       .set("x-setup-token", "setup-secret-123")
@@ -496,5 +534,18 @@ describe("admin routes", () => {
       .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: linked.body.profileId, serverId: linkedServerId })
       .expect(200);
     expect(unlinked.body.group).toMatchObject({ linkedServerCount: 1, masterServer: null });
+
+    await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/delete`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    const emptyList = await request(app)
+      .post("/api/admin/shared-index-groups")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+    expect(emptyList.body.groups).toHaveLength(0);
   });
 });

@@ -4,6 +4,7 @@ import {
   bulkAdminProfiles,
   cancelAdminSharedIndexScan,
   createAdminSharedIndexGroup,
+  deleteAdminSharedIndexGroup,
   deleteAdminProfile,
   issueAdminManifestToken,
   linkAdminSharedIndexServer,
@@ -13,6 +14,7 @@ import {
   rescanAdminSharedIndexGroup,
   rotateAdminSharedIndexKey,
   setAdminProfileEnabled,
+  unlinkAdminSharedIndexServer,
   updateAdminSharedIndexGroup,
   type AdminBulkProfileAction,
   type AdminBulkProfilesResponse,
@@ -27,7 +29,7 @@ type AdminDashboardProps = {
   passphrase: string;
 };
 
-type AdminSortKey = "browserUid" | "admin" | "servers" | "indexed" | "lastScanAt" | "state" | "manifest";
+type AdminSortKey = "browserUid" | "admin" | "servers" | "indexed" | "lastScanAt" | "state";
 type AdminSort = {
   key: AdminSortKey;
   direction: "asc" | "desc";
@@ -51,6 +53,14 @@ type BulkLinkResult = {
   failed: number;
 };
 
+type ConfirmDialogState = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  danger?: boolean;
+  onConfirm: () => void;
+};
+
 export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) {
   const [data, setData] = useState<AdminProfileListResponse | null>(null);
   const [message, setMessage] = useState("Loading admin profile list...");
@@ -68,6 +78,9 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [sharedCreateForm, setSharedCreateForm] = useState({ profileId: "", serverId: "", name: "", keyHint: "" });
   const [busySharedGroupId, setBusySharedGroupId] = useState<number | "create" | null>(null);
   const [revealedSharedKey, setRevealedSharedKey] = useState<{ groupId: number; key: string } | null>(null);
+  const [serverModalProfileId, setServerModalProfileId] = useState<number | null>(null);
+  const [serverLinkSelections, setServerLinkSelections] = useState<Record<string, string>>({});
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   async function refreshProfiles() {
     setLoading(true);
@@ -161,6 +174,41 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
+  function requestRotateSharedKey(group: AdminSharedIndexGroup) {
+    setConfirmDialog({
+      title: `Rotate key for ${group.name}?`,
+      body: "Existing import files with the current shared index key will stop auto-linking. Linked servers stay linked.",
+      confirmLabel: "Rotate key",
+      danger: true,
+      onConfirm: () => void rotateSharedKey(group),
+    });
+  }
+
+  async function deleteSharedGroup(group: AdminSharedIndexGroup) {
+    setBusySharedGroupId(group.id);
+    try {
+      await deleteAdminSharedIndexGroup({ browserUid, passphrase, groupId: group.id });
+      setSharedGroups((current) => current.filter((candidate) => candidate.id !== group.id));
+      if (revealedSharedKey?.groupId === group.id) setRevealedSharedKey(null);
+      setMessage(`${group.name} deleted.`);
+      await refreshAdminData();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to delete shared index group.");
+    } finally {
+      setBusySharedGroupId(null);
+    }
+  }
+
+  function requestDeleteSharedGroup(group: AdminSharedIndexGroup) {
+    setConfirmDialog({
+      title: `Delete ${group.name}?`,
+      body: "This removes the disabled shared index group and its shared index data. Profile servers linked to it will become unlinked.",
+      confirmLabel: "Delete group",
+      danger: true,
+      onConfirm: () => void deleteSharedGroup(group),
+    });
+  }
+
   async function runSharedScan(group: AdminSharedIndexGroup) {
     const active = group.scanStatus.status === "queued" || group.scanStatus.status === "running";
     setBusySharedGroupId(group.id);
@@ -194,7 +242,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
           : current,
       );
       await navigator.clipboard?.writeText(issued.manifestUrl);
-      setMessage(`Manifest URL issued for ${profile.browserUid}.`);
+      setMessage(`Manifest URL issued and copied for ${profile.browserUid}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to issue manifest URL.");
     } finally {
@@ -336,6 +384,40 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
+  async function linkServerFromModal(profileId: number, serverId: number) {
+    const key = serverSelectionKey(profileId, serverId);
+    const groupId = Number(serverLinkSelections[key]);
+    if (!groupId) {
+      setMessage("Choose a shared index group before linking this server.");
+      return;
+    }
+    setBusyProfileId(profileId);
+    try {
+      const result = await linkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId, serverId });
+      setSharedGroups((current) => upsertSharedGroup(current, result.group));
+      setMessage("Server linked to shared index group.");
+      await refreshAdminData();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to link server.");
+    } finally {
+      setBusyProfileId(null);
+    }
+  }
+
+  async function unlinkServerFromModal(profileId: number, serverId: number, groupId: number) {
+    setBusyProfileId(profileId);
+    try {
+      const result = await unlinkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId, serverId });
+      setSharedGroups((current) => upsertSharedGroup(current, result.group));
+      setMessage("Server unlinked from shared index group.");
+      await refreshAdminData();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to unlink server.");
+    } finally {
+      setBusyProfileId(null);
+    }
+  }
+
   function updateSort(key: AdminSortKey) {
     setSort((current) => (current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }));
   }
@@ -390,6 +472,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const selectedCount = selectedProfiles.length;
   const selectedHasScanActivity = selectedProfiles.some((profile) => profile.activeScans > 0 || profile.pendingScans > 0);
   const allVisibleSelected = visibleProfiles.length > 0 && visibleSelectedCount === visibleProfiles.length;
+  const serverModalProfile = profiles.find((profile) => profile.id === serverModalProfileId) ?? null;
 
   return (
     <section className="panel admin-dashboard-panel" aria-labelledby="admin-dashboard-heading">
@@ -397,7 +480,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
         <div>
           <span className="section-label">Admin tools</span>
           <h2 id="admin-dashboard-heading">Admin dashboard</h2>
-          <p>Inspect profile setup, index state, and debug manifest URLs.</p>
+          <p>Inspect profile setup, linked indexes, and scan state.</p>
         </div>
         <button type="button" className="secondary-button" disabled={loading} onClick={() => void refreshAdminData()}>
           <RefreshCw size={16} aria-hidden="true" />
@@ -474,7 +557,6 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                   <SortHeader label="Indexed" sortKey="indexed" sort={sort} onSort={updateSort} />
                   <SortHeader label="Last scan" sortKey="lastScanAt" sort={sort} onSort={updateSort} />
                   <SortHeader label="State" sortKey="state" sort={sort} onSort={updateSort} />
-                  <SortHeader label="Manifest" sortKey="manifest" sort={sort} onSort={updateSort} />
                   <th scope="col">Actions</th>
                 </tr>
               </thead>
@@ -508,34 +590,19 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                       <AdminState profile={profile} />
                     </td>
                     <td data-label="Servers">
-                      <div className="admin-server-cell">
+                      <button type="button" className="admin-server-cell admin-server-cell-button" onClick={() => setServerModalProfileId(profile.id)}>
                         <span>{profile.configuredFtpServers}/{profile.ftpServers}</span>
                         {profile.ftpServerDetails?.length ? (
                           <span className="admin-server-id-list">
-                            {profile.ftpServerDetails.length} server{profile.ftpServerDetails.length === 1 ? "" : "s"} available for bulk link
+                            {serverLinkSummary(profile)}
                           </span>
                         ) : null}
-                      </div>
+                      </button>
                     </td>
                     <td data-label="Indexed">{profile.indexedItems}</td>
                     <td data-label="Last scan">{formatScanTime(profile.lastScanAt)}</td>
                     <td data-label="State">
                       <ProfileStateBadge profile={profile} />
-                    </td>
-                    <td data-label="Manifest">
-                      {profile.manifestUrl ? (
-                        <button
-                          type="button"
-                          className="icon-button admin-manifest-copy"
-                          aria-label={`Copy manifest URL for ${profile.browserUid}`}
-                          title="Copy manifest URL"
-                          onClick={() => void navigator.clipboard?.writeText(profile.manifestUrl!)}
-                        >
-                          <Copy size={16} aria-hidden="true" />
-                        </button>
-                      ) : (
-                        <span className="admin-empty-value">Not issued</span>
-                      )}
                     </td>
                     <td data-label="Actions">
                       <div className="admin-actions">
@@ -596,9 +663,22 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
         onCreateFormChange={(patch) => setSharedCreateForm((current) => ({ ...current, ...patch }))}
         onCreate={() => void createSharedGroup()}
         onUpdate={updateSharedGroup}
-        onRotate={rotateSharedKey}
+        onRotate={requestRotateSharedKey}
+        onDelete={requestDeleteSharedGroup}
         onScan={runSharedScan}
       />
+      {serverModalProfile ? (
+        <ProfileServersDialog
+          profile={serverModalProfile}
+          groups={sharedGroups}
+          selections={serverLinkSelections}
+          busy={busyProfileId === serverModalProfile.id}
+          onSelectionChange={(key, groupId) => setServerLinkSelections((current) => ({ ...current, [key]: groupId }))}
+          onLink={linkServerFromModal}
+          onUnlink={unlinkServerFromModal}
+          onClose={() => setServerModalProfileId(null)}
+        />
+      ) : null}
       {bulkLinkOpen ? (
         <BulkLinkDialog
           buckets={serverBucketsForProfiles(selectedProfiles)}
@@ -612,6 +692,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
         />
       ) : null}
       {bulkResult ? <BulkActionDialog result={bulkResult} profiles={profiles} onClose={() => setBulkResult(null)} /> : null}
+      {confirmDialog ? <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} /> : null}
     </section>
   );
 }
@@ -647,6 +728,40 @@ function normalizedServerName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
 }
 
+function serverSelectionKey(profileId: number, serverId: number) {
+  return `${profileId}:${serverId}`;
+}
+
+type AdminServerDetail = NonNullable<AdminProfileSummary["ftpServerDetails"]>[number];
+
+function configuredServerDetails(profile: AdminProfileSummary) {
+  return (profile.ftpServerDetails ?? []).filter((server) => server.host);
+}
+
+function serverLinkedStatus(server: AdminServerDetail) {
+  if (!server.sharedIndex) return "Unlinked";
+  return server.sharedIndex.autoLinked ? "Auto-L" : "Linked";
+}
+
+function serverLinkSummary(profile: AdminProfileSummary) {
+  const configured = configuredServerDetails(profile);
+  const linked = configured.filter((server) => server.sharedIndex);
+  if (!configured.length) return `${profile.ftpServerDetails?.length ?? 0} server${profile.ftpServerDetails?.length === 1 ? "" : "s"}`;
+  return `${linked.length}/${configured.length} linked`;
+}
+
+function sharedProfileState(profile: AdminProfileSummary): "Auto-L" | "Linked" | "Partial" | null {
+  const configured = configuredServerDetails(profile);
+  if (!configured.length) return null;
+  const linked = configured.filter((server) => server.sharedIndex);
+  if (!linked.length) return null;
+  if (linked.length !== configured.length) return "Partial";
+  const autoLinked = linked.filter((server) => server.sharedIndex?.autoLinked);
+  if (autoLinked.length === linked.length) return "Auto-L";
+  if (autoLinked.length === 0) return "Linked";
+  return "Partial";
+}
+
 function defaultGroupIdForBucket(bucket: ServerBucket, groups: AdminSharedIndexGroup[]) {
   let best: { groupId: number; score: number; nameLength: number } | null = null;
   for (const group of groups) {
@@ -677,6 +792,7 @@ function SharedIndexAdminSection({
   onCreate,
   onUpdate,
   onRotate,
+  onDelete,
   onScan,
 }: {
   groups: AdminSharedIndexGroup[];
@@ -687,6 +803,7 @@ function SharedIndexAdminSection({
   onCreate: () => void;
   onUpdate: (group: AdminSharedIndexGroup, patch: Partial<Pick<AdminSharedIndexGroup, "enabled" | "autoLinkImports">>) => void;
   onRotate: (group: AdminSharedIndexGroup) => void;
+  onDelete: (group: AdminSharedIndexGroup) => void;
   onScan: (group: AdminSharedIndexGroup) => void;
 }) {
   return (
@@ -735,6 +852,7 @@ function SharedIndexAdminSection({
         <div className="admin-shared-grid">
           {groups.map((group) => {
             const active = group.scanStatus.status === "queued" || group.scanStatus.status === "running";
+            const canDelete = !group.enabled && !active;
             return (
               <article className="admin-shared-card" key={group.id}>
                 <div className="admin-shared-card-header">
@@ -795,6 +913,11 @@ function SharedIndexAdminSection({
                   <button type="button" className="icon-button" title="Rotate key" aria-label={`Rotate key for ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onRotate(group)}>
                     <KeyRound size={15} aria-hidden="true" />
                   </button>
+                  {!group.enabled ? (
+                    <button type="button" className="icon-button danger-button" title={active ? "Halt shared scan before deleting" : "Delete group"} aria-label={`Delete ${group.name}`} disabled={busyGroupId === group.id || !canDelete} onClick={() => onDelete(group)}>
+                      <Trash2 size={15} aria-hidden="true" />
+                    </button>
+                  ) : null}
                   <button type="button" className={`icon-button ${active ? "danger-button" : ""}`} title={active ? "Halt shared scan" : "Rescan shared index"} aria-label={active ? `Halt scan for ${group.name}` : `Rescan ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onScan(group)}>
                     {active ? <CircleStop size={15} aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
                   </button>
@@ -807,6 +930,135 @@ function SharedIndexAdminSection({
         <p className="admin-empty-value">No shared index groups configured.</p>
       )}
     </section>
+  );
+}
+
+function ProfileServersDialog({
+  profile,
+  groups,
+  selections,
+  busy,
+  onSelectionChange,
+  onLink,
+  onUnlink,
+  onClose,
+}: {
+  profile: AdminProfileSummary;
+  groups: AdminSharedIndexGroup[];
+  selections: Record<string, string>;
+  busy: boolean;
+  onSelectionChange: (key: string, groupId: string) => void;
+  onLink: (profileId: number, serverId: number) => void;
+  onUnlink: (profileId: number, serverId: number, groupId: number) => void;
+  onClose: () => void;
+}) {
+  const servers = profile.ftpServerDetails ?? [];
+  return (
+    <div className="admin-bulk-dialog-backdrop">
+      <div className="admin-bulk-dialog admin-server-dialog" role="dialog" aria-modal={true} aria-labelledby="admin-server-dialog-heading">
+        <div className="admin-bulk-dialog-header">
+          <div>
+            <span className="section-label">Servers</span>
+            <h3 id="admin-server-dialog-heading">{truncateUid(profile.browserUid)}</h3>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close server list" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="admin-server-dialog-table-wrap">
+          <table className="admin-server-dialog-table">
+            <thead>
+              <tr>
+                <th scope="col">Server</th>
+                <th scope="col">Host</th>
+                <th scope="col">Last index</th>
+                <th scope="col">Status</th>
+                <th scope="col">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {servers.map((server) => {
+                const key = serverSelectionKey(profile.id, server.id);
+                const status = serverLinkedStatus(server);
+                const linkedGroupId = server.sharedIndex?.id ?? null;
+                return (
+                  <tr key={server.id}>
+                    <td data-label="Server">
+                      <strong>{server.name}</strong>
+                      <span>#{server.id}</span>
+                    </td>
+                    <td data-label="Host">{server.host ?? "Not configured"}</td>
+                    <td data-label="Last index">{formatScanTime(server.sharedIndex ? server.sharedIndex.lastIndexedAt : server.lastIndexedAt)}</td>
+                    <td data-label="Status">
+                      <StatusBadge tone={status === "Unlinked" ? "gray" : status === "Auto-L" ? "green" : "green"}>{status}</StatusBadge>
+                      {server.sharedIndex ? <span>{server.sharedIndex.name}</span> : null}
+                    </td>
+                    <td data-label="Action">
+                      {linkedGroupId ? (
+                        <button type="button" className="secondary-button danger-button" disabled={busy} onClick={() => onUnlink(profile.id, server.id, linkedGroupId)}>
+                          Unlink
+                        </button>
+                      ) : (
+                        <div className="admin-server-link-controls">
+                          <select
+                            aria-label={`Shared index group for ${server.name}`}
+                            value={selections[key] ?? ""}
+                            disabled={busy || !groups.length}
+                            onChange={(event) => onSelectionChange(key, event.target.value)}
+                          >
+                            <option value="">Choose group</option>
+                            {groups.map((group) => (
+                              <option key={group.id} value={group.id}>
+                                {group.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button type="button" className="secondary-button" disabled={busy || !groups.length} onClick={() => onLink(profile.id, server.id)}>
+                            Link
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDialog({ dialog, onClose }: { dialog: ConfirmDialogState; onClose: () => void }) {
+  function confirm() {
+    dialog.onConfirm();
+    onClose();
+  }
+
+  return (
+    <div className="admin-bulk-dialog-backdrop">
+      <div className="admin-bulk-dialog admin-confirm-dialog" role="dialog" aria-modal={true} aria-labelledby="admin-confirm-dialog-heading">
+        <div className="admin-bulk-dialog-header">
+          <div>
+            <span className="section-label">Confirm</span>
+            <h3 id="admin-confirm-dialog-heading">{dialog.title}</h3>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close confirmation" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+        <p>{dialog.body}</p>
+        <div className="admin-confirm-actions">
+          <button type="button" className={`secondary-button ${dialog.danger ? "danger-button" : ""}`} onClick={confirm}>
+            {dialog.confirmLabel}
+          </button>
+          <button type="button" className="secondary-button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1036,8 +1288,6 @@ function profileSortValue(profile: AdminProfileSummary, key: AdminSortKey) {
       return profile.lastScanAt ? Date.parse(profile.lastScanAt) : 0;
     case "state":
       return profileStateLabel(profile);
-    case "manifest":
-      return profile.manifestUrl ? 1 : 0;
   }
 }
 
@@ -1052,13 +1302,21 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
 
 function ProfileStateBadge({ profile }: { profile: AdminProfileSummary }) {
   const label = profileStateLabel(profile);
-  const tone = label === "Scanning" || label === "Indexed" ? "green" : label === "Pending" ? "amber" : "gray";
-  return <StatusBadge tone={tone}>{label}</StatusBadge>;
+  const tone = label === "Scanning" || label === "Indexed" || label === "Auto-L" || label === "Linked" ? "green" : label === "Pending" || label === "Partial" ? "amber" : "gray";
+  const sharedState = sharedProfileState(profile);
+  return (
+    <span className="admin-state-stack">
+      <StatusBadge tone={tone}>{label}</StatusBadge>
+      {sharedState && sharedState !== label ? <StatusBadge tone={sharedState === "Partial" ? "amber" : "green"}>{sharedState}</StatusBadge> : null}
+    </span>
+  );
 }
 
 function profileStateLabel(profile: AdminProfileSummary) {
   if (profile.activeScans > 0) return "Scanning";
   if (profile.pendingScans > 0) return "Pending";
+  const sharedState = sharedProfileState(profile);
+  if (sharedState) return sharedState;
   if (profile.indexedItems > 0) return "Indexed";
   if (profile.configuredFtpServers > 0) return "Configured";
   return "Empty";

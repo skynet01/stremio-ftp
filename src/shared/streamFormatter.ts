@@ -23,6 +23,8 @@ export type StreamFormatterContext = {
     deliveryMode: string;
     videoTags: string;
     visualTags: string[];
+    "3dtype": string;
+    threeDType: string;
     encode: string;
     audioTags: string[];
     audioChannels: string[];
@@ -94,6 +96,39 @@ export function streamVideoTags(filename: string) {
   const visualTags = streamVideoTagList(filename).map((tag) => (tag === "DV" ? "Dolby Vision" : tag));
   const remux = visualTags.includes("Remux") ? ["Remux"] : [];
   return [...visualTags.filter((tag) => tag !== "Remux"), streamEncode(filename), ...remux].filter(Boolean).join(" ");
+}
+
+export function stream3DType(filename: string) {
+  const projection = tagList([
+    [tokenPattern(["vr"], ["180"]), "180"],
+    [tokenPattern(["180"], ["vr"]), "180"],
+    [tokenPattern(["180"]), "180"],
+    [tokenPattern(["vr"], ["360"]), "360"],
+    [tokenPattern(["360"], ["vr"]), "360"],
+    [tokenPattern(["360"]), "360"],
+  ], filename)[0] ?? "";
+  const layout = tagList([
+    [tokenPattern(["vr"], ["sbs"]), "VR SBS"],
+    [tokenPattern(["full", "f"], ["sbs"]), "Full SBS"],
+    [tokenPattern(["fsbs", "fullsbs"]), "Full SBS"],
+    [/(^|[^a-z0-9])(?:full|f)[\s._-]*(?:side[\s._-]*(?:by[\s._-]*)?side)(?=$|[^a-z0-9])/i, "Full SBS"],
+    [tokenPattern(["half", "h"], ["sbs"]), "Half SBS"],
+    [tokenPattern(["hsbs", "halfsbs"]), "Half SBS"],
+    [/(^|[^a-z0-9])(?:half|h)[\s._-]*(?:side[\s._-]*(?:by[\s._-]*)?side)(?=$|[^a-z0-9])/i, "Half SBS"],
+    [/(^|[^a-z0-9])(?:side[\s._-]*(?:by[\s._-]*)?side)(?=$|[^a-z0-9])/i, "SBS"],
+    [tokenPattern(["sbs"]), "SBS"],
+    [tokenPattern(["full", "f"], ["ou"]), "Full OU"],
+    [tokenPattern(["fou", "fullou"]), "Full OU"],
+    [/(^|[^a-z0-9])(?:full|f)[\s._-]*(?:top[\s._-]*(?:and[\s._-]*)?bottom|over[\s._-]*under|tab)(?=$|[^a-z0-9])/i, "Full OU"],
+    [tokenPattern(["half", "h"], ["ou"]), "Half OU"],
+    [tokenPattern(["hou", "halfou"]), "Half OU"],
+    [/(^|[^a-z0-9])(?:half|h)[\s._-]*(?:top[\s._-]*(?:and[\s._-]*)?bottom|over[\s._-]*under|tab)(?=$|[^a-z0-9])/i, "Half OU"],
+    [/(^|[^a-z0-9])(?:top[\s._-]*(?:and[\s._-]*)?bottom|over[\s._-]*under|tab)(?=$|[^a-z0-9])/i, "OU"],
+    [tokenPattern(["ou"]), "OU"],
+    [tokenPattern(["mvc"]), "MVC"],
+    [tokenPattern(["3d"]), "3D"],
+  ], filename)[0] ?? "";
+  return [projection, layout].filter(Boolean).join(" ");
 }
 
 export function streamEncode(filename: string) {
@@ -491,4 +526,15 @@ function tagList(patterns: Array<[RegExp, string]>, value: string) {
     if (pattern.test(value)) seen.add(label);
   }
   return Array.from(seen);
+}
+
+function tokenPattern(first: string[], second?: string[]) {
+  const token = (values: string[]) => `(?:${values.map(escapeRegExp).join("|")})`;
+  const separator = String.raw`[\s._-]*`;
+  const body = second ? `${token(first)}${separator}${token(second)}` : token(first);
+  return new RegExp(`(^|[^a-z0-9])${body}(?=$|[^a-z0-9])`, "i");
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

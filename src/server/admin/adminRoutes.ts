@@ -79,6 +79,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
         id: server.id,
         name: server.name,
         host: server.ftpConfig?.host ?? null,
+        lastIndexedAt: server.indexStatus.lastScanAt,
         sharedIndex: server.sharedIndex,
       }));
       const activeScans = scanStatuses.filter((scanStatus) => scanStatus.status === "running").length;
@@ -243,6 +244,27 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
       const group = service.getSharedIndexGroup(groupId.data);
       if (!group) return res.status(404).json({ error: "Shared index group not found" });
       res.json({ group: sharedIndexGroupView(service, scanQueue, group), scanStatus: scanQueue.cancelSharedIndexScan(groupId.data) });
+    } catch (error) {
+      handleSharedIndexError(error, res);
+    }
+  });
+
+  router.post("/shared-index-groups/:groupId/delete", async (req, res) => {
+    const groupId = groupIdSchema.safeParse(req.params.groupId);
+    if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    try {
+      const group = service.getSharedIndexGroup(groupId.data);
+      if (!group) return res.status(404).json({ error: "Shared index group not found" });
+      if (group.enabled) return res.status(400).json({ error: "Disable the shared index group before deleting it" });
+      const scanStatus = scanQueue.getSharedIndexScanStatus(groupId.data);
+      if (scanStatus.status === "queued" || scanStatus.status === "running") {
+        return res.status(409).json({ error: "Stop the shared index scan before deleting this group" });
+      }
+      service.deleteDisabledSharedIndexGroup(groupId.data);
+      res.json({ ok: true });
     } catch (error) {
       handleSharedIndexError(error, res);
     }

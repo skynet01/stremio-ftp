@@ -144,12 +144,14 @@ describe("web API setup token handling", () => {
       .mockResolvedValueOnce(jsonResponse({ group: { id: 3 } }))
       .mockResolvedValueOnce(jsonResponse({ group: { id: 3 } }))
       .mockResolvedValueOnce(jsonResponse({ group: { id: 3 }, scanStatus: { status: "queued" } }))
-      .mockResolvedValueOnce(jsonResponse({ group: { id: 3 }, scanStatus: { status: "cancelled" } }));
+      .mockResolvedValueOnce(jsonResponse({ group: { id: 3 }, scanStatus: { status: "cancelled" } }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
 
     const {
       cancelAdminSharedIndexScan,
       createAdminSharedIndexGroup,
+      deleteAdminSharedIndexGroup,
       linkAdminSharedIndexServer,
       loadAdminSharedIndexGroups,
       rescanAdminSharedIndexGroup,
@@ -171,6 +173,7 @@ describe("web API setup token handling", () => {
     await setAdminSharedIndexMaster({ ...auth, groupId: 3, profileId: 7, serverId: 9 });
     await rescanAdminSharedIndexGroup({ ...auth, groupId: 3 });
     await cancelAdminSharedIndexScan({ ...auth, groupId: 3 });
+    await deleteAdminSharedIndexGroup({ ...auth, groupId: 3 });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/shared-index-groups", expect.objectContaining({ method: "POST", body: JSON.stringify(auth) }));
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -204,6 +207,7 @@ describe("web API setup token handling", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(8, "/api/admin/shared-index-groups/3/rescan", expect.objectContaining({ method: "POST", body: JSON.stringify(auth) }));
     expect(fetchMock).toHaveBeenNthCalledWith(9, "/api/admin/shared-index-groups/3/cancel-scan", expect.objectContaining({ method: "POST", body: JSON.stringify(auth) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(10, "/api/admin/shared-index-groups/3/delete", expect.objectContaining({ method: "POST", body: JSON.stringify(auth) }));
   });
 });
 

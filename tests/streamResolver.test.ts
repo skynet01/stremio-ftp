@@ -70,6 +70,36 @@ describe("stream resolver", () => {
     expect(streams[0]).not.toHaveProperty("title");
   });
 
+  it("exposes detected 3D type to custom stream templates", async () => {
+    const streams = await resolveStreams({
+      baseUrl: "https://addon.example.test",
+      installToken: "token",
+      profileId: 1,
+      type: "movie",
+      id: "tt0499549",
+      metadata: { name: "Avatar", releaseInfo: "2009" },
+      streamNameTemplate: "3D - {stream.3dtype} - {stream.quality}",
+      streamDescriptionTemplate: "{stream.threeDType}",
+      mediaRepository: {
+        findEpisode: () => [],
+        findMovie: () => [
+          {
+            id: 101,
+            filename: "Avatar.2009.2160p.Full-SBS.mkv",
+            ftpPath: "/Movies/Avatar.2009.2160p.Full-SBS.mkv",
+            quality: "2160p",
+            sizeBytes: null,
+          },
+        ],
+      },
+    });
+
+    expect(streams[0]).toMatchObject({
+      name: "3D - Full SBS - 2160p",
+      description: "Full SBS",
+    });
+  });
+
   it("encodes proxy URL path segments and strips trailing slashes from base URL", async () => {
     const streams = await resolveStreams({
       baseUrl: "https://addon.example.test/",

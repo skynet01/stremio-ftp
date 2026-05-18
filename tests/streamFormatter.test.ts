@@ -3,6 +3,7 @@ import {
   DEFAULT_STREAM_DESCRIPTION_TEMPLATE,
   DEFAULT_STREAM_NAME_TEMPLATE,
   renderStreamTemplate,
+  stream3DType,
   streamAudioTags,
   streamVideoTags,
 } from "../src/shared/streamFormatter";
@@ -26,6 +27,8 @@ const context = {
     deliveryMode: "proxy",
     videoTags: "HDR HEVC",
     visualTags: ["HDR"],
+    "3dtype": "",
+    threeDType: "",
     encode: "HEVC",
     audioTags: ["TrueHD", "Atmos"],
     audioChannels: ["7.1"],
@@ -71,6 +74,41 @@ describe("stream formatter", () => {
     expect(streamVideoTags(filename)).toBe("Dolby Vision HDR10 HEVC Remux");
     expect(streamAudioTags(filename)).toBe("Atmos TrueHD 7.1");
     expect(renderStreamTemplate("{stream.videoTags}{tools.newLine}{stream.audioTags}", context, "description")).toBe("HDR HEVC\nTrueHD Atmos");
+  });
+
+  it("detects 3D type tokens from filenames", () => {
+    expect(stream3DType("Avatar.2009.2160p.FSBS.mkv")).toBe("Full SBS");
+    expect(stream3DType("Avatar.2009.2160p.Full-SBS.mkv")).toBe("Full SBS");
+    expect(stream3DType("Avatar.2009.2160p.Full.Side-by-Side.mkv")).toBe("Full SBS");
+    expect(stream3DType("Avatar.2009.1080p.HSBS.mkv")).toBe("Half SBS");
+    expect(stream3DType("Avatar.2009.1080p.Half.SideBySide.mkv")).toBe("Half SBS");
+    expect(stream3DType("Avatar.2009.1080p.Half_OU.mkv")).toBe("Half OU");
+    expect(stream3DType("Avatar.2009.2160p.FOU.mkv")).toBe("Full OU");
+    expect(stream3DType("Avatar.2009.2160p.Top-and-Bottom.mkv")).toBe("OU");
+    expect(stream3DType("Avatar.2009.2160p.Half-TAB.mkv")).toBe("Half OU");
+    expect(stream3DType("Avatar.2009.2160p.Full.Top.Bottom.mkv")).toBe("Full OU");
+    expect(stream3DType("Avatar.2009.2160p.Over_Under.mkv")).toBe("OU");
+    expect(stream3DType("Avatar.2009.2160p.TAB.mkv")).toBe("OU");
+    expect(stream3DType("Avatar.2009.1080p.MVC.mkv")).toBe("MVC");
+    expect(stream3DType("Avatar.2009.3D.mkv")).toBe("3D");
+    expect(stream3DType("VR.Movie.180.Full-SBS.mp4")).toBe("180 Full SBS");
+    expect(stream3DType("VR.Movie.VR360.Half-OU.mp4")).toBe("360 Half OU");
+    expect(stream3DType("The.Matrix.1999.2160p.HEVC.mkv")).toBe("");
+  });
+
+  it("renders 3D type formatter aliases", () => {
+    const threeDContext = {
+      ...context,
+      stream: {
+        ...context.stream,
+        filename: "Avatar.2009.2160p.Full-SBS.mkv",
+        "3dtype": "Full SBS",
+        threeDType: "Full SBS",
+      },
+    };
+
+    expect(renderStreamTemplate("3D - {stream.3dtype} - {stream.quality}", threeDContext, "name")).toBe("3D - Full SBS - 2160p");
+    expect(renderStreamTemplate("{stream.threeDType}", threeDContext, "name")).toBe("Full SBS");
   });
 
   it("renders AIOStreams-style aliases, arrays, modifiers, and conditionals", () => {

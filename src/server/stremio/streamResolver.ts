@@ -2,6 +2,7 @@ import { normalizeTitle } from "../media/normalizer.js";
 import type { FtpConfig, StreamDeliveryMode } from "../profiles/profileService.js";
 import {
   renderStreamTemplate,
+  stream3DType,
   streamAudioChannels,
   streamAudioTagList,
   streamEncode,
@@ -124,6 +125,7 @@ function streamFormatterContext({
   const release = releaseParts(match.filename);
   const visualTags = streamVideoTagList(match.filename);
   const audioTags = streamAudioTagList(match.filename);
+  const threeDType = stream3DType(match.filename);
   return {
     config: {
       addonName: addonName?.trim() || "Stremio FTP Addon",
@@ -164,6 +166,8 @@ function streamFormatterContext({
       deliveryMode,
       videoTags: visualTags.map((tag) => (tag === "DV" ? "Dolby Vision" : tag)).join(" "),
       visualTags,
+      "3dtype": threeDType,
+      threeDType,
       encode: streamEncode(match.filename),
       audioTags,
       audioChannels: streamAudioChannels(match.filename),

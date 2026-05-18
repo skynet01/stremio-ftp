@@ -82,6 +82,8 @@ export type SharedIndexLink = {
   id: number;
   name: string;
   keyHint: string;
+  autoLinked: boolean;
+  lastIndexedAt: string | null;
 };
 
 export type SharedIndexGroup = {
@@ -663,7 +665,7 @@ export class ProfileService {
         now,
       );
     const groupId = Number(result.lastInsertRowid);
-    this.linkServerToSharedGroup(profileId, serverId, groupId, sharedIndexKey);
+    this.linkServerToSharedGroup(profileId, serverId, groupId);
     return { group: this.getSharedIndexGroup(groupId)!, sharedIndexKey };
   }
 
@@ -758,6 +760,15 @@ export class ProfileService {
       .run(hashSharedIndexKey(sharedIndexKey), new Date().toISOString(), groupId);
     if (result.changes === 0) throw new ProfileNotFoundError();
     return { group: this.getSharedIndexGroup(groupId)!, sharedIndexKey };
+  }
+
+  deleteDisabledSharedIndexGroup(groupId: number) {
+    const group = this.getSharedIndexGroup(groupId);
+    if (!group) throw new ProfileNotFoundError();
+    if (group.enabled) throw new Error("Disable the shared index group before deleting it");
+    const deleted = this.db.prepare("delete from shared_index_groups where id = ? and enabled = 0").run(groupId).changes;
+    if (deleted === 0) throw new ProfileNotFoundError();
+    return true;
   }
 
   setSharedIndexGroupMaster(groupId: number, profileId: number, serverId: number): SharedIndexGroup {
@@ -1217,15 +1228,21 @@ export class ProfileService {
         ok: row.last_ftp_test_ok === null ? null : Boolean(row.last_ftp_test_ok),
       },
       pendingScanAfter: row.pending_scan_after,
-      sharedIndex: row.shared_index_group_id ? this.sharedIndexLink(row.shared_index_group_id) : null,
+      sharedIndex: this.sharedIndexLinkFromServerRow(row),
     };
   }
 
+  private sharedIndexLinkFromServerRow(row: FtpServerRow): SharedIndexLink | null {
+    if (!row.shared_index_group_id) return null;
+    const link = this.sharedIndexLink(row.shared_index_group_id);
+    return link ? { ...link, autoLinked: Boolean(row.shared_index_key_hash) } : null;
+  }
+
   private sharedIndexLink(groupId: number): SharedIndexLink | null {
-    const row = this.db.prepare("select id, name, key_hint from shared_index_groups where id = ?").get(groupId) as
-      | { id: number; name: string; key_hint: string }
+    const row = this.db.prepare("select id, name, key_hint, last_indexed_at from shared_index_groups where id = ?").get(groupId) as
+      | { id: number; name: string; key_hint: string; last_indexed_at: string | null }
       | undefined;
-    return row ? { id: row.id, name: row.name, keyHint: row.key_hint } : null;
+    return row ? { id: row.id, name: row.name, keyHint: row.key_hint, autoLinked: false, lastIndexedAt: row.last_indexed_at } : null;
   }
 
   private sharedIndexGroupFromRow(row: SharedIndexGroupRow): SharedIndexGroup {
