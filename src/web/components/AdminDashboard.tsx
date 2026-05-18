@@ -35,6 +35,24 @@ type AdminSort = {
   direction: "asc" | "desc";
 };
 
+type ServerBucket = {
+  key: string;
+  name: string;
+  servers: Array<{
+    profileId: number;
+    profileUid: string;
+    serverId: number;
+    serverName: string;
+    host: string | null;
+  }>;
+};
+
+type BulkLinkResult = {
+  linked: number;
+  skipped: number;
+  failed: number;
+};
+
 export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) {
   const [data, setData] = useState<AdminProfileListResponse | null>(null);
   const [message, setMessage] = useState("Loading admin profile list...");
@@ -43,8 +61,9 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<AdminBulkProfilesResponse | null>(null);
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<number>>(() => new Set());
-  const [selectedServerKeys, setSelectedServerKeys] = useState<Set<string>>(() => new Set());
-  const [bulkSharedGroupId, setBulkSharedGroupId] = useState("");
+  const [bulkLinkOpen, setBulkLinkOpen] = useState(false);
+  const [bulkLinkMappings, setBulkLinkMappings] = useState<Record<string, string>>({});
+  const [bulkLinkResult, setBulkLinkResult] = useState<BulkLinkResult | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sort, setSort] = useState<AdminSort | null>(null);
   const [sharedGroups, setSharedGroups] = useState<AdminSharedIndexGroup[]>([]);
@@ -60,10 +79,6 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       const loaded = await loadAdminProfiles({ browserUid, passphrase });
       setData(loaded);
       setSelectedProfileIds((current) => new Set([...current].filter((profileId) => loaded.profiles.some((profile) => profile.id === profileId))));
-      const availableServerKeys = new Set(
-        loaded.profiles.flatMap((profile) => profile.ftpServerDetails?.map((server) => serverKey(profile.id, server.id)) ?? []),
-      );
-      setSelectedServerKeys((current) => new Set([...current].filter((key) => availableServerKeys.has(key))));
       setMessage(loaded.profiles.length ? "Admin profile list loaded." : "No profiles are set up yet.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load admin profiles.");
@@ -301,30 +316,45 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
-  async function assignSelectedServersToSharedGroup() {
-    const groupId = Number(bulkSharedGroupId);
-    const targets = [...selectedServerKeys].map(parseServerKey).filter((target): target is { profileId: number; serverId: number } => Boolean(target));
-    const group = sharedGroups.find((candidate) => candidate.id === groupId);
-    if (!group || !targets.length) return;
+  function openBulkLinkDialog() {
+    const buckets = serverBucketsForProfiles(selectedProfiles);
+    const nextMappings = Object.fromEntries(
+      buckets.map((bucket) => [bucket.key, String(defaultGroupIdForBucket(bucket, sharedGroups) ?? "")]),
+    );
+    setBulkLinkMappings(nextMappings);
+    setBulkLinkResult(null);
+    setBulkLinkOpen(true);
+  }
+
+  async function linkServerBuckets(buckets: ServerBucket[]) {
+    if (!buckets.length) return;
 
     setBulkBusy(true);
     try {
-      let assigned = 0;
+      let linked = 0;
       let failed = 0;
+      let skipped = 0;
       let updatedGroup: AdminSharedIndexGroup | null = null;
-      for (const target of targets) {
-        try {
-          const result = await linkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId: target.profileId, serverId: target.serverId });
-          updatedGroup = result.group;
-          assigned += 1;
-        } catch {
-          failed += 1;
+      for (const bucket of buckets) {
+        const groupId = Number(bulkLinkMappings[bucket.key]);
+        if (!groupId) {
+          skipped += bucket.servers.length;
+          continue;
+        }
+        for (const server of bucket.servers) {
+          try {
+            const result = await linkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId: server.profileId, serverId: server.serverId });
+            updatedGroup = result.group;
+            linked += 1;
+          } catch {
+            failed += 1;
+          }
         }
       }
 
       if (updatedGroup) setSharedGroups((current) => upsertSharedGroup(current, updatedGroup));
-      if (assigned > 0) setSelectedServerKeys(new Set());
-      setMessage(`${assigned} server${assigned === 1 ? "" : "s"} assigned to ${group.name}${failed ? `; ${failed} failed identity checks.` : "."}`);
+      setBulkLinkResult({ linked, failed, skipped });
+      setMessage(`Bulk link complete: ${linked} linked, ${skipped} skipped, ${failed} failed.`);
       await refreshAdminData();
     } finally {
       setBulkBusy(false);
@@ -340,16 +370,6 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       const next = new Set(current);
       if (selected) next.add(profileId);
       else next.delete(profileId);
-      return next;
-    });
-  }
-
-  function toggleServerSelection(profileId: number, serverId: number, selected: boolean) {
-    setSelectedServerKeys((current) => {
-      const next = new Set(current);
-      const key = serverKey(profileId, serverId);
-      if (selected) next.add(key);
-      else next.delete(key);
       return next;
     });
   }
@@ -449,32 +469,14 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
               <button type="button" className="secondary-button" disabled={bulkBusy} onClick={() => void runBulkAction("convert_to_proxy")}>
                 Convert selected to proxy
               </button>
+              {sharedGroups.length ? (
+                <button type="button" className="secondary-button" disabled={bulkBusy} onClick={openBulkLinkDialog}>
+                  <Link2 size={15} aria-hidden="true" />
+                  Bulk link servers
+                </button>
+              ) : null}
               <button type="button" className="secondary-button danger-button" disabled={bulkBusy} onClick={() => void runBulkAction("delete")}>
                 Delete selected
-              </button>
-            </div>
-          ) : null}
-          {selectedServerKeys.size ? (
-            <div className="admin-bulk-actions admin-server-bulk-actions" aria-label="Bulk server actions">
-              <span>{selectedServerKeys.size} server{selectedServerKeys.size === 1 ? "" : "s"} selected</span>
-              <select
-                aria-label="Shared index group for selected servers"
-                value={bulkSharedGroupId}
-                onChange={(event) => setBulkSharedGroupId(event.target.value)}
-              >
-                <option value="">Choose shared group</option>
-                {sharedGroups.map((group) => (
-                  <option value={group.id} key={group.id}>
-                    {group.name}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="secondary-button" disabled={bulkBusy || !bulkSharedGroupId} onClick={() => void assignSelectedServersToSharedGroup()}>
-                <Link2 size={15} aria-hidden="true" />
-                Assign selected servers
-              </button>
-              <button type="button" className="secondary-button" disabled={bulkBusy} onClick={() => setSelectedServerKeys(new Set())}>
-                Clear
               </button>
             </div>
           ) : null}
@@ -534,24 +536,9 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                       <div className="admin-server-cell">
                         <span>{profile.configuredFtpServers}/{profile.ftpServers}</span>
                         {profile.ftpServerDetails?.length ? (
-                          <div className="admin-server-option-list">
-                            {profile.ftpServerDetails.map((server) => (
-                              <label className="admin-server-option" htmlFor={`admin-server-${profile.id}-${server.id}`} key={server.id}>
-                                <input
-                                  id={`admin-server-${profile.id}-${server.id}`}
-                                  type="checkbox"
-                                  className="admin-profile-select"
-                                  aria-label={`Select server ${server.id} from ${profile.browserUid}`}
-                                  checked={selectedServerKeys.has(serverKey(profile.id, server.id))}
-                                  onChange={(event) => toggleServerSelection(profile.id, server.id, event.target.checked)}
-                                />
-                                <span className="admin-server-id-list">
-                                  #{server.id} {server.host ?? server.name}
-                                  {server.sharedIndex ? ` -> ${server.sharedIndex.name}` : ""}
-                                </span>
-                              </label>
-                            ))}
-                          </div>
+                          <span className="admin-server-id-list">
+                            {profile.ftpServerDetails.length} server{profile.ftpServerDetails.length === 1 ? "" : "s"} available for bulk link
+                          </span>
                         ) : null}
                       </div>
                     </td>
@@ -642,6 +629,18 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
         onScan={runSharedScan}
         onApplyTarget={applySharedTarget}
       />
+      {bulkLinkOpen ? (
+        <BulkLinkDialog
+          buckets={serverBucketsForProfiles(selectedProfiles)}
+          groups={sharedGroups}
+          mappings={bulkLinkMappings}
+          busy={bulkBusy}
+          result={bulkLinkResult}
+          onMappingChange={(bucketKey, groupId) => setBulkLinkMappings((current) => ({ ...current, [bucketKey]: groupId }))}
+          onLink={linkServerBuckets}
+          onClose={() => setBulkLinkOpen(false)}
+        />
+      ) : null}
       {bulkResult ? <BulkActionDialog result={bulkResult} profiles={profiles} onClose={() => setBulkResult(null)} /> : null}
     </section>
   );
@@ -654,13 +653,49 @@ function upsertSharedGroup(groups: AdminSharedIndexGroup[], group: AdminSharedIn
   return next.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
 }
 
-function serverKey(profileId: number, serverId: number) {
-  return `${profileId}:${serverId}`;
+function serverBucketsForProfiles(profiles: AdminProfileSummary[]) {
+  const buckets = new Map<string, ServerBucket>();
+  for (const profile of profiles) {
+    for (const server of profile.ftpServerDetails ?? []) {
+      const key = normalizedServerName(server.name);
+      if (!key) continue;
+      const bucket = buckets.get(key) ?? { key, name: server.name.trim() || `Server ${server.id}`, servers: [] };
+      bucket.servers.push({
+        profileId: profile.id,
+        profileUid: profile.browserUid,
+        serverId: server.id,
+        serverName: server.name,
+        host: server.host,
+      });
+      buckets.set(key, bucket);
+    }
+  }
+  return [...buckets.values()].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
 }
 
-function parseServerKey(key: string) {
-  const [profileId, serverId] = key.split(":").map(Number);
-  return profileId && serverId ? { profileId, serverId } : null;
+function normalizedServerName(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+}
+
+function defaultGroupIdForBucket(bucket: ServerBucket, groups: AdminSharedIndexGroup[]) {
+  let best: { groupId: number; score: number; nameLength: number } | null = null;
+  for (const group of groups) {
+    const score = Math.max(groupMatchScore(bucket, group.name), groupMatchScore(bucket, group.keyHint), groupMatchScore(bucket, group.host));
+    if (score === 0) continue;
+    const candidate = { groupId: group.id, score, nameLength: group.name.length };
+    if (!best || candidate.score > best.score || (candidate.score === best.score && candidate.nameLength < best.nameLength)) best = candidate;
+  }
+  return best?.groupId ?? null;
+}
+
+function groupMatchScore(bucket: ServerBucket, value: string) {
+  const normalizedValue = normalizedServerName(value);
+  if (!normalizedValue) return 0;
+  if (normalizedValue === bucket.key) return 100;
+  if (normalizedValue.startsWith(`${bucket.key} `)) return 90;
+  if (bucket.key.startsWith(`${normalizedValue} `)) return 80;
+  if (normalizedValue.split(" ").includes(bucket.key)) return 70;
+  return 0;
 }
 
 function SharedIndexAdminSection({
@@ -923,6 +958,95 @@ function bulkResultStats(result: AdminBulkProfilesResponse) {
     { label: "deleted", value: summary?.deleted ?? result.deleted ?? 0 },
   ];
   return stats.filter((stat) => stat.value > 0 || stat.label === "profiles");
+}
+
+function BulkLinkDialog({
+  buckets,
+  groups,
+  mappings,
+  busy,
+  result,
+  onMappingChange,
+  onLink,
+  onClose,
+}: {
+  buckets: ServerBucket[];
+  groups: AdminSharedIndexGroup[];
+  mappings: Record<string, string>;
+  busy: boolean;
+  result: BulkLinkResult | null;
+  onMappingChange: (bucketKey: string, groupId: string) => void;
+  onLink: (buckets: ServerBucket[]) => void;
+  onClose: () => void;
+}) {
+  const serverCount = buckets.reduce((total, bucket) => total + bucket.servers.length, 0);
+  return (
+    <div className="admin-bulk-dialog-backdrop">
+      <div className="admin-bulk-dialog admin-bulk-link-dialog" role="dialog" aria-modal={true} aria-labelledby="admin-bulk-link-heading">
+        <div className="admin-bulk-dialog-header">
+          <div>
+            <span className="section-label">Bulk link</span>
+            <h3 id="admin-bulk-link-heading">Link selected servers</h3>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close bulk link dialog" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+        <p className="admin-bulk-link-summary">
+          {serverCount} server{serverCount === 1 ? "" : "s"} across {buckets.length} server-name bucket{buckets.length === 1 ? "" : "s"}.
+        </p>
+        <div className="admin-bulk-link-grid">
+          {buckets.map((bucket) => {
+            const exampleUids = bucket.servers
+              .slice(0, 3)
+              .map((server) => truncateUid(server.profileUid))
+              .join(", ");
+            const host = bucket.servers.find((server) => server.host)?.host;
+            return (
+              <label className="admin-bulk-link-row" key={bucket.key}>
+                <span className="admin-bulk-link-server">
+                  <strong>{bucket.name}</strong>
+                  <span>
+                    {bucket.servers.length} server{bucket.servers.length === 1 ? "" : "s"}
+                    {host ? ` on ${host}` : ""}{exampleUids ? ` - ${exampleUids}` : ""}
+                  </span>
+                </span>
+                <select
+                  aria-label={`Shared index group for ${bucket.name}`}
+                  value={mappings[bucket.key] ?? ""}
+                  disabled={busy}
+                  onChange={(event) => onMappingChange(bucket.key, event.target.value)}
+                >
+                  <option value="">Skip</option>
+                  {groups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
+        </div>
+        {result ? (
+          <div className="admin-bulk-link-result" aria-live="polite">
+            <span>{result.linked} linked</span>
+            <span>{result.skipped} skipped</span>
+            <span>{result.failed} failed</span>
+          </div>
+        ) : null}
+        <div className="admin-bulk-link-footer">
+          <button type="button" className="secondary-button" disabled={busy || !buckets.length} onClick={() => onLink(buckets)}>
+            <Link2 size={15} aria-hidden="true" />
+            {busy ? "Linking..." : "Link server buckets"}
+          </button>
+          <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SortHeader({

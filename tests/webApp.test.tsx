@@ -1450,9 +1450,13 @@ describe("App", () => {
     await screen.findByRole("heading", { name: "Shared index groups" });
     expect(screen.getByText("Sputnik Main")).toBeTruthy();
     expect(screen.getByText("12")).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select server 9 from bf1f80d7-4971-4919-8f4e-ab80aa2de852" }));
-    fireEvent.change(screen.getByLabelText("Shared index group for selected servers"), { target: { value: "5" } });
-    fireEvent.click(screen.getByRole("button", { name: "Assign selected servers" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select bf1f80d7-4971-4919-8f4e-ab80aa2de852" }));
+    fireEvent.click(screen.getByRole("button", { name: "Bulk link servers" }));
+    const bulkLinkDialog = await screen.findByRole("dialog", { name: "Link selected servers" });
+    expect(within(bulkLinkDialog).getByText("Sputnik")).toBeTruthy();
+    expect(within(bulkLinkDialog).getByText("Tamarind")).toBeTruthy();
+    expect(screen.getByLabelText("Shared index group for Sputnik")).toHaveValue("5");
+    fireEvent.click(within(bulkLinkDialog).getByRole("button", { name: "Link server buckets" }));
     await waitFor(() =>
       expect(linkAdminSharedIndexServerMock).toHaveBeenCalledWith({
         browserUid: expect.any(String),

@@ -1369,6 +1369,85 @@ input:-webkit-autofill:active {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.admin-bulk-link-dialog {
+  width: min(720px, 100%);
+}
+
+.admin-bulk-link-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.admin-bulk-link-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-bulk-link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.65fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.admin-bulk-link-server {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-bulk-link-server strong {
+  overflow: hidden;
+  color: var(--cream);
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-bulk-link-server span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-bulk-link-row select {
+  min-height: 36px;
+  margin: 0;
+}
+
+.admin-bulk-link-result {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-bulk-link-result span {
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  color: var(--accent);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: rgba(168, 224, 99, 0.06);
+}
+
+.admin-bulk-link-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .admin-bulk-result-list {
   display: grid;
   gap: 8px;
@@ -1480,20 +1559,6 @@ input:-webkit-autofill:active {
   min-width: 0;
 }
 
-.admin-server-option-list {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.admin-server-option {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
 .admin-server-id-list {
   overflow: hidden;
   color: var(--muted);
@@ -1501,12 +1566,6 @@ input:-webkit-autofill:active {
   font-size: 0.62rem;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.admin-server-bulk-actions select {
-  width: min(260px, 100%);
-  min-height: 34px;
-  margin: 0;
 }
 
 .admin-select-header,
@@ -2579,6 +2638,19 @@ input:-webkit-autofill:active {
 
   .admin-bulk-dialog {
     padding: 16px;
+  }
+
+  .admin-bulk-link-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-bulk-link-server strong,
+  .admin-bulk-link-server span {
+    white-space: normal;
+  }
+
+  .admin-bulk-link-footer {
+    justify-content: flex-start;
   }
 
   .admin-bulk-result-list li {
