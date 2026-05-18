@@ -5,22 +5,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App, globalScanProgressForServers } from "../src/web/App";
 import {
   bulkAdminProfiles,
+  cancelAdminSharedIndexScan,
+  createAdminSharedIndexGroup,
   cancelScan,
   createProfile,
   deleteAdminProfile,
   issueAdminManifestToken,
+  linkAdminSharedIndexServer,
+  loadAdminSharedIndexGroups,
   loadAdminProfiles,
   loadCustomization,
   loadFtpSettings,
   loadScanStatus,
   loadSetupStatus,
   rescanIndex,
+  rescanAdminSharedIndexGroup,
   rescanAdminProfile,
+  rotateAdminSharedIndexKey,
   saveCustomization,
   saveFtpSettings,
   saveScanSchedule,
   saveSetupToken,
   setAdminProfileEnabled,
+  setAdminSharedIndexMaster,
+  unlinkAdminSharedIndexServer,
+  updateAdminSharedIndexGroup,
   markSetupTokenValidated,
   setupTokenAvailable,
   setupTokenNeedsValidation,
@@ -31,22 +40,31 @@ import {
 
 vi.mock("../src/web/api", () => ({
   bulkAdminProfiles: vi.fn(),
+  cancelAdminSharedIndexScan: vi.fn(),
+  createAdminSharedIndexGroup: vi.fn(),
   cancelScan: vi.fn(),
   createProfile: vi.fn(),
   deleteAdminProfile: vi.fn(),
   issueAdminManifestToken: vi.fn(),
+  linkAdminSharedIndexServer: vi.fn(),
+  loadAdminSharedIndexGroups: vi.fn(),
   loadAdminProfiles: vi.fn(),
   loadCustomization: vi.fn(),
   loadFtpSettings: vi.fn(),
   loadScanStatus: vi.fn(),
   loadSetupStatus: vi.fn(),
   rescanIndex: vi.fn(),
+  rescanAdminSharedIndexGroup: vi.fn(),
   rescanAdminProfile: vi.fn(),
+  rotateAdminSharedIndexKey: vi.fn(),
   saveCustomization: vi.fn(),
   saveFtpSettings: vi.fn(),
   saveScanSchedule: vi.fn(),
   saveSetupToken: vi.fn(),
   setAdminProfileEnabled: vi.fn(),
+  setAdminSharedIndexMaster: vi.fn(),
+  unlinkAdminSharedIndexServer: vi.fn(),
+  updateAdminSharedIndexGroup: vi.fn(),
   markSetupTokenValidated: vi.fn(),
   setupTokenAvailable: vi.fn(),
   setupTokenNeedsValidation: vi.fn(),
@@ -56,22 +74,31 @@ vi.mock("../src/web/api", () => ({
 }));
 
 const bulkAdminProfilesMock = vi.mocked(bulkAdminProfiles);
+const cancelAdminSharedIndexScanMock = vi.mocked(cancelAdminSharedIndexScan);
+const createAdminSharedIndexGroupMock = vi.mocked(createAdminSharedIndexGroup);
 const cancelScanMock = vi.mocked(cancelScan);
 const createProfileMock = vi.mocked(createProfile);
 const deleteAdminProfileMock = vi.mocked(deleteAdminProfile);
 const issueAdminManifestTokenMock = vi.mocked(issueAdminManifestToken);
+const linkAdminSharedIndexServerMock = vi.mocked(linkAdminSharedIndexServer);
+const loadAdminSharedIndexGroupsMock = vi.mocked(loadAdminSharedIndexGroups);
 const loadAdminProfilesMock = vi.mocked(loadAdminProfiles);
 const loadCustomizationMock = vi.mocked(loadCustomization);
 const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
 const loadScanStatusMock = vi.mocked(loadScanStatus);
 const loadSetupStatusMock = vi.mocked(loadSetupStatus);
 const rescanIndexMock = vi.mocked(rescanIndex);
+const rescanAdminSharedIndexGroupMock = vi.mocked(rescanAdminSharedIndexGroup);
 const rescanAdminProfileMock = vi.mocked(rescanAdminProfile);
+const rotateAdminSharedIndexKeyMock = vi.mocked(rotateAdminSharedIndexKey);
 const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
 const saveScanScheduleMock = vi.mocked(saveScanSchedule);
 const saveSetupTokenMock = vi.mocked(saveSetupToken);
 const setAdminProfileEnabledMock = vi.mocked(setAdminProfileEnabled);
+const setAdminSharedIndexMasterMock = vi.mocked(setAdminSharedIndexMaster);
+const unlinkAdminSharedIndexServerMock = vi.mocked(unlinkAdminSharedIndexServer);
+const updateAdminSharedIndexGroupMock = vi.mocked(updateAdminSharedIndexGroup);
 const markSetupTokenValidatedMock = vi.mocked(markSetupTokenValidated);
 const setupTokenAvailableMock = vi.mocked(setupTokenAvailable);
 const setupTokenNeedsValidationMock = vi.mocked(setupTokenNeedsValidation);
@@ -119,10 +146,15 @@ describe("App", () => {
       value: { writeText: vi.fn() },
     });
     bulkAdminProfilesMock.mockReset();
+    cancelAdminSharedIndexScanMock.mockReset();
+    createAdminSharedIndexGroupMock.mockReset();
     cancelScanMock.mockReset();
     createProfileMock.mockReset();
     deleteAdminProfileMock.mockReset();
     issueAdminManifestTokenMock.mockReset();
+    linkAdminSharedIndexServerMock.mockReset();
+    loadAdminSharedIndexGroupsMock.mockReset();
+    loadAdminSharedIndexGroupsMock.mockResolvedValue({ groups: [] });
     loadAdminProfilesMock.mockReset();
     loadAdminProfilesMock.mockResolvedValue({
       summary: {
@@ -142,12 +174,17 @@ describe("App", () => {
     loadSetupStatusMock.mockReset();
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: true });
     rescanIndexMock.mockReset();
+    rescanAdminSharedIndexGroupMock.mockReset();
     rescanAdminProfileMock.mockReset();
+    rotateAdminSharedIndexKeyMock.mockReset();
     saveCustomizationMock.mockReset();
     saveFtpSettingsMock.mockReset();
     saveScanScheduleMock.mockReset();
     saveSetupTokenMock.mockReset();
     setAdminProfileEnabledMock.mockReset();
+    setAdminSharedIndexMasterMock.mockReset();
+    unlinkAdminSharedIndexServerMock.mockReset();
+    updateAdminSharedIndexGroupMock.mockReset();
     markSetupTokenValidatedMock.mockReset();
     setupTokenAvailableMock.mockReset();
     setupTokenAvailableMock.mockReturnValue(true);
@@ -1360,8 +1397,36 @@ describe("App", () => {
         },
       ],
     });
+    const sharedGroup = {
+      id: 5,
+      keyHint: "sputnik-main",
+      name: "Sputnik Main",
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      tlsMode: "explicit" as const,
+      allowInvalidCertificate: false,
+      rootPaths: ["/media"],
+      libraryLayout: "auto" as const,
+      catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+      enabled: true,
+      autoLinkImports: true,
+      masterProfileFtpServerId: 9,
+      indexedMediaCount: 1200,
+      lastIndexedAt: "2026-05-16T00:00:00.000Z",
+      linkedServerCount: 12,
+      createdAt: "2026-05-16T00:00:00.000Z",
+      updatedAt: "2026-05-16T00:00:00.000Z",
+      linkedServers: [],
+      masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", serverId: 9, serverName: "Server 1" },
+      scanStatus: { ...idleScanStatus },
+    };
+    loadAdminSharedIndexGroupsMock.mockResolvedValue({ groups: [sharedGroup] });
     setAdminProfileEnabledMock.mockResolvedValue({ profileId: 2, adminEnabled: true, adminSource: "database" });
     rescanAdminProfileMock.mockResolvedValue({ profileId: 2, scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } });
+    rescanAdminSharedIndexGroupMock.mockResolvedValue({
+      group: { ...sharedGroup, scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } },
+      scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" },
+    });
     bulkAdminProfilesMock.mockResolvedValue({ action: "convert_to_proxy", profileIds: [2, 3], converted: 2 });
     createProfileMock.mockResolvedValue({
       profileId: 1,
@@ -1376,6 +1441,17 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
 
     await screen.findByRole("heading", { name: "Admin dashboard" });
+    await screen.findByRole("heading", { name: "Shared index groups" });
+    expect(screen.getByText("Sputnik Main")).toBeTruthy();
+    expect(screen.getByText("12")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Rescan Sputnik Main" }));
+    await waitFor(() =>
+      expect(rescanAdminSharedIndexGroupMock).toHaveBeenCalledWith({
+        browserUid: expect.any(String),
+        passphrase: "passphrase",
+        groupId: 5,
+      }),
+    );
     const uidButton = await screen.findByRole("button", { name: "Copy recovery UID bf1f80d7-4971-4919-8f4e-ab80aa2de852" });
     expect(uidButton).toHaveTextContent("🇨🇦");
     expect(uidButton).toHaveTextContent("bf1f80d7-4971");

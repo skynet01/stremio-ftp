@@ -75,10 +75,17 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     const list = service.listAdminProfileSummaries(config.adminBrowserUids);
     const profiles = list.profiles.map((profile) => {
       const scanStatuses = service.listFtpServers(profile.id).map((server) => scanQueue.getServerScanStatus(profile.id, server.id));
+      const ftpServerDetails = service.listFtpServers(profile.id).map((server) => ({
+        id: server.id,
+        name: server.name,
+        host: server.ftpConfig?.host ?? null,
+        sharedIndex: server.sharedIndex,
+      }));
       const activeScans = scanStatuses.filter((scanStatus) => scanStatus.status === "running").length;
       const queuedScans = scanStatuses.filter((scanStatus) => scanStatus.status === "queued").length;
       return {
         ...profile,
+        ftpServerDetails,
         activeScans,
         pendingScans: profile.pendingScans + queuedScans,
         manifestUrl: null,

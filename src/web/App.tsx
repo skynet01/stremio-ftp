@@ -180,7 +180,7 @@ function serverFormFromPayload(server: FtpServerSettings): ServerForm {
     pendingScanAfter: server.pendingScanAfter,
     sharedIndexKey: undefined,
     sharedIndex: server.sharedIndex ?? null,
-    message: serverMessage(server.pendingScanAfter, server.scanStatus, "Server ready."),
+    message: server.sharedIndex?.message ?? serverMessage(server.pendingScanAfter, server.scanStatus, "Server ready."),
   };
 }
 

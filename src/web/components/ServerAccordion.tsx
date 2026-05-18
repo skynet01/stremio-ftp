@@ -60,16 +60,17 @@ export function isServerDraft(server: ServerForm): boolean {
 }
 
 function serverSummary(server: ServerForm) {
-  if (server.scanStatus.status === "queued") return "Queued for indexing";
+  const prefix = server.sharedIndex ? `${server.sharedIndex.name} shared index - ` : "";
+  if (server.scanStatus.status === "queued") return `${prefix}Queued for indexing`;
   if (server.scanStatus.status === "running") {
     const path = server.scanStatus.currentPath ? ` - ${server.scanStatus.currentPath}` : "";
-    return `${server.scanStatus.progressPercent}% ${scanModeLabel(server.scanStatus).toLowerCase()}${path}`;
+    return `${prefix}${server.scanStatus.progressPercent}% ${scanModeLabel(server.scanStatus).toLowerCase()}${path}`;
   }
   if (server.scanStatus.status === "failed") {
     const reason = server.scanStatus.error || server.scanStatus.message || "Scan failed";
-    return server.pendingScanAfter ? `${reason} - retry pending` : reason;
+    return server.pendingScanAfter ? `${prefix}${reason} - retry pending` : `${prefix}${reason}`;
   }
-  return `${server.indexStatus.mediaItems} items - Last scan ${formatCompactScanTime(server.indexStatus.lastScanAt)}`;
+  return `${prefix}${server.indexStatus.mediaItems} items - Last scan ${formatCompactScanTime(server.indexStatus.lastScanAt)}`;
 }
 
 function formatCompactScanTime(lastScanAt: string | null) {
@@ -394,7 +395,22 @@ export function ServerAccordion({
 
                     <div className="server-section">
                       <h3>Index status</h3>
+                      {server.sharedIndex ? (
+                        <div className="shared-index-banner">
+                          <StatusBadge tone="green">Shared</StatusBadge>
+                          <div>
+                            <strong>{server.sharedIndex.name}</strong>
+                            <span>{server.sharedIndex.message}</span>
+                          </div>
+                        </div>
+                      ) : null}
                       <dl className="status-list">
+                        {server.sharedIndex ? (
+                          <div>
+                            <dt>Shared group</dt>
+                            <dd>{server.sharedIndex.keyHint}</dd>
+                          </div>
+                        ) : null}
                         <div>
                           <dt>Last scan</dt>
                           <dd>{formatScanTime(server.indexStatus.lastScanAt)}</dd>
@@ -424,7 +440,7 @@ export function ServerAccordion({
                             id={`scanInterval-${server.id}`}
                             className={filledClass(server.scanSchedule.intervalMinutes)}
                             value={String(server.scanSchedule.intervalMinutes)}
-                            disabled={!profileReady}
+                            disabled={!profileReady || Boolean(server.sharedIndex)}
                             onChange={(event) => onUpdateScanSchedule(server.id, Number(event.currentTarget.value))}
                           >
                             <option value="0">Manual only</option>

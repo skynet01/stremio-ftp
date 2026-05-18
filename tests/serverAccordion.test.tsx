@@ -144,6 +144,43 @@ describe("ServerAccordion", () => {
     expect(screen.getByText(/42% difference update/)).toBeTruthy();
   });
 
+  it("shows linked shared index state and disables local scan scheduling", () => {
+    render(
+      <ServerAccordion
+        servers={[
+          {
+            ...failedServer,
+            sharedIndex: {
+              id: 5,
+              name: "Sputnik Main",
+              keyHint: "sputnik-main",
+              linked: true,
+              message: "Scanning handled by shared master index.",
+            },
+            scanStatus: { ...failedServer.scanStatus, status: "idle", error: null, message: null, progressPercent: 0 },
+            pendingScanAfter: null,
+          },
+        ]}
+        expandedServerId={failedServer.id}
+        profileReady={true}
+        onToggle={vi.fn()}
+        onAddServer={vi.fn()}
+        onDeleteServer={vi.fn()}
+        onServerChange={vi.fn()}
+        onSaveServer={vi.fn()}
+        onTestServer={vi.fn()}
+        onRefreshServer={vi.fn()}
+        onCancelServer={vi.fn()}
+        onUpdateScanSchedule={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Sputnik Main")).toBeTruthy();
+    expect(screen.getByText("Scanning handled by shared master index.")).toBeTruthy();
+    expect(screen.getByText("sputnik-main")).toBeTruthy();
+    expect(screen.getByLabelText("Rescan frequency")).toBeDisabled();
+  });
+
   it("groups library selects and server content separately from catalog toggles", () => {
     render(
       <ServerAccordion

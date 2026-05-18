@@ -1,16 +1,26 @@
 import { useEffect, useState } from "react";
-import { CircleStop, Copy, Link2, RefreshCw, Search, Shield, ShieldCheck, Trash2, X } from "lucide-react";
+import { CircleStop, Copy, KeyRound, Link2, RefreshCw, Search, Shield, ShieldCheck, Trash2, Unlink, X } from "lucide-react";
 import {
   bulkAdminProfiles,
+  cancelAdminSharedIndexScan,
+  createAdminSharedIndexGroup,
   deleteAdminProfile,
   issueAdminManifestToken,
+  linkAdminSharedIndexServer,
+  loadAdminSharedIndexGroups,
   loadAdminProfiles,
   rescanAdminProfile,
+  rescanAdminSharedIndexGroup,
+  rotateAdminSharedIndexKey,
   setAdminProfileEnabled,
+  setAdminSharedIndexMaster,
+  unlinkAdminSharedIndexServer,
+  updateAdminSharedIndexGroup,
   type AdminBulkProfileAction,
   type AdminBulkProfilesResponse,
   type AdminProfileListResponse,
   type AdminProfileSummary,
+  type AdminSharedIndexGroup,
 } from "../api.js";
 import { Notice, formatScanTime, StatusBadge } from "./ui.js";
 
@@ -35,6 +45,11 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<number>>(() => new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [sort, setSort] = useState<AdminSort | null>(null);
+  const [sharedGroups, setSharedGroups] = useState<AdminSharedIndexGroup[]>([]);
+  const [sharedCreateForm, setSharedCreateForm] = useState({ profileId: "", serverId: "", name: "", keyHint: "" });
+  const [sharedTargetForms, setSharedTargetForms] = useState<Record<number, { profileId: string; serverId: string }>>({});
+  const [busySharedGroupId, setBusySharedGroupId] = useState<number | "create" | null>(null);
+  const [revealedSharedKey, setRevealedSharedKey] = useState<{ groupId: number; key: string } | null>(null);
 
   async function refreshProfiles() {
     setLoading(true);
@@ -51,9 +66,120 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
+  async function refreshSharedGroups() {
+    try {
+      const loaded = await loadAdminSharedIndexGroups({ browserUid, passphrase });
+      setSharedGroups(loaded.groups);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load shared index groups.");
+    }
+  }
+
+  async function refreshAdminData() {
+    await refreshProfiles();
+    await refreshSharedGroups();
+  }
+
   useEffect(() => {
-    void refreshProfiles();
+    void refreshAdminData();
   }, [browserUid, passphrase]);
+
+  async function createSharedGroup() {
+    const profileId = Number(sharedCreateForm.profileId);
+    const serverId = Number(sharedCreateForm.serverId);
+    if (!profileId || !serverId || !sharedCreateForm.name.trim()) return;
+    setBusySharedGroupId("create");
+    try {
+      const created = await createAdminSharedIndexGroup({
+        browserUid,
+        passphrase,
+        profileId,
+        serverId,
+        name: sharedCreateForm.name,
+        keyHint: sharedCreateForm.keyHint || undefined,
+      });
+      setSharedGroups((current) => upsertSharedGroup(current, created.group));
+      setRevealedSharedKey({ groupId: created.group.id, key: created.sharedIndexKey });
+      setSharedCreateForm({ profileId: "", serverId: "", name: "", keyHint: "" });
+      setMessage(`Shared index group created for ${created.group.host}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to create shared index group.");
+    } finally {
+      setBusySharedGroupId(null);
+    }
+  }
+
+  async function updateSharedGroup(group: AdminSharedIndexGroup, patch: Partial<Pick<AdminSharedIndexGroup, "enabled" | "autoLinkImports">>) {
+    setBusySharedGroupId(group.id);
+    try {
+      const updated = await updateAdminSharedIndexGroup({
+        browserUid,
+        passphrase,
+        groupId: group.id,
+        enabled: patch.enabled ?? group.enabled,
+        autoLinkImports: patch.autoLinkImports ?? group.autoLinkImports,
+      });
+      setSharedGroups((current) => upsertSharedGroup(current, updated.group));
+      setMessage(`${group.name} updated.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update shared index group.");
+    } finally {
+      setBusySharedGroupId(null);
+    }
+  }
+
+  async function rotateSharedKey(group: AdminSharedIndexGroup) {
+    setBusySharedGroupId(group.id);
+    try {
+      const rotated = await rotateAdminSharedIndexKey({ browserUid, passphrase, groupId: group.id });
+      setSharedGroups((current) => upsertSharedGroup(current, rotated.group));
+      setRevealedSharedKey({ groupId: group.id, key: rotated.sharedIndexKey });
+      await navigator.clipboard?.writeText(rotated.sharedIndexKey);
+      setMessage(`Shared index key rotated for ${group.name}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to rotate shared index key.");
+    } finally {
+      setBusySharedGroupId(null);
+    }
+  }
+
+  async function runSharedScan(group: AdminSharedIndexGroup) {
+    const active = group.scanStatus.status === "queued" || group.scanStatus.status === "running";
+    setBusySharedGroupId(group.id);
+    try {
+      const result = active
+        ? await cancelAdminSharedIndexScan({ browserUid, passphrase, groupId: group.id })
+        : await rescanAdminSharedIndexGroup({ browserUid, passphrase, groupId: group.id });
+      setSharedGroups((current) => upsertSharedGroup(current, { ...result.group, scanStatus: result.scanStatus }));
+      setMessage(active ? `Shared scan halted for ${group.name}.` : `Shared scan queued for ${group.name}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update shared scan.");
+    } finally {
+      setBusySharedGroupId(null);
+    }
+  }
+
+  async function applySharedTarget(group: AdminSharedIndexGroup, action: "link" | "unlink" | "master") {
+    const target = sharedTargetForms[group.id] ?? { profileId: "", serverId: "" };
+    const profileId = Number(target.profileId);
+    const serverId = Number(target.serverId);
+    if (!profileId || !serverId) return;
+    setBusySharedGroupId(group.id);
+    try {
+      const result =
+        action === "link"
+          ? await linkAdminSharedIndexServer({ browserUid, passphrase, groupId: group.id, profileId, serverId })
+          : action === "unlink"
+            ? await unlinkAdminSharedIndexServer({ browserUid, passphrase, groupId: group.id, profileId, serverId })
+            : await setAdminSharedIndexMaster({ browserUid, passphrase, groupId: group.id, profileId, serverId });
+      setSharedGroups((current) => upsertSharedGroup(current, result.group));
+      setMessage(`${group.name} ${action === "master" ? "master updated" : action === "link" ? "linked" : "unlinked"}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update shared index server.");
+    } finally {
+      setBusySharedGroupId(null);
+    }
+  }
 
   async function issueManifest(profile: AdminProfileSummary) {
     setBusyProfileId(profile.id);
@@ -225,7 +351,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
           <h2 id="admin-dashboard-heading">Admin dashboard</h2>
           <p>Inspect profile setup, index state, and debug manifest URLs.</p>
         </div>
-        <button type="button" className="secondary-button" disabled={loading} onClick={() => void refreshProfiles()}>
+        <button type="button" className="secondary-button" disabled={loading} onClick={() => void refreshAdminData()}>
           <RefreshCw size={16} aria-hidden="true" />
           Refresh
         </button>
@@ -328,7 +454,15 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
                       <AdminState profile={profile} />
                     </td>
                     <td data-label="Servers">
-                      {profile.configuredFtpServers}/{profile.ftpServers}
+                      <div className="admin-server-cell">
+                        <span>{profile.configuredFtpServers}/{profile.ftpServers}</span>
+                        {profile.ftpServerDetails?.length ? (
+                          <span className="admin-server-id-list">
+                            {profile.ftpServerDetails.slice(0, 2).map((server) => `#${server.id} ${server.host ?? server.name}`).join(", ")}
+                            {profile.ftpServerDetails.length > 2 ? " ..." : ""}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td data-label="Indexed">{profile.indexedItems}</td>
                     <td data-label="Last scan">{formatScanTime(profile.lastScanAt)}</td>
@@ -401,7 +535,204 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
           </div>
         </>
       ) : null}
+      <SharedIndexAdminSection
+        groups={sharedGroups}
+        createForm={sharedCreateForm}
+        targetForms={sharedTargetForms}
+        busyGroupId={busySharedGroupId}
+        revealedKey={revealedSharedKey}
+        onCreateFormChange={(patch) => setSharedCreateForm((current) => ({ ...current, ...patch }))}
+        onTargetFormChange={(groupId, patch) =>
+          setSharedTargetForms((current) => ({ ...current, [groupId]: { ...(current[groupId] ?? { profileId: "", serverId: "" }), ...patch } }))
+        }
+        onCreate={() => void createSharedGroup()}
+        onUpdate={updateSharedGroup}
+        onRotate={rotateSharedKey}
+        onScan={runSharedScan}
+        onApplyTarget={applySharedTarget}
+      />
       {bulkResult ? <BulkActionDialog result={bulkResult} profiles={profiles} onClose={() => setBulkResult(null)} /> : null}
+    </section>
+  );
+}
+
+function upsertSharedGroup(groups: AdminSharedIndexGroup[], group: AdminSharedIndexGroup) {
+  const next = groups.some((candidate) => candidate.id === group.id)
+    ? groups.map((candidate) => (candidate.id === group.id ? group : candidate))
+    : [...groups, group];
+  return next.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+}
+
+function SharedIndexAdminSection({
+  groups,
+  createForm,
+  targetForms,
+  busyGroupId,
+  revealedKey,
+  onCreateFormChange,
+  onTargetFormChange,
+  onCreate,
+  onUpdate,
+  onRotate,
+  onScan,
+  onApplyTarget,
+}: {
+  groups: AdminSharedIndexGroup[];
+  createForm: { profileId: string; serverId: string; name: string; keyHint: string };
+  targetForms: Record<number, { profileId: string; serverId: string }>;
+  busyGroupId: number | "create" | null;
+  revealedKey: { groupId: number; key: string } | null;
+  onCreateFormChange: (patch: Partial<typeof createForm>) => void;
+  onTargetFormChange: (groupId: number, patch: Partial<{ profileId: string; serverId: string }>) => void;
+  onCreate: () => void;
+  onUpdate: (group: AdminSharedIndexGroup, patch: Partial<Pick<AdminSharedIndexGroup, "enabled" | "autoLinkImports">>) => void;
+  onRotate: (group: AdminSharedIndexGroup) => void;
+  onScan: (group: AdminSharedIndexGroup) => void;
+  onApplyTarget: (group: AdminSharedIndexGroup, action: "link" | "unlink" | "master") => void;
+}) {
+  return (
+    <section className="admin-shared-index-section" aria-labelledby="admin-shared-index-heading">
+      <div className="admin-subsection-header">
+        <div>
+          <span className="section-label">Shared indexes</span>
+          <h3 id="admin-shared-index-heading">Shared index groups</h3>
+        </div>
+      </div>
+
+      <div className="admin-shared-create">
+        <input
+          inputMode="numeric"
+          aria-label="Master profile ID"
+          placeholder="Profile ID"
+          value={createForm.profileId}
+          onChange={(event) => onCreateFormChange({ profileId: event.target.value })}
+        />
+        <input
+          inputMode="numeric"
+          aria-label="Master server ID"
+          placeholder="Server ID"
+          value={createForm.serverId}
+          onChange={(event) => onCreateFormChange({ serverId: event.target.value })}
+        />
+        <input
+          aria-label="Shared group name"
+          placeholder="Group name"
+          value={createForm.name}
+          onChange={(event) => onCreateFormChange({ name: event.target.value })}
+        />
+        <input
+          aria-label="Shared key hint"
+          placeholder="Key hint"
+          value={createForm.keyHint}
+          onChange={(event) => onCreateFormChange({ keyHint: event.target.value })}
+        />
+        <button type="button" className="secondary-button" disabled={busyGroupId === "create"} onClick={onCreate}>
+          <KeyRound size={15} aria-hidden="true" />
+          Create group
+        </button>
+      </div>
+
+      {groups.length ? (
+        <div className="admin-shared-grid">
+          {groups.map((group) => {
+            const target = targetForms[group.id] ?? { profileId: "", serverId: "" };
+            const active = group.scanStatus.status === "queued" || group.scanStatus.status === "running";
+            return (
+              <article className="admin-shared-card" key={group.id}>
+                <div className="admin-shared-card-header">
+                  <div>
+                    <h4>{group.name}</h4>
+                    <p>
+                      {group.host}:{group.port} - {group.rootPaths.join(", ")}
+                    </p>
+                  </div>
+                  <StatusBadge tone={group.enabled ? "green" : "gray"}>{group.enabled ? "Enabled" : "Disabled"}</StatusBadge>
+                </div>
+                <dl className="status-list admin-shared-stats">
+                  <SummaryStat label="Linked" value={group.linkedServerCount} />
+                  <SummaryStat label="Items" value={group.indexedMediaCount} />
+                  <div>
+                    <dt>Last scan</dt>
+                    <dd>{formatScanTime(group.lastIndexedAt)}</dd>
+                  </div>
+                  <div>
+                    <dt>Master</dt>
+                    <dd>{group.masterServer ? `${truncateUid(group.masterServer.browserUid)} / ${group.masterServer.serverName}` : "None"}</dd>
+                  </div>
+                </dl>
+                {revealedKey?.groupId === group.id ? (
+                  <button
+                    type="button"
+                    className="admin-shared-key"
+                    title="Copy shared index key"
+                    onClick={() => void navigator.clipboard?.writeText(revealedKey.key)}
+                  >
+                    <Copy size={14} aria-hidden="true" />
+                    <code>{revealedKey.key}</code>
+                  </button>
+                ) : null}
+                <div className="admin-shared-toggles">
+                  <label className="toggle-row" htmlFor={`shared-enabled-${group.id}`}>
+                    <input
+                      id={`shared-enabled-${group.id}`}
+                      type="checkbox"
+                      checked={group.enabled}
+                      disabled={busyGroupId === group.id}
+                      onChange={(event) => onUpdate(group, { enabled: event.target.checked })}
+                    />
+                    Enabled
+                  </label>
+                  <label className="toggle-row" htmlFor={`shared-autolink-${group.id}`}>
+                    <input
+                      id={`shared-autolink-${group.id}`}
+                      type="checkbox"
+                      checked={group.autoLinkImports}
+                      disabled={busyGroupId === group.id}
+                      onChange={(event) => onUpdate(group, { autoLinkImports: event.target.checked })}
+                    />
+                    Auto-link imports
+                  </label>
+                </div>
+                <div className="admin-shared-target-row">
+                  <input
+                    inputMode="numeric"
+                    aria-label={`Profile ID for ${group.name}`}
+                    placeholder="Profile ID"
+                    value={target.profileId}
+                    onChange={(event) => onTargetFormChange(group.id, { profileId: event.target.value })}
+                  />
+                  <input
+                    inputMode="numeric"
+                    aria-label={`Server ID for ${group.name}`}
+                    placeholder="Server ID"
+                    value={target.serverId}
+                    onChange={(event) => onTargetFormChange(group.id, { serverId: event.target.value })}
+                  />
+                </div>
+                <div className="admin-shared-actions">
+                  <button type="button" className="icon-button" title="Link server" aria-label={`Link server to ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onApplyTarget(group, "link")}>
+                    <Link2 size={15} aria-hidden="true" />
+                  </button>
+                  <button type="button" className="icon-button" title="Set master server" aria-label={`Set master for ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onApplyTarget(group, "master")}>
+                    <ShieldCheck size={15} aria-hidden="true" />
+                  </button>
+                  <button type="button" className="icon-button" title="Unlink server" aria-label={`Unlink server from ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onApplyTarget(group, "unlink")}>
+                    <Unlink size={15} aria-hidden="true" />
+                  </button>
+                  <button type="button" className="icon-button" title="Rotate key" aria-label={`Rotate key for ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onRotate(group)}>
+                    <KeyRound size={15} aria-hidden="true" />
+                  </button>
+                  <button type="button" className={`icon-button ${active ? "danger-button" : ""}`} title={active ? "Halt shared scan" : "Rescan shared index"} aria-label={active ? `Halt scan for ${group.name}` : `Rescan ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onScan(group)}>
+                    {active ? <CircleStop size={15} aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="admin-empty-value">No shared index groups configured.</p>
+      )}
     </section>
   );
 }

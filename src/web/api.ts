@@ -229,6 +229,16 @@ export type AdminProfileSummary = {
   adminSource: "environment" | "database" | null;
   ftpServers: number;
   configuredFtpServers: number;
+  ftpServerDetails?: Array<{
+    id: number;
+    name: string;
+    host: string | null;
+    sharedIndex: {
+      id: number;
+      name: string;
+      keyHint: string;
+    } | null;
+  }>;
   indexedItems: number;
   lastScanAt: string | null;
   activeScans: number;
