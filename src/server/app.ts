@@ -50,7 +50,9 @@ export function createApp(
 
   const profileService = new ProfileService(db, config.encryptionKey);
   const mediaRepository = new MediaRepository(db);
-  const ftpClientFactory = limitFtpClientFactory(options.ftpClientFactory ?? createBasicFtpClientFactory(config.ftpTimeoutMs), config.ftpMaxConnections);
+  const baseFtpClientFactory = options.ftpClientFactory ?? createBasicFtpClientFactory(config.ftpTimeoutMs);
+  const ftpClientFactory = limitFtpClientFactory(baseFtpClientFactory, config.ftpMaxConnections);
+  const proxyFtpClientFactory = limitFtpClientFactory(baseFtpClientFactory, Math.max(2, config.ftpMaxConnections));
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
   const scanScheduler = setInterval(() => scanQueue.enqueueDueScheduledScans(), config.scanSchedulerIntervalMs);
   scanScheduler.unref();
@@ -88,7 +90,7 @@ export function createApp(
   });
   app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue));
   app.use("/api/admin", adminRoutes(config, profileService, scanQueue));
-  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
+  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, proxyFtpClientFactory) }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 
   app.get("/health", (_req, res) => {
