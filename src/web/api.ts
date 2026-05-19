@@ -320,6 +320,7 @@ export type AdminProfileAdminResponse = {
 export type AdminSharedIndexLinkedServer = {
   profileId: number;
   browserUid: string;
+  countryCode: string | null;
   serverId: number;
   serverName: string;
 };

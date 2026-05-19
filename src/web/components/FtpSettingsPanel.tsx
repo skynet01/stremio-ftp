@@ -305,6 +305,7 @@ function LibrarySettings({
               onChange={(event) => onCatalogTmdbApiKeyChange(event.currentTarget.value)}
               onBlur={onCommitCatalogTmdbApiKey}
             />,
+            "field-stack tmdb-api-key-field",
           )}
         </div>
         <div className="catalog-options-column" role="group" aria-label="Catalogs">

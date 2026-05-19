@@ -79,7 +79,7 @@ describe("shared index groups", () => {
       id: created.group.id,
       name: "Sputnik Main",
       linkedServers: 1,
-      catalogItemCounts: { movies: 2, anime: 1, series: 0, uncategorized: 1 },
+      catalogItemCounts: { movies: 2, anime: 1, series: 0, uncategorized: 0 },
     });
     expect(JSON.stringify(listed)).not.toContain(created.sharedIndexKey);
     expect(JSON.stringify(listed)).not.toContain("secret");

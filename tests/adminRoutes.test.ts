@@ -403,8 +403,8 @@ describe("admin routes", () => {
     migrate(db);
     const app = createApp(config({ scanGlobalConcurrency: 0 }), db);
     await createProfile(app, "admin-uid");
-    const master = await createProfile(app, "master-uid");
-    const linked = await createProfile(app, "linked-uid");
+    const master = await createProfile(app, "master-uid", "passphrase", "US");
+    const linked = await createProfile(app, "linked-uid", "passphrase", "CA");
     const other = await createProfile(app, "other-uid");
     await saveDefaultFtp(app, "master-uid", "sputnik.whatbox.ca");
     await saveDefaultFtp(app, "linked-uid", "sputnik.whatbox.ca");
@@ -433,7 +433,7 @@ describe("admin routes", () => {
       keyHint: "sputnik-main",
       host: "sputnik.whatbox.ca",
       linkedServerCount: 1,
-      masterServer: { profileId: master.body.profileId, browserUid: "master-uid", serverId: masterServerId, serverName: "Server 1" },
+      masterServer: { profileId: master.body.profileId, browserUid: "master-uid", countryCode: "US", serverId: masterServerId, serverName: "Server 1" },
       scanSchedule: { intervalMinutes: 0, nextScheduledScanAt: null },
       scanStatus: expect.objectContaining({ status: "idle" }),
     });
@@ -481,8 +481,8 @@ describe("admin routes", () => {
     expect(linkedResponse.body.group.linkedServerCount).toBe(2);
     expect(linkedResponse.body.group.linkedServers).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ profileId: master.body.profileId, serverId: masterServerId }),
-        expect.objectContaining({ profileId: linked.body.profileId, serverId: linkedServerId }),
+        expect.objectContaining({ profileId: master.body.profileId, countryCode: "US", serverId: masterServerId }),
+        expect.objectContaining({ profileId: linked.body.profileId, countryCode: "CA", serverId: linkedServerId }),
       ]),
     );
 

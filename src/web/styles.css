@@ -523,7 +523,7 @@ textarea:focus-visible,
 
 .global-settings-row {
   display: grid;
-  grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
+  grid-template-columns: minmax(360px, 460px) minmax(0, 1fr);
   gap: 20px;
   margin-top: 22px;
 }
@@ -1404,17 +1404,15 @@ input:-webkit-autofill:active {
 .admin-shared-content-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  column-gap: 14px;
+  row-gap: 6px;
 }
 
 .admin-shared-content-grid div {
   display: grid;
-  gap: 4px;
-  min-height: 50px;
-  padding: 8px;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.024);
+  gap: 3px;
+  min-height: 32px;
+  padding: 0;
 }
 
 .admin-shared-content-grid span,
@@ -1717,6 +1715,36 @@ input:-webkit-autofill:active {
 .admin-linked-servers-dialog .admin-server-dialog-table-wrap {
   max-height: none;
   overflow: visible;
+}
+
+.admin-linked-servers-dialog .admin-server-dialog-table th,
+.admin-linked-servers-dialog .admin-server-dialog-table td {
+  padding: 6px 8px;
+}
+
+.admin-linked-servers-dialog .admin-server-dialog-table th:nth-child(1),
+.admin-linked-servers-dialog .admin-server-dialog-table td:nth-child(1) {
+  width: 230px;
+}
+
+.admin-linked-servers-dialog .admin-server-dialog-table th:nth-child(2),
+.admin-linked-servers-dialog .admin-server-dialog-table td:nth-child(2) {
+  width: 84px;
+}
+
+.admin-linked-servers-dialog .admin-server-dialog-table th:nth-child(3),
+.admin-linked-servers-dialog .admin-server-dialog-table td:nth-child(3) {
+  width: auto;
+}
+
+.admin-linked-servers-dialog .admin-server-dialog-table th:nth-child(4),
+.admin-linked-servers-dialog .admin-server-dialog-table td:nth-child(4) {
+  width: 96px;
+}
+
+.admin-linked-servers-dialog .admin-server-dialog-table th:nth-child(5),
+.admin-linked-servers-dialog .admin-server-dialog-table td:nth-child(5) {
+  width: 74px;
 }
 
 .admin-create-shared-dialog {
@@ -2252,6 +2280,40 @@ input:-webkit-autofill:active {
   white-space: normal;
 }
 
+.admin-linked-uid-cell {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  margin-top: 0 !important;
+}
+
+.admin-linked-uid-cell .admin-country-flag {
+  flex: 0 0 auto;
+}
+
+.admin-inline-danger-link {
+  border: 0;
+  padding: 0;
+  color: var(--danger);
+  background: transparent;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.admin-inline-danger-link:hover,
+.admin-inline-danger-link:focus-visible {
+  color: var(--cream);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.admin-inline-danger-link:disabled {
+  color: var(--muted-2);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
 .admin-server-link-controls {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) auto auto;
@@ -2598,6 +2660,14 @@ input:-webkit-autofill:active {
   display: grid;
   gap: 10px;
   padding-top: 2px;
+}
+
+.tmdb-api-key-field {
+  max-width: 460px;
+}
+
+.global-tmdb-field {
+  width: min(460px, 100%);
 }
 
 .server-content-row {

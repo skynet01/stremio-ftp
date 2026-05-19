@@ -1331,8 +1331,9 @@ function LinkedServersDialog({
             <table className="admin-server-dialog-table">
               <thead>
                 <tr>
+                  <th scope="col">UID</th>
+                  <th scope="col">Server #</th>
                   <th scope="col">Server</th>
-                  <th scope="col">Recovery UID</th>
                   <th scope="col">Role</th>
                   <th scope="col">Action</th>
                 </tr>
@@ -1342,20 +1343,29 @@ function LinkedServersDialog({
                   const isMaster = group.masterServer?.profileId === server.profileId && group.masterServer.serverId === server.serverId;
                   return (
                     <tr key={`${server.profileId}-${server.serverId}`}>
+                      <td data-label="UID">
+                        <span className="admin-linked-uid-cell">
+                          <span className="admin-country-flag" aria-hidden="true">
+                            {countryFlag(server.countryCode)}
+                          </span>
+                          <code>{truncateUid(server.browserUid)}</code>
+                        </span>
+                      </td>
+                      <td data-label="Server #">
+                        <code>{server.serverId}</code>
+                      </td>
                       <td data-label="Server">
                         <strong>{server.serverName}</strong>
-                        <span>#{server.serverId}</span>
-                      </td>
-                      <td data-label="Recovery UID">
-                        <code>{truncateUid(server.browserUid)}</code>
                       </td>
                       <td data-label="Role">
                         <StatusBadge tone={isMaster ? "blue" : "purple"}>{isMaster ? "Master" : "Linked"}</StatusBadge>
                       </td>
                       <td data-label="Action">
-                        <button type="button" className="secondary-button danger-button" disabled={busy} onClick={() => onUnlink(server)}>
-                          Unlink
-                        </button>
+                        {isMaster ? null : (
+                          <button type="button" className="admin-inline-danger-link" disabled={busy} onClick={() => onUnlink(server)}>
+                            Unlink
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

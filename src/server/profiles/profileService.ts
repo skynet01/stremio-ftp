@@ -118,6 +118,7 @@ export type SharedIndexGroup = {
 export type SharedIndexGroupMaster = {
   profileId: number;
   browserUid: string;
+  countryCode: string | null;
   serverId: number;
   serverName: string;
 } | null;
@@ -125,6 +126,7 @@ export type SharedIndexGroupMaster = {
 export type SharedIndexLinkedServer = {
   profileId: number;
   browserUid: string;
+  countryCode: string | null;
   serverId: number;
   serverName: string;
 };
@@ -736,17 +738,18 @@ export class ProfileService {
     const rows = this.db
       .prepare(
         `
-        select p.id as profile_id, p.browser_uid, s.id as server_id, s.name as server_name
+        select p.id as profile_id, p.browser_uid, p.last_country_code, s.id as server_id, s.name as server_name
         from profile_ftp_servers s
         join profiles p on p.id = s.profile_id
         where s.shared_index_group_id = ?
         order by p.browser_uid asc, s.name asc, s.id asc
       `,
       )
-      .all(groupId) as Array<{ profile_id: number; browser_uid: string; server_id: number; server_name: string }>;
+      .all(groupId) as Array<{ profile_id: number; browser_uid: string; last_country_code: string | null; server_id: number; server_name: string }>;
     return rows.map((row) => ({
       profileId: row.profile_id,
       browserUid: row.browser_uid,
+      countryCode: row.last_country_code,
       serverId: row.server_id,
       serverName: row.server_name,
     }));
@@ -756,18 +759,19 @@ export class ProfileService {
     const row = this.db
       .prepare(
         `
-        select p.id as profile_id, p.browser_uid, s.id as server_id, s.name as server_name
+        select p.id as profile_id, p.browser_uid, p.last_country_code, s.id as server_id, s.name as server_name
         from shared_index_groups g
         join profile_ftp_servers s on s.id = g.master_profile_ftp_server_id
         join profiles p on p.id = s.profile_id
         where g.id = ?
       `,
       )
-      .get(groupId) as { profile_id: number; browser_uid: string; server_id: number; server_name: string } | undefined;
+      .get(groupId) as { profile_id: number; browser_uid: string; last_country_code: string | null; server_id: number; server_name: string } | undefined;
     return row
       ? {
           profileId: row.profile_id,
           browserUid: row.browser_uid,
+          countryCode: row.last_country_code,
           serverId: row.server_id,
           serverName: row.server_name,
         }
@@ -1487,11 +1491,10 @@ export class ProfileService {
           coalesce(sum(case when catalog_kind = 'movie' then 1 else 0 end), 0) as movies,
           coalesce(sum(case when catalog_kind = 'series' then 1 else 0 end), 0) as series,
           coalesce(sum(case when catalog_kind = 'anime' then 1 else 0 end), 0) as anime,
-          coalesce(sum(case when categorized = 0 then 1 else 0 end), 0) as uncategorized
+          coalesce(sum(case when catalog_kind not in ('movie', 'series', 'anime') then 1 else 0 end), 0) as uncategorized
         from (
           select
-            catalog_kind,
-            case when confidence > 70 or imdb_id is not null then 1 else 0 end as categorized
+            catalog_kind
           from shared_media_files
           where shared_index_group_id = ?
         )

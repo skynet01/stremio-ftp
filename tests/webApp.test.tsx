@@ -1585,10 +1585,10 @@ describe("App", () => {
       createdAt: "2026-05-16T00:00:00.000Z",
       updatedAt: "2026-05-16T00:00:00.000Z",
       linkedServers: [
-        { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", serverId: 9, serverName: "Server 1" },
-        { profileId: 3, browserUid: "aa2f80d7-4971-4919-8f4e-ab80aa2de852", serverId: 12, serverName: "Whatbox" },
+        { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", countryCode: "US", serverId: 9, serverName: "Server 1" },
+        { profileId: 3, browserUid: "aa2f80d7-4971-4919-8f4e-ab80aa2de852", countryCode: "CA", serverId: 12, serverName: "Whatbox" },
       ],
-      masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", serverId: 9, serverName: "Server 1" },
+      masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", countryCode: "US", serverId: 9, serverName: "Server 1" },
       scanSchedule: { intervalMinutes: 360, nextScheduledScanAt: "2026-05-16T06:00:00.000Z" },
       scanStatus: { ...idleScanStatus },
     };
@@ -1825,7 +1825,7 @@ describe("App", () => {
       createdAt: "2026-05-16T00:00:00.000Z",
       updatedAt: "2026-05-16T00:00:00.000Z",
       linkedServers: [],
-      masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", serverId: 9, serverName: "Server 1" },
+      masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", countryCode: "US", serverId: 9, serverName: "Server 1" },
       scanSchedule: { intervalMinutes: 360, nextScheduledScanAt: "2026-05-16T06:00:00.000Z" },
       scanStatus: { ...idleScanStatus },
     };
