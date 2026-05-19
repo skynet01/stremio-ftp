@@ -22,6 +22,7 @@ import {
   type AdminProfileListResponse,
   type AdminProfileSummary,
   type AdminSharedIndexGroup,
+  type AdminSharedIndexLinkedServer,
 } from "../api.js";
 import { useConfirmDialog } from "./ConfirmDialog.js";
 import { Notice, formatNextScan, formatScanTime, StatusBadge, type StatusTone } from "./ui.js";
@@ -60,6 +61,14 @@ type BulkLinkResult = {
   }>;
 };
 
+type CreateSharedGroupTarget = {
+  profileId: number;
+  profileUid: string;
+  serverId: number;
+  serverName: string;
+  host: string | null;
+};
+
 export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) {
   const [data, setData] = useState<AdminProfileListResponse | null>(null);
   const [message, setMessage] = useState("Loading admin profile list...");
@@ -74,12 +83,14 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [searchQuery, setSearchQuery] = useState("");
   const [sort, setSort] = useState<AdminSort | null>(null);
   const [sharedGroups, setSharedGroups] = useState<AdminSharedIndexGroup[]>([]);
-  const [sharedCreateForm, setSharedCreateForm] = useState({ profileId: "", serverId: "", name: "", keyHint: "" });
   const [busySharedGroupId, setBusySharedGroupId] = useState<number | "create" | null>(null);
   const [revealedSharedKey, setRevealedSharedKey] = useState<{ groupId: number; key: string } | null>(null);
   const [serverModalProfileId, setServerModalProfileId] = useState<number | null>(null);
   const [serverLinkSelections, setServerLinkSelections] = useState<Record<string, string>>({});
   const [editingSharedScheduleId, setEditingSharedScheduleId] = useState<number | null>(null);
+  const [linkedServersGroupId, setLinkedServersGroupId] = useState<number | null>(null);
+  const [createSharedTarget, setCreateSharedTarget] = useState<CreateSharedGroupTarget | null>(null);
+  const [createSharedDraft, setCreateSharedDraft] = useState({ name: "", keyHint: "" });
   const { confirm, confirmDialog } = useConfirmDialog();
 
   async function refreshProfiles() {
@@ -148,24 +159,35 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     void refreshAdminData();
   }, [browserUid, passphrase]);
 
+  function openCreateSharedGroupDialog(profile: AdminProfileSummary, server: AdminServerDetail) {
+    setCreateSharedTarget({
+      profileId: profile.id,
+      profileUid: profile.browserUid,
+      serverId: server.id,
+      serverName: server.name,
+      host: server.host,
+    });
+    setCreateSharedDraft({ name: server.name.trim() || `Server ${server.id}`, keyHint: "" });
+  }
+
   async function createSharedGroup() {
-    const profileId = Number(sharedCreateForm.profileId);
-    const serverId = Number(sharedCreateForm.serverId);
-    if (!profileId || !serverId || !sharedCreateForm.name.trim()) return;
+    if (!createSharedTarget || !createSharedDraft.name.trim()) return;
     setBusySharedGroupId("create");
     try {
       const created = await createAdminSharedIndexGroup({
         browserUid,
         passphrase,
-        profileId,
-        serverId,
-        name: sharedCreateForm.name,
-        keyHint: sharedCreateForm.keyHint || undefined,
+        profileId: createSharedTarget.profileId,
+        serverId: createSharedTarget.serverId,
+        name: createSharedDraft.name,
+        keyHint: createSharedDraft.keyHint || undefined,
       });
       setSharedGroups((current) => upsertSharedGroup(current, created.group));
       setRevealedSharedKey({ groupId: created.group.id, key: created.sharedIndexKey });
-      setSharedCreateForm({ profileId: "", serverId: "", name: "", keyHint: "" });
+      setCreateSharedTarget(null);
+      setCreateSharedDraft({ name: "", keyHint: "" });
       setMessage(`Shared index group created for ${created.group.host}.`);
+      await refreshAdminData();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to create shared index group.");
     } finally {
@@ -520,6 +542,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const selectedHasScanActivity = selectedProfiles.some((profile) => profile.activeScans > 0 || profile.pendingScans > 0);
   const allVisibleSelected = visibleProfiles.length > 0 && visibleSelectedCount === visibleProfiles.length;
   const serverModalProfile = profiles.find((profile) => profile.id === serverModalProfileId) ?? null;
+  const linkedServersGroup = sharedGroups.find((group) => group.id === linkedServersGroupId) ?? null;
   const displayStats = adminDisplayStats(profiles, sharedGroups, summary);
 
   return (
@@ -710,15 +733,13 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       ) : null}
       <SharedIndexAdminSection
         groups={sharedGroups}
-        createForm={sharedCreateForm}
         busyGroupId={busySharedGroupId}
         revealedKey={revealedSharedKey}
-        onCreateFormChange={(patch) => setSharedCreateForm((current) => ({ ...current, ...patch }))}
-        onCreate={() => void createSharedGroup()}
         onUpdate={updateSharedGroup}
         onRotate={requestRotateSharedKey}
         onDelete={requestDeleteSharedGroup}
         onScan={runSharedScan}
+        onOpenLinkedServers={(group) => setLinkedServersGroupId(group.id)}
         editingScheduleId={editingSharedScheduleId}
         onToggleScheduleEditor={(group) => setEditingSharedScheduleId((current) => (current === group.id ? null : group.id))}
         onSchedule={updateSharedSchedule}
@@ -732,7 +753,29 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
           onSelectionChange={(key, groupId) => setServerLinkSelections((current) => ({ ...current, [key]: groupId }))}
           onLink={linkServerFromModal}
           onUnlink={unlinkServerFromModal}
+          onCreateGroup={openCreateSharedGroupDialog}
           onClose={() => setServerModalProfileId(null)}
+        />
+      ) : null}
+      {linkedServersGroup ? (
+        <LinkedServersDialog
+          group={linkedServersGroup}
+          busy={busyProfileId !== null || busySharedGroupId !== null}
+          onUnlink={(server) => void unlinkServerFromModal(server.profileId, server.serverId, linkedServersGroup.id)}
+          onClose={() => setLinkedServersGroupId(null)}
+        />
+      ) : null}
+      {createSharedTarget ? (
+        <CreateSharedGroupDialog
+          target={createSharedTarget}
+          draft={createSharedDraft}
+          busy={busySharedGroupId === "create"}
+          onDraftChange={(patch) => setCreateSharedDraft((current) => ({ ...current, ...patch }))}
+          onCreate={() => void createSharedGroup()}
+          onClose={() => {
+            setCreateSharedTarget(null);
+            setCreateSharedDraft({ name: "", keyHint: "" });
+          }}
         />
       ) : null}
       {bulkLinkOpen ? (
@@ -922,29 +965,25 @@ function ModalPortal({ children }: { children: ReactNode }) {
 
 function SharedIndexAdminSection({
   groups,
-  createForm,
   busyGroupId,
   revealedKey,
-  onCreateFormChange,
-  onCreate,
   onUpdate,
   onRotate,
   onDelete,
   onScan,
+  onOpenLinkedServers,
   editingScheduleId,
   onToggleScheduleEditor,
   onSchedule,
 }: {
   groups: AdminSharedIndexGroup[];
-  createForm: { profileId: string; serverId: string; name: string; keyHint: string };
   busyGroupId: number | "create" | null;
   revealedKey: { groupId: number; key: string } | null;
-  onCreateFormChange: (patch: Partial<typeof createForm>) => void;
-  onCreate: () => void;
   onUpdate: (group: AdminSharedIndexGroup, patch: Partial<Pick<AdminSharedIndexGroup, "name" | "enabled" | "autoLinkImports">>) => void;
   onRotate: (group: AdminSharedIndexGroup) => void;
   onDelete: (group: AdminSharedIndexGroup) => void;
   onScan: (group: AdminSharedIndexGroup) => void;
+  onOpenLinkedServers: (group: AdminSharedIndexGroup) => void;
   editingScheduleId: number | null;
   onToggleScheduleEditor: (group: AdminSharedIndexGroup) => void;
   onSchedule: (group: AdminSharedIndexGroup, intervalMinutes: number) => void;
@@ -987,39 +1026,6 @@ function SharedIndexAdminSection({
           <span className="section-label">Shared indexes</span>
           <h3 id="admin-shared-index-heading">Shared index groups</h3>
         </div>
-      </div>
-
-      <div className="admin-shared-create">
-        <input
-          inputMode="numeric"
-          aria-label="Master profile ID"
-          placeholder="Profile ID"
-          value={createForm.profileId}
-          onChange={(event) => onCreateFormChange({ profileId: event.target.value })}
-        />
-        <input
-          inputMode="numeric"
-          aria-label="Master server ID"
-          placeholder="Server ID"
-          value={createForm.serverId}
-          onChange={(event) => onCreateFormChange({ serverId: event.target.value })}
-        />
-        <input
-          aria-label="Shared group name"
-          placeholder="Group name"
-          value={createForm.name}
-          onChange={(event) => onCreateFormChange({ name: event.target.value })}
-        />
-        <input
-          aria-label="Shared key hint"
-          placeholder="Key hint"
-          value={createForm.keyHint}
-          onChange={(event) => onCreateFormChange({ keyHint: event.target.value })}
-        />
-        <button type="button" className="secondary-button" disabled={busyGroupId === "create"} onClick={onCreate}>
-          <KeyRound size={15} aria-hidden="true" />
-          Create group
-        </button>
       </div>
 
       {groups.length ? (
@@ -1080,6 +1086,15 @@ function SharedIndexAdminSection({
                     >
                       {group.enabled ? "Enabled" : "Disabled"}
                     </button>
+                    <button
+                      type="button"
+                      className="admin-linked-count-button"
+                      aria-label={`Show linked servers for ${group.name}`}
+                      disabled={busyGroupId === group.id}
+                      onClick={() => onOpenLinkedServers(group)}
+                    >
+                      Linked {group.linkedServerCount}
+                    </button>
                     {!group.enabled ? (
                       <button type="button" className="icon-button danger-button" title={active ? "Halt shared scan before deleting" : "Delete group"} aria-label={`Delete ${group.name}`} disabled={busyGroupId === group.id || !canDelete} onClick={() => onDelete(group)}>
                         <Trash2 size={15} aria-hidden="true" />
@@ -1088,9 +1103,16 @@ function SharedIndexAdminSection({
                   </div>
                 </div>
                 <dl className="status-list admin-shared-stats">
-                  <SummaryStat label="Linked" value={group.linkedServerCount} />
                   <SummaryStat label="Items" value={group.indexedMediaCount} />
                 </dl>
+                <div className="admin-shared-content-grid" aria-label={`${group.name} catalog content types`}>
+                  {sharedContentCells(group).map((cell) => (
+                    <div className={cell.enabled ? "is-on" : "is-off"} key={cell.label}>
+                      <span>{cell.label}</span>
+                      <strong>{cell.enabled ? "On" : "Off"}</strong>
+                    </div>
+                  ))}
+                </div>
                 <div className="admin-shared-detail">
                   <span>Last scan</span>
                   <strong>{formatScanTime(group.lastIndexedAt)}</strong>
@@ -1172,6 +1194,7 @@ function ProfileServersDialog({
   onSelectionChange,
   onLink,
   onUnlink,
+  onCreateGroup,
   onClose,
 }: {
   profile: AdminProfileSummary;
@@ -1181,6 +1204,7 @@ function ProfileServersDialog({
   onSelectionChange: (key: string, groupId: string) => void;
   onLink: (profileId: number, serverId: number) => void;
   onUnlink: (profileId: number, serverId: number, groupId: number) => void;
+  onCreateGroup: (profile: AdminProfileSummary, server: AdminServerDetail) => void;
   onClose: () => void;
 }) {
   const servers = profile.ftpServerDetails ?? [];
@@ -1250,6 +1274,10 @@ function ProfileServersDialog({
                           <button type="button" className="secondary-button" disabled={busy || !groups.length} onClick={() => onLink(profile.id, server.id)}>
                             Link
                           </button>
+                          <button type="button" className="secondary-button" disabled={busy || !server.host} onClick={() => onCreateGroup(profile, server)}>
+                            <KeyRound size={15} aria-hidden="true" />
+                            Create group
+                          </button>
                         </div>
                       )}
                     </td>
@@ -1263,6 +1291,151 @@ function ProfileServersDialog({
       </div>
     </ModalPortal>
   );
+}
+
+function LinkedServersDialog({
+  group,
+  busy,
+  onUnlink,
+  onClose,
+}: {
+  group: AdminSharedIndexGroup;
+  busy: boolean;
+  onUnlink: (server: AdminSharedIndexLinkedServer) => void;
+  onClose: () => void;
+}) {
+  return (
+    <ModalPortal>
+      <div className="admin-bulk-dialog-backdrop">
+      <div className="admin-bulk-dialog admin-linked-servers-dialog" role="dialog" aria-modal={true} aria-labelledby="admin-linked-servers-heading">
+        <div className="admin-bulk-dialog-header">
+          <div>
+            <span className="section-label">Linked servers</span>
+            <h3 id="admin-linked-servers-heading">{group.name}</h3>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close linked servers" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+        {group.linkedServers.length ? (
+          <div className="admin-server-dialog-table-wrap">
+            <table className="admin-server-dialog-table">
+              <thead>
+                <tr>
+                  <th scope="col">Server</th>
+                  <th scope="col">Recovery UID</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {group.linkedServers.map((server) => {
+                  const isMaster = group.masterServer?.profileId === server.profileId && group.masterServer.serverId === server.serverId;
+                  return (
+                    <tr key={`${server.profileId}-${server.serverId}`}>
+                      <td data-label="Server">
+                        <strong>{server.serverName}</strong>
+                        <span>#{server.serverId}</span>
+                      </td>
+                      <td data-label="Recovery UID">
+                        <code>{truncateUid(server.browserUid)}</code>
+                      </td>
+                      <td data-label="Role">
+                        <StatusBadge tone={isMaster ? "blue" : "purple"}>{isMaster ? "Master" : "Linked"}</StatusBadge>
+                      </td>
+                      <td data-label="Action">
+                        <button type="button" className="secondary-button danger-button" disabled={busy} onClick={() => onUnlink(server)}>
+                          Unlink
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="admin-empty-value">No linked servers.</p>
+        )}
+      </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+function CreateSharedGroupDialog({
+  target,
+  draft,
+  busy,
+  onDraftChange,
+  onCreate,
+  onClose,
+}: {
+  target: CreateSharedGroupTarget;
+  draft: { name: string; keyHint: string };
+  busy: boolean;
+  onDraftChange: (patch: Partial<{ name: string; keyHint: string }>) => void;
+  onCreate: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <ModalPortal>
+      <div className="admin-bulk-dialog-backdrop">
+      <div className="admin-bulk-dialog admin-create-shared-dialog" role="dialog" aria-modal={true} aria-labelledby="admin-create-shared-heading">
+        <div className="admin-bulk-dialog-header">
+          <div>
+            <span className="section-label">Create group</span>
+            <h3 id="admin-create-shared-heading">{target.serverName}</h3>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close create group" disabled={busy} onClick={onClose}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+        <p className="admin-bulk-link-summary">
+          {truncateUid(target.profileUid)} / {target.host ?? "No host configured"} / server #{target.serverId}
+        </p>
+        <label className="field-stack">
+          <span>Group name</span>
+          <input
+            aria-label="Shared group name"
+            value={draft.name}
+            disabled={busy}
+            autoFocus
+            onChange={(event) => onDraftChange({ name: event.currentTarget.value })}
+          />
+        </label>
+        <label className="field-stack">
+          <span>Key hint</span>
+          <input
+            aria-label="Shared key hint"
+            value={draft.keyHint}
+            disabled={busy}
+            placeholder="Generated from name"
+            onChange={(event) => onDraftChange({ keyHint: event.currentTarget.value })}
+          />
+        </label>
+        <div className="admin-bulk-link-footer">
+          <button type="button" className="secondary-button" disabled={busy || !draft.name.trim()} onClick={onCreate}>
+            <KeyRound size={15} aria-hidden="true" />
+            {busy ? "Creating..." : "Create group"}
+          </button>
+          <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+function sharedContentCells(group: AdminSharedIndexGroup) {
+  return [
+    { label: "Movie", enabled: group.catalogContentTypes.movies },
+    { label: "Anime", enabled: group.catalogContentTypes.anime },
+    { label: "Series", enabled: group.catalogContentTypes.series },
+    { label: "Uncategorized", enabled: Boolean(group.catalogContentTypes.uncategorized) },
+  ];
 }
 
 function truncateUid(uid: string) {

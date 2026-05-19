@@ -1583,7 +1583,10 @@ describe("App", () => {
       linkedServerCount: 12,
       createdAt: "2026-05-16T00:00:00.000Z",
       updatedAt: "2026-05-16T00:00:00.000Z",
-      linkedServers: [],
+      linkedServers: [
+        { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", serverId: 9, serverName: "Server 1" },
+        { profileId: 3, browserUid: "aa2f80d7-4971-4919-8f4e-ab80aa2de852", serverId: 12, serverName: "Whatbox" },
+      ],
       masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", serverId: 9, serverName: "Server 1" },
       scanSchedule: { intervalMinutes: 360, nextScheduledScanAt: "2026-05-16T06:00:00.000Z" },
       scanStatus: { ...idleScanStatus },
@@ -1630,7 +1633,9 @@ describe("App", () => {
     await screen.findByRole("heading", { name: "Admin dashboard" });
     await screen.findByRole("heading", { name: "Shared index groups" });
     expect(screen.getByText("Sputnik Main")).toBeTruthy();
-    expect(screen.getByText("12")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show linked servers for Sputnik Main" })).toHaveTextContent("Linked 12");
+    expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("Movie");
+    expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("Uncategorized");
     expect(screen.getAllByText("Master").length).toBeGreaterThan(0);
     expect(screen.getByText("bf1f80d7-4971-4 / Server 1")).toBeTruthy();
     expect(screen.queryByRole("columnheader", { name: "Manifest" })).toBeNull();
@@ -1648,6 +1653,10 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Link server to Sputnik Main" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Set master for Sputnik Main" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Unlink server from Sputnik Main" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show linked servers for Sputnik Main" }));
+    const linkedServersDialog = await screen.findByRole("dialog", { name: "Sputnik Main" });
+    expect(within(linkedServersDialog).getByText("Whatbox")).toBeTruthy();
+    fireEvent.click(within(linkedServersDialog).getByRole("button", { name: "Close linked servers" }));
     fireEvent.click(screen.getByRole("button", { name: /1\/2 linked/ }));
     const serverDialog = await screen.findByRole("dialog", { name: "bf1f80d7-4971-4" });
     expect(within(serverDialog).getByText("Auto-L")).toBeTruthy();

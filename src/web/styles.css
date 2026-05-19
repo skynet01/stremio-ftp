@@ -682,6 +682,19 @@ textarea:focus-visible,
   white-space: nowrap;
 }
 
+.server-host-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-port {
+  color: var(--muted-2);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.88em;
+}
+
 .server-metrics {
   min-width: 0;
   display: inline-flex;
@@ -698,8 +711,9 @@ textarea:focus-visible,
 }
 
 .server-linked-index {
-  color: oklch(78% 0.13 236);
+  color: oklch(84% 0.11 78);
   font-weight: 700;
+  text-shadow: 0 0 14px rgba(242, 184, 75, 0.24);
 }
 
 .server-item-count {
@@ -1223,21 +1237,6 @@ input:-webkit-autofill:active {
     0 18px 52px -42px rgba(168, 224, 99, 0.55);
 }
 
-.admin-shared-create {
-  display: grid;
-  grid-template-columns: minmax(74px, 0.45fr) minmax(74px, 0.45fr) minmax(130px, 1fr) minmax(120px, 0.8fr) auto;
-  gap: 8px;
-  align-items: center;
-  padding: 12px;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.admin-shared-create input {
-  min-height: 36px;
-}
-
 .admin-shared-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1268,8 +1267,7 @@ input:-webkit-autofill:active {
   flex-wrap: wrap;
 }
 
-.admin-tag-toggle,
-.admin-rekey-button {
+.admin-tag-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1295,18 +1293,33 @@ input:-webkit-autofill:active {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.admin-linked-count-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  border: 1px solid rgba(116, 210, 255, 0.24);
+  border-radius: 999px;
+  padding: 0 10px;
+  color: var(--accent);
+  background: rgba(116, 210, 255, 0.075);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.admin-linked-count-button:hover,
+.admin-linked-count-button:focus-visible {
+  border-color: rgba(116, 210, 255, 0.48);
+  color: var(--cream);
+}
+
 .admin-icon-toggle.is-on {
   color: oklch(78% 0.13 236);
   background: rgba(92, 174, 255, 0.09);
-}
-
-.admin-rekey-button {
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
-  padding: 0;
-  color: var(--amber);
-  background: rgba(242, 184, 75, 0.08);
 }
 
 .admin-shared-card h4 {
@@ -1349,8 +1362,50 @@ input:-webkit-autofill:active {
 }
 
 .admin-shared-stats {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+}
+
+.admin-shared-content-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-shared-content-grid div {
+  display: grid;
+  gap: 4px;
+  min-height: 50px;
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.024);
+}
+
+.admin-shared-content-grid span,
+.admin-shared-content-grid strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-shared-content-grid span {
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-shared-content-grid strong {
+  color: var(--cream);
+  font-size: 0.72rem;
+}
+
+.admin-shared-content-grid .is-off {
+  opacity: 0.56;
 }
 
 .admin-shared-detail {
@@ -1614,8 +1669,13 @@ input:-webkit-autofill:active {
   background: rgba(255, 255, 255, 0.025);
 }
 
-.admin-bulk-link-dialog {
+.admin-bulk-link-dialog,
+.admin-linked-servers-dialog {
   width: min(720px, 100%);
+}
+
+.admin-create-shared-dialog {
+  width: min(520px, 100%);
 }
 
 .admin-server-dialog {
@@ -2149,7 +2209,7 @@ input:-webkit-autofill:active {
 
 .admin-server-link-controls {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
   gap: 8px;
   align-items: center;
 }
@@ -3023,7 +3083,6 @@ input:-webkit-autofill:active {
     gap: 14px;
   }
 
-  .admin-shared-create,
   .admin-shared-card-header,
   .admin-shared-stats {
     grid-template-columns: 1fr;
@@ -3031,10 +3090,6 @@ input:-webkit-autofill:active {
 
   .admin-shared-grid {
     grid-template-columns: 1fr;
-  }
-
-  .admin-shared-create .secondary-button {
-    width: max-content;
   }
 
   .admin-profile-table {

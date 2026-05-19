@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   cancelScan,
+  createAdminSharedIndexGroup,
   createFtpServer,
   createProfile,
   deleteFtpServer,
@@ -328,6 +329,7 @@ export function App() {
   });
   const [passphrase, setPassphrase] = useState("");
   const [profileState, setProfileState] = useState<ProfileState>("new");
+  const [profileId, setProfileId] = useState<number | null>(null);
   const [profileMessage, setProfileMessage] = useState("Create or unlock this browser profile to install the addon.");
   const [manifestUrl, setManifestUrl] = useState<string | null>(null);
   const [stremioInstallUrl, setStremioInstallUrl] = useState<string | null>(null);
@@ -528,6 +530,7 @@ export function App() {
         return;
       }
       const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase: rememberedPassphrase });
+      setProfileId(unlocked.profileId);
       rememberSession(rememberedPassphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
       setProfileState("unlocked");
       await loadServerState(rememberedPassphrase);
@@ -588,6 +591,7 @@ export function App() {
     setProfileMessage("Creating profile...");
     try {
       const created = await createProfile({ browserUid: recoveryUid, passphrase });
+      setProfileId(created.profileId);
       rememberSession(passphrase, created.manifestUrl, created.stremioInstallUrl);
       setProfileState("created");
       const importToApply = importedSettings;
@@ -634,6 +638,7 @@ export function App() {
     setProfileMessage("Unlocking profile...");
     try {
       const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase });
+      setProfileId(unlocked.profileId);
       rememberSession(passphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
       setProfileState("unlocked");
       await loadServerState();
@@ -655,6 +660,34 @@ export function App() {
       setCustomizationMessage("Addon branding saved. Reinstall or refresh the addon in Stremio to see it there.");
     } catch (error) {
       setCustomizationMessage(error instanceof Error ? error.message : "Unable to save addon branding.");
+    }
+  }
+
+  async function currentProfileId() {
+    if (profileId) return profileId;
+    const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase });
+    setProfileId(unlocked.profileId);
+    rememberSession(passphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
+    return unlocked.profileId;
+  }
+
+  async function createSharedGroupFromServer(serverId: number) {
+    const server = serverById(serverId);
+    updateServer(serverId, { message: "Creating shared index group..." });
+    try {
+      const ownerProfileId = await currentProfileId();
+      const created = await createAdminSharedIndexGroup({
+        browserUid: recoveryUid,
+        passphrase,
+        profileId: ownerProfileId,
+        serverId,
+        name: server.name.trim() || `Server ${serverId}`,
+      });
+      await navigator.clipboard?.writeText(created.sharedIndexKey);
+      await loadServerState();
+      updateServer(serverId, { message: "Shared index group created. Shared index key copied." });
+    } catch (error) {
+      updateServer(serverId, { message: error instanceof Error ? error.message : "Unable to create shared index group." });
     }
   }
 
@@ -1140,6 +1173,7 @@ export function App() {
 
   function logout() {
     setProfileState("new");
+    setProfileId(null);
     setProfileMessage("Enter your passphrase to unlock this browser profile.");
     setManifestUrl(null);
     setStremioInstallUrl(null);
@@ -1286,6 +1320,7 @@ export function App() {
                 onTestServer={(serverId) => void testServer(serverId)}
                 onRefreshServer={(serverId) => void refreshServer(serverId)}
                 onCancelServer={(serverId) => void haltServer(serverId)}
+                onCreateSharedGroup={isSuperAdmin ? (serverId) => void createSharedGroupFromServer(serverId) : undefined}
                 onUpdateScanSchedule={(serverId, intervalMinutes) => void updateScanSchedule(serverId, intervalMinutes)}
               />
               {hasSavedServer ? (

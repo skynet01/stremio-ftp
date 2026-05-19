@@ -1,4 +1,4 @@
-import { ChevronRight, CircleStop, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, CircleStop, KeyRound, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type { AddonCustomization, ConnectionStatus, IndexStatus, ScanSchedule, ScanStatus } from "../api.js";
 import {
   field,
@@ -60,11 +60,16 @@ export function isServerDraft(server: ServerForm): boolean {
   return false;
 }
 
-function serverHostLabel(server: ServerForm) {
+function ServerHostLabel({ server }: { server: ServerForm }) {
   const host = server.host.trim();
   if (!host) return "No host configured";
   const port = server.port.trim();
-  return port ? `${host}:${port}` : host;
+  return (
+    <span className="server-host-label">
+      <span>{host}</span>
+      {port ? <span className="server-port">:{port}</span> : null}
+    </span>
+  );
 }
 
 function serverSummaryTokens(server: ServerForm) {
@@ -136,6 +141,7 @@ export function ServerAccordion({
   onTestServer,
   onRefreshServer,
   onCancelServer,
+  onCreateSharedGroup,
   onUpdateScanSchedule,
 }: {
   servers: ServerForm[];
@@ -151,6 +157,7 @@ export function ServerAccordion({
   onTestServer: (serverId: number) => void;
   onRefreshServer: (serverId: number) => void;
   onCancelServer: (serverId: number) => void;
+  onCreateSharedGroup?: (serverId: number) => void;
   onUpdateScanSchedule: (serverId: number, intervalMinutes: number) => void;
 }) {
   const atServerCap = maxFtpServersPerProfile > 0 && servers.length >= maxFtpServersPerProfile;
@@ -199,7 +206,9 @@ export function ServerAccordion({
               >
                 <ChevronRight size={18} aria-hidden={true} />
                 <span className="server-title">{server.name || `Server ${index + 1}`}</span>
-                <span className="server-subtitle">{serverHostLabel(server)}</span>
+                <span className="server-subtitle">
+                  <ServerHostLabel server={server} />
+                </span>
                 <span className="server-metrics">
                   {summary.linkedLabel ? (
                     <span className="server-linked-index">{summary.linkedLabel}</span>
@@ -519,6 +528,17 @@ export function ServerAccordion({
                         Rescan
                       </button>
                     )}
+                    {onCreateSharedGroup ? (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={!profileReady || active || linkedNonMaster || isServerDraft(server)}
+                        onClick={() => onCreateSharedGroup(server.id)}
+                      >
+                        <KeyRound size={17} aria-hidden={true} />
+                        Create group
+                      </button>
+                    ) : null}
                     <button type="button" className="primary-button save-server-button" aria-label="Save FTP settings" disabled={!profileReady || active} onClick={() => onSaveServer(server.id)}>
                       Save FTP settings
                     </button>

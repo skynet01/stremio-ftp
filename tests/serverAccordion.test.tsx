@@ -67,7 +67,8 @@ describe("ServerAccordion", () => {
 
     expect(screen.getByText("Retry pending")).toBeTruthy();
     expect(screen.getByText(/Server sent FIN packet unexpectedly, closing connection/)).toBeTruthy();
-    expect(screen.getByText("ftp.example.test:21")).toBeTruthy();
+    expect(screen.getByText("ftp.example.test")).toBeTruthy();
+    expect(screen.getByText(":21")).toHaveClass("server-port");
   });
 
   it("clears uncategorized when Stremio catalogs are turned off", () => {
