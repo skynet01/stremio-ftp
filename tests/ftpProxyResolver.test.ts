@@ -11,6 +11,54 @@ function deferred<T>() {
 }
 
 describe("createFtpProxyResolver", () => {
+  it("reuses a warmed FTP client for the next stream open", async () => {
+    let factoryCalls = 0;
+    let openedPath = "";
+    const resolver = createFtpProxyResolver(
+      {
+        profileIdForInstallToken: () => 12,
+        getFtpServerConfig: () => ({
+          host: "ftp.example.test",
+          port: 21,
+          username: "user",
+          password: "secret",
+          tlsMode: "none",
+          allowInvalidCertificate: false,
+          roots: ["/"],
+        }),
+        getFtpConfig: () => null,
+      } as never,
+      {
+        getFileForProfile: () => ({
+          id: 44,
+          ftpServerId: 5,
+          filename: "video.mkv",
+          ftpPath: "/video.mkv",
+          sizeBytes: 10,
+        }),
+      } as never,
+      async () => {
+        factoryCalls += 1;
+        return {
+          list: async () => [],
+          openReadStream: async (path) => {
+            openedPath = path;
+            return Readable.from("ok");
+          },
+          close: async () => undefined,
+        };
+      },
+    );
+
+    const file = await resolver({ installToken: "token", fileId: 44 });
+    file?.warmReadStream();
+    const stream = await file?.openReadStream({ start: 0, end: 1 });
+
+    expect(stream).toBeDefined();
+    expect(factoryCalls).toBe(1);
+    expect(openedPath).toBe("/video.mkv");
+  });
+
   it("closes the FTP client when a pending stream open is aborted", async () => {
     const streamReady = deferred<NodeJS.ReadableStream>();
     let closed = 0;
