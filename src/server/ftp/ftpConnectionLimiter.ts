@@ -1,40 +1,63 @@
 import type { FtpClient, FtpClientFactory } from "./ftpTypes.js";
+import type { FtpConfig } from "../profiles/profileService.js";
 
 type QueueWaiter = {
   resolve: (release: () => void) => void;
 };
 
-export function limitFtpClientFactory(factory: FtpClientFactory, maxConnections: number): FtpClientFactory {
-  let activeConnections = 0;
-  const queue: QueueWaiter[] = [];
+type LimiterState = {
+  activeConnections: number;
+  queue: QueueWaiter[];
+};
 
-  async function acquire() {
-    if (activeConnections < maxConnections) {
-      activeConnections += 1;
-      return releaseOnce();
+export function limitFtpClientFactory(factory: FtpClientFactory, maxConnections: number): FtpClientFactory {
+  return limitFtpClientFactoryByKey(factory, maxConnections, () => "global");
+}
+
+export function limitFtpClientFactoryByKey(
+  factory: FtpClientFactory,
+  maxConnectionsPerKey: number,
+  keyForConfig: (config: FtpConfig) => string = ftpConfigConnectionKey,
+): FtpClientFactory {
+  const connectionLimit = Math.max(1, Math.floor(maxConnectionsPerKey));
+  const states = new Map<string, LimiterState>();
+
+  async function acquire(key: string) {
+    let state = states.get(key);
+    if (!state) {
+      state = { activeConnections: 0, queue: [] };
+      states.set(key, state);
+    }
+
+    if (state.activeConnections < connectionLimit) {
+      state.activeConnections += 1;
+      return releaseOnce(key, state);
     }
 
     return new Promise<() => void>((resolve) => {
-      queue.push({ resolve });
+      state.queue.push({ resolve });
     });
   }
 
-  function releaseOnce() {
+  function releaseOnce(key: string, state: LimiterState) {
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      const next = queue.shift();
+      const next = state.queue.shift();
       if (next) {
-        next.resolve(releaseOnce());
+        next.resolve(releaseOnce(key, state));
         return;
       }
-      activeConnections -= 1;
+      state.activeConnections -= 1;
+      if (state.activeConnections === 0 && state.queue.length === 0) {
+        states.delete(key);
+      }
     };
   }
 
   return async (config) => {
-    const release = await acquire();
+    const release = await acquire(keyForConfig(config));
     try {
       const client = await factory(config);
       return releaseClientSlotOnClose(client, release);
@@ -43,6 +66,17 @@ export function limitFtpClientFactory(factory: FtpClientFactory, maxConnections:
       throw error;
     }
   };
+}
+
+function ftpConfigConnectionKey(config: FtpConfig) {
+  return [
+    config.host.trim().toLowerCase(),
+    config.port,
+    config.username,
+    config.password,
+    config.tlsMode,
+    config.allowInvalidCertificate ? "invalid-cert-ok" : "valid-cert",
+  ].join("\0");
 }
 
 function releaseClientSlotOnClose(client: FtpClient, release: () => void): FtpClient {
