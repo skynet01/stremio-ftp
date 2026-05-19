@@ -1298,27 +1298,31 @@ input:-webkit-autofill:active {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 30px;
-  border-radius: 999px;
-  border: 1px solid currentColor;
-  padding: 0 10px;
+  min-height: 30px;
+  border: 0;
+  padding: 0 2px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.58rem;
   font-weight: 700;
   letter-spacing: 0.12em;
-  line-height: 1;
+  line-height: 1.2;
   text-transform: uppercase;
   white-space: nowrap;
+  background: transparent;
 }
 
 .admin-tag-toggle.is-on {
   color: var(--green);
-  background: rgba(117, 213, 148, 0.08);
 }
 
 .admin-tag-toggle.is-off {
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.025);
+}
+
+.admin-tag-toggle:hover,
+.admin-tag-toggle:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .admin-linked-count-button {

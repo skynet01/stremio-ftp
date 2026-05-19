@@ -1484,9 +1484,9 @@ export class ProfileService {
       .prepare(
         `
         select
-          coalesce(sum(case when catalog_kind = 'movie' and categorized = 1 then 1 else 0 end), 0) as movies,
-          coalesce(sum(case when catalog_kind = 'series' and categorized = 1 then 1 else 0 end), 0) as series,
-          coalesce(sum(case when catalog_kind = 'anime' and categorized = 1 then 1 else 0 end), 0) as anime,
+          coalesce(sum(case when catalog_kind = 'movie' then 1 else 0 end), 0) as movies,
+          coalesce(sum(case when catalog_kind = 'series' then 1 else 0 end), 0) as series,
+          coalesce(sum(case when catalog_kind = 'anime' then 1 else 0 end), 0) as anime,
           coalesce(sum(case when categorized = 0 then 1 else 0 end), 0) as uncategorized
         from (
           select

@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { date: "2026-05-19", hash: "v0.4.44", subject: "fix: tune FTP playback concurrency and shared index count display" },
   { date: "2026-05-19", hash: "v0.4.43", subject: "feat: master index groups with linked server management" },
   { date: "2026-05-19", hash: "v0.4.43", subject: "feat: warm proxy playback connections for faster stream starts" },
   { date: "2026-05-19", hash: "v0.4.43", subject: "ui: refine shared index group stats and admin scrollbars" },
