@@ -9,7 +9,7 @@ import { adminRoutes } from "./admin/adminRoutes.js";
 import type { AppConfig } from "./config.js";
 import { openDatabase } from "./db/database.js";
 import { createBasicFtpClientFactory } from "./ftp/basicFtpClient.js";
-import { limitFtpClientFactory } from "./ftp/ftpConnectionLimiter.js";
+import { limitFtpClientFactoryByKey } from "./ftp/ftpConnectionLimiter.js";
 import type { FtpClientFactory } from "./ftp/ftpTypes.js";
 import { MediaRepository } from "./media/mediaRepository.js";
 import { ProfileService } from "./profiles/profileService.js";
@@ -51,8 +51,7 @@ export function createApp(
   const profileService = new ProfileService(db, config.encryptionKey);
   const mediaRepository = new MediaRepository(db);
   const baseFtpClientFactory = options.ftpClientFactory ?? createBasicFtpClientFactory(config.ftpTimeoutMs);
-  const ftpClientFactory = limitFtpClientFactory(baseFtpClientFactory, config.ftpMaxConnections);
-  const proxyFtpClientFactory = limitFtpClientFactory(baseFtpClientFactory, Math.max(2, config.ftpMaxConnections));
+  const ftpClientFactory = limitFtpClientFactoryByKey(baseFtpClientFactory, config.ftpMaxConnections);
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
   const scanScheduler = setInterval(() => scanQueue.enqueueDueScheduledScans(), config.scanSchedulerIntervalMs);
   scanScheduler.unref();
@@ -90,7 +89,7 @@ export function createApp(
   });
   app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue));
   app.use("/api/admin", adminRoutes(config, profileService, scanQueue));
-  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, proxyFtpClientFactory) }));
+  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 
   app.get("/health", (_req, res) => {
