@@ -1,5 +1,4 @@
 import { performance } from "node:perf_hooks";
-import { Transform } from "node:stream";
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { lookup } from "mime-types";
@@ -219,12 +218,7 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
     }
     res.destroy(error instanceof Error ? error : undefined);
   });
-  const timingTap = createTimingTap(timing);
-  timingTap.on("error", (error) => {
-    markFinished();
-    res.destroy(error instanceof Error ? error : undefined);
-  });
-  stream.pipe(timingTap).pipe(res);
+  stream.pipe(res);
 }
 
 function destroyStream(stream: NodeJS.ReadableStream) {
@@ -270,14 +264,4 @@ function logProxyTiming(timing: ProxyTiming, outcome: string) {
 
 function elapsedMs(startedAt: number) {
   return Math.round((performance.now() - startedAt) * 10) / 10;
-}
-
-function createTimingTap(timing: ProxyTiming) {
-  return new Transform({
-    transform(chunk: Buffer | string, _encoding, callback) {
-      timing.firstByteMs ??= elapsedMs(timing.startedAt);
-      timing.bytesFromFtp += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
-      callback(null, chunk);
-    },
-  });
 }
