@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { CircleStop, Copy, Crown, KeyRound, Link2, RefreshCw, Search, ShieldCheck, Trash2, User, X } from "lucide-react";
+import { CircleStop, Copy, Crown, createLucideIcon, KeyRound, Link2, RefreshCw, Search, ShieldCheck, Trash2, User, X } from "lucide-react";
 import {
   bulkAdminProfiles,
   cancelAdminSharedIndexScan,
@@ -26,6 +26,14 @@ import {
 } from "../api.js";
 import { useConfirmDialog } from "./ConfirmDialog.js";
 import { Notice, formatNextScan, formatScanTime, StatusBadge, type StatusTone } from "./ui.js";
+
+const RotateCcwKey = createLucideIcon("rotate-ccw-key", [
+  ["path", { d: "M12 7v6", key: "lw1j43" }],
+  ["path", { d: "M12 9h2", key: "1lpap9" }],
+  ["path", { d: "M3 12a9 9 0 1 0 9-9 9.74 9.74 0 0 0-6.74 2.74L3 8", key: "g2jlw" }],
+  ["path", { d: "M3 3v5h5", key: "1xhq8a" }],
+  ["circle", { cx: "12", cy: "15", r: "2", key: "1vpstw" }],
+]);
 
 type AdminDashboardProps = {
   browserUid: string;
@@ -1079,21 +1087,22 @@ function SharedIndexAdminSection({
                   <div className="admin-shared-top-actions">
                     <button
                       type="button"
+                      className="admin-linked-count-button"
+                      aria-label={`Show linked servers for ${group.name}`}
+                      title={`${group.linkedServerCount} linked server${group.linkedServerCount === 1 ? "" : "s"}`}
+                      disabled={busyGroupId === group.id}
+                      onClick={() => onOpenLinkedServers(group)}
+                    >
+                      {group.linkedServerCount}
+                    </button>
+                    <button
+                      type="button"
                       className={`admin-tag-toggle ${group.enabled ? "is-on" : "is-off"}`}
                       aria-pressed={group.enabled}
                       disabled={busyGroupId === group.id}
                       onClick={() => onUpdate(group, { enabled: !group.enabled })}
                     >
                       {group.enabled ? "Enabled" : "Disabled"}
-                    </button>
-                    <button
-                      type="button"
-                      className="admin-linked-count-button"
-                      aria-label={`Show linked servers for ${group.name}`}
-                      disabled={busyGroupId === group.id}
-                      onClick={() => onOpenLinkedServers(group)}
-                    >
-                      Linked {group.linkedServerCount}
                     </button>
                     {!group.enabled ? (
                       <button type="button" className="icon-button danger-button" title={active ? "Halt shared scan before deleting" : "Delete group"} aria-label={`Delete ${group.name}`} disabled={busyGroupId === group.id || !canDelete} onClick={() => onDelete(group)}>
@@ -1107,9 +1116,9 @@ function SharedIndexAdminSection({
                 </dl>
                 <div className="admin-shared-content-grid" aria-label={`${group.name} catalog content types`}>
                   {sharedContentCells(group).map((cell) => (
-                    <div className={cell.enabled ? "is-on" : "is-off"} key={cell.label}>
+                    <div key={cell.label}>
                       <span>{cell.label}</span>
-                      <strong>{cell.enabled ? "On" : "Off"}</strong>
+                      <strong>{cell.value}</strong>
                     </div>
                   ))}
                 </div>
@@ -1169,7 +1178,7 @@ function SharedIndexAdminSection({
                     <Link2 size={15} aria-hidden="true" />
                   </button>
                   <button type="button" className="icon-button admin-rekey-button" title="Rekey shared index" aria-label={`Rotate key for ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onRotate(group)}>
-                    <KeyRound size={15} aria-hidden="true" />
+                    <RotateCcwKey size={15} aria-hidden="true" />
                   </button>
                   <button type="button" className={`icon-button ${active ? "danger-button" : ""}`} title={active ? "Halt shared scan" : "Rescan shared index"} aria-label={active ? `Halt scan for ${group.name}` : `Rescan ${group.name}`} disabled={busyGroupId === group.id} onClick={() => onScan(group)}>
                     {active ? <CircleStop size={15} aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
@@ -1431,10 +1440,10 @@ function CreateSharedGroupDialog({
 
 function sharedContentCells(group: AdminSharedIndexGroup) {
   return [
-    { label: "Movie", enabled: group.catalogContentTypes.movies },
-    { label: "Anime", enabled: group.catalogContentTypes.anime },
-    { label: "Series", enabled: group.catalogContentTypes.series },
-    { label: "Uncategorized", enabled: Boolean(group.catalogContentTypes.uncategorized) },
+    { label: "Movie", value: group.catalogItemCounts.movies },
+    { label: "Anime", value: group.catalogItemCounts.anime },
+    { label: "Series", value: group.catalogItemCounts.series },
+    { label: "Other", value: group.catalogItemCounts.uncategorized },
   ];
 }
 

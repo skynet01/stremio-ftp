@@ -103,6 +103,12 @@ export type SharedIndexGroup = {
   autoLinkImports: boolean;
   masterProfileFtpServerId: number | null;
   indexedMediaCount: number;
+  catalogItemCounts: {
+    movies: number;
+    series: number;
+    anime: number;
+    uncategorized: number;
+  };
   lastIndexedAt: string | null;
   linkedServers: number;
   createdAt: string;
@@ -453,7 +459,7 @@ export class ProfileService {
     return {
       ...profileCustomization,
       catalogEnabled: Boolean(row.catalog_enabled),
-      catalogTmdbApiKey: profileCustomization.catalogTmdbApiKey,
+      catalogTmdbApiKey: profileCustomization.catalogTmdbApiKey || row.catalog_tmdb_api_key?.trim() || "",
       catalogContentTypes: catalogContentTypesFromRow(row),
       libraryLayout: row.library_layout || "auto",
       streamDeliveryMode: row.stream_delivery_mode || "proxy",
@@ -1449,6 +1455,7 @@ export class ProfileService {
     const linked = this.db.prepare("select count(*) as count from profile_ftp_servers where shared_index_group_id = ?").get(row.id) as {
       count: number;
     };
+    const catalogItemCounts = this.sharedIndexGroupCatalogItemCounts(row.id);
     return {
       id: row.id,
       keyHint: row.key_hint,
@@ -1464,11 +1471,34 @@ export class ProfileService {
       autoLinkImports: Boolean(row.auto_link_imports),
       masterProfileFtpServerId: row.master_profile_ftp_server_id,
       indexedMediaCount: row.indexed_media_count,
+      catalogItemCounts,
       lastIndexedAt: row.last_indexed_at,
       linkedServers: linked.count,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  private sharedIndexGroupCatalogItemCounts(groupId: number) {
+    const row = this.db
+      .prepare(
+        `
+        select
+          coalesce(sum(case when catalog_kind = 'movie' and categorized = 1 then 1 else 0 end), 0) as movies,
+          coalesce(sum(case when catalog_kind = 'series' and categorized = 1 then 1 else 0 end), 0) as series,
+          coalesce(sum(case when catalog_kind = 'anime' and categorized = 1 then 1 else 0 end), 0) as anime,
+          coalesce(sum(case when categorized = 0 then 1 else 0 end), 0) as uncategorized
+        from (
+          select
+            catalog_kind,
+            case when confidence > 70 or imdb_id is not null then 1 else 0 end as categorized
+          from shared_media_files
+          where shared_index_group_id = ?
+        )
+      `,
+      )
+      .get(groupId) as { movies: number; series: number; anime: number; uncategorized: number };
+    return row;
   }
 }
 

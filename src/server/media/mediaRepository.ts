@@ -565,31 +565,152 @@ export class MediaRepository {
       )
       .get(profileId, ...uniqueSharedIndexGroupIds) as { total: number };
 
+    const enriched = this.catalogEnrichmentCountsForProfileWithSharedIndexes(profileId, uniqueSharedIndexGroupIds);
+    const fallbackSharedIndexGroupIds = this.sharedIndexGroupIdsWithoutCatalogEnrichment(uniqueSharedIndexGroupIds);
+    const raw = this.rawAggregateCountsForProfileWithSharedIndexes(profileId, fallbackSharedIndexGroupIds);
+
+    return {
+      total: totalRow.total,
+      movies: enriched.movies + raw.movies,
+      series: enriched.series + raw.series,
+      anime: enriched.anime + raw.anime,
+      uncategorized: enriched.uncategorized + raw.uncategorized,
+    };
+  }
+
+  private catalogEnrichmentCountsForProfileWithSharedIndexes(profileId: number, sharedIndexGroupIds: number[]) {
+    const placeholders = sharedIndexGroupIds.map(() => "?").join(", ");
+    const row = this.db
+      .prepare(
+        `
+        with local_keys as (
+          select distinct mf.ftp_server_id, ${catalogEnrichmentSqlKey("mf")} as item_key
+          from media_files mf
+          left join profile_ftp_servers s on s.id = mf.ftp_server_id
+          where mf.profile_id = ?
+            and mf.parsed_title is not null
+            and (mf.ftp_server_id is null or s.shared_index_group_id is null)
+        ),
+        shared_keys as (
+          select distinct sm.shared_index_group_id, ${catalogEnrichmentSqlKey("sm")} as item_key
+          from shared_media_files sm
+          where sm.shared_index_group_id in (${placeholders})
+            and sm.parsed_title is not null
+        ),
+        enriched_sources as (
+          select ce.catalog_kind, ce.status, ce.meta_id, ce.item_key
+          from catalog_enrichment ce
+          join local_keys lk
+            on lk.ftp_server_id = ce.ftp_server_id
+           and lk.item_key = ce.item_key
+          where ce.profile_id = ?
+          union all
+          select ce.catalog_kind, ce.status, ce.meta_id, ce.item_key
+          from catalog_enrichment ce
+          join shared_index_groups g on g.master_profile_ftp_server_id = ce.ftp_server_id
+          join profile_ftp_servers master on master.id = g.master_profile_ftp_server_id and master.profile_id = ce.profile_id
+          join shared_keys sk
+            on sk.shared_index_group_id = g.id
+           and sk.item_key = ce.item_key
+          where g.id in (${placeholders})
+        )
+        select
+          count(distinct case when status = 'matched' and catalog_kind = 'movie' then coalesce(meta_id, item_key) end) as movies,
+          count(distinct case when status = 'matched' and catalog_kind = 'series' then coalesce(meta_id, item_key) end) as series,
+          count(distinct case when status = 'matched' and catalog_kind = 'anime' then coalesce(meta_id, item_key) end) as anime,
+          count(distinct case when status = 'unmatched' then item_key end) as uncategorized
+        from enriched_sources
+      `,
+      )
+      .get(profileId, ...sharedIndexGroupIds, profileId, ...sharedIndexGroupIds) as {
+      movies: number | null;
+      series: number | null;
+      anime: number | null;
+      uncategorized: number | null;
+    };
+
+    return {
+      movies: row.movies ?? 0,
+      series: row.series ?? 0,
+      anime: row.anime ?? 0,
+      uncategorized: row.uncategorized ?? 0,
+    };
+  }
+
+  private rawAggregateCountsForProfileWithSharedIndexes(profileId: number, sharedIndexGroupIds: number[]) {
+    const sources: string[] = [];
+    const params: Array<number> = [];
+    sources.push(`
+      select
+        mf.catalog_kind,
+        mf.imdb_id,
+        mf.parsed_title,
+        mf.parsed_year,
+        mf.confidence,
+        case
+          when mf.ftp_server_id is null then 1
+          when s.catalog_enabled = 1 and (s.catalog_content_movies = 1 or s.catalog_content_series = 1 or s.catalog_content_anime = 1) then 1
+          else 0
+        end as counts_uncategorized
+      from media_files mf
+      left join profile_ftp_servers s on s.id = mf.ftp_server_id
+      where mf.profile_id = ?
+        and mf.parsed_title is not null
+        and (mf.ftp_server_id is null or s.shared_index_group_id is null)
+        and (
+          mf.ftp_server_id is null
+          or not exists (
+            select 1
+            from catalog_enrichment ce
+            where ce.profile_id = mf.profile_id
+              and ce.ftp_server_id = mf.ftp_server_id
+          )
+        )
+    `);
+    params.push(profileId);
+    if (sharedIndexGroupIds.length) {
+      sources.push(`
+        select
+          sm.catalog_kind,
+          sm.imdb_id,
+          sm.parsed_title,
+          sm.parsed_year,
+          sm.confidence,
+          case
+            when master.catalog_enabled = 1 and (master.catalog_content_movies = 1 or master.catalog_content_series = 1 or master.catalog_content_anime = 1) then 1
+            else 0
+          end as counts_uncategorized
+        from shared_media_files sm
+        join shared_index_groups g on g.id = sm.shared_index_group_id
+        left join profile_ftp_servers master on master.id = g.master_profile_ftp_server_id
+        where sm.shared_index_group_id in (${sharedIndexGroupIds.map(() => "?").join(", ")})
+          and sm.parsed_title is not null
+      `);
+      params.push(...sharedIndexGroupIds);
+    }
+
     const counts = this.db
       .prepare(
         `
         with library_files as (
-          select mf.catalog_kind, mf.imdb_id, mf.parsed_title, mf.parsed_year, mf.confidence
-          from media_files mf
-          left join profile_ftp_servers s on s.id = mf.ftp_server_id
-          where mf.profile_id = ?
-            and (mf.ftp_server_id is null or s.shared_index_group_id is null)
-            and mf.parsed_title is not null
-          union all
-          select sm.catalog_kind, sm.imdb_id, sm.parsed_title, sm.parsed_year, sm.confidence
-          from shared_media_files sm
-          where sm.shared_index_group_id in (${placeholders})
-            and sm.parsed_title is not null
+          ${sources.join("\n          union all\n")}
         )
         select
-          sum(case when category = 'movie' and needs_review = 0 then 1 else 0 end) as movies,
-          sum(case when category = 'series' and needs_review = 0 then 1 else 0 end) as series,
-          sum(case when category = 'anime' and needs_review = 0 then 1 else 0 end) as anime,
+          sum(case when category = 'movie' and is_categorized = 1 and needs_review = 0 then 1 else 0 end) as movies,
+          sum(case when category = 'series' and is_categorized = 1 and needs_review = 0 then 1 else 0 end) as series,
+          sum(case when category = 'anime' and is_categorized = 1 and needs_review = 0 then 1 else 0 end) as anime,
           sum(case when needs_review = 1 then 1 else 0 end) as uncategorized
         from (
           select
             catalog_kind as category,
-            case when max(confidence) <= 70 and max(case when imdb_id is not null then 1 else 0 end) = 0 then 1 else 0 end as needs_review
+            case
+              when max(confidence) > 70 or max(case when imdb_id is not null then 1 else 0 end) = 1 then 1
+              else 0
+            end as is_categorized,
+            case
+              when max(counts_uncategorized) = 1 and max(confidence) <= 70 and max(case when imdb_id is not null then 1 else 0 end) = 0 then 1
+              else 0
+            end as needs_review
           from library_files
           group by
             catalog_kind,
@@ -601,15 +722,39 @@ export class MediaRepository {
         )
       `,
       )
-      .get(profileId, ...uniqueSharedIndexGroupIds) as { movies: number | null; series: number | null; anime: number | null; uncategorized: number | null };
+      .get(...params) as { movies: number | null; series: number | null; anime: number | null; uncategorized: number | null };
 
     return {
-      total: totalRow.total,
       movies: counts.movies ?? 0,
       series: counts.series ?? 0,
       anime: counts.anime ?? 0,
       uncategorized: counts.uncategorized ?? 0,
     };
+  }
+
+  private sharedIndexGroupIdsWithoutCatalogEnrichment(sharedIndexGroupIds: number[]) {
+    if (!sharedIndexGroupIds.length) return [];
+    const rows = this.db
+      .prepare(
+        `
+        with shared_keys as (
+          select distinct sm.shared_index_group_id, ${catalogEnrichmentSqlKey("sm")} as item_key
+          from shared_media_files sm
+          where sm.shared_index_group_id in (${sharedIndexGroupIds.map(() => "?").join(", ")})
+            and sm.parsed_title is not null
+        )
+        select g.id
+        from shared_index_groups g
+        left join catalog_enrichment ce
+          on ce.ftp_server_id = g.master_profile_ftp_server_id
+         and ce.item_key in (select item_key from shared_keys where shared_index_group_id = g.id)
+        where g.id in (${sharedIndexGroupIds.map(() => "?").join(", ")})
+        group by g.id
+        having count(ce.id) = 0
+      `,
+      )
+      .all(...sharedIndexGroupIds, ...sharedIndexGroupIds) as Array<{ id: number }>;
+    return rows.map((row) => row.id);
   }
 
   directorySnapshotMatchesModifiedAt(profileId: number, ftpServerId: number | null | undefined, dirPath: string, modifiedAt: string) {
@@ -921,6 +1066,52 @@ export class MediaRepository {
     return rows.map((row) => ({
       id: row.id,
       ftpServerId: row.ftp_server_id,
+      mediaKind: row.media_kind,
+      catalogKind: row.catalog_kind,
+      parsedTitle: row.parsed_title,
+      parsedYear: row.parsed_year,
+      imdbId: row.imdb_id,
+      itemKey: catalogEnrichmentKey(row.catalog_kind, row.parsed_title, row.parsed_year, row.imdb_id),
+    }));
+  }
+
+  sharedCatalogEnrichmentCandidates(
+    sharedIndexGroupId: number,
+    ftpServerId: number,
+    catalogKinds: Array<"movie" | "series" | "anime">,
+  ): CatalogEnrichmentCandidate[] {
+    if (!catalogKinds.length) return [];
+    const rows = this.db
+      .prepare(
+        `
+        select
+          min(sm.id) as id,
+          sm.media_kind,
+          sm.catalog_kind,
+          sm.parsed_title,
+          sm.parsed_year,
+          sm.imdb_id,
+          max(sm.confidence) as max_confidence
+        from shared_media_files sm
+        where sm.shared_index_group_id = ?
+          and sm.catalog_kind in (${catalogKinds.map(() => "?").join(", ")})
+          and sm.parsed_title is not null
+        group by sm.media_kind, sm.catalog_kind, sm.parsed_title, sm.parsed_year, sm.imdb_id
+        order by max_confidence desc, sm.parsed_title asc
+      `,
+      )
+      .all(sharedIndexGroupId, ...catalogKinds) as Array<{
+      id: number;
+      media_kind: "movie" | "series";
+      catalog_kind: "movie" | "series" | "anime";
+      parsed_title: string;
+      parsed_year: number | null;
+      imdb_id: string | null;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      ftpServerId,
       mediaKind: row.media_kind,
       catalogKind: row.catalog_kind,
       parsedTitle: row.parsed_title,

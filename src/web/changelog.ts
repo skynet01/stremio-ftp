@@ -1,4 +1,7 @@
 export const APP_CHANGELOG = [
+  { date: "2026-05-19", hash: "v0.4.43", subject: "feat: master index groups with linked server management" },
+  { date: "2026-05-19", hash: "v0.4.43", subject: "feat: warm proxy playback connections for faster stream starts" },
+  { date: "2026-05-19", hash: "v0.4.43", subject: "ui: refine shared index group stats and admin scrollbars" },
   { date: "2026-05-11", hash: "41cf1f5", subject: "feat: settings export decrypts passwords; Save & Generate; delete profile; manifest-gated Ready badge" },
   { date: "2026-05-11", hash: "c1d8adf", subject: "feat: persisted draft servers ignored during scans; align strip-creds toggle" },
   { date: "2026-05-11", hash: "9a98c81", subject: "fix: preserve imported host/port for partial-credential servers" },

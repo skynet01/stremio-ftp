@@ -13,7 +13,7 @@ function createProfile(db: Database.Database) {
   );
 }
 
-function createServer(db: Database.Database, profileId: number) {
+function createServer(db: Database.Database, profileId: number, options: { catalogEnabled?: boolean; movies?: boolean; series?: boolean; anime?: boolean } = {}) {
   return Number(
     db
       .prepare(
@@ -21,11 +21,36 @@ function createServer(db: Database.Database, profileId: number) {
         insert into profile_ftp_servers (
           profile_id, name, catalog_enabled, catalog_content_movies, catalog_content_series,
           catalog_content_anime, library_layout, stream_delivery_mode, created_at, updated_at
-        ) values (?, 'Server 1', 1, 1, 1, 0, 'auto', 'proxy', 'n', 'n')
+        ) values (?, 'Server 1', ?, ?, ?, ?, 'auto', 'proxy', 'n', 'n')
       `,
       )
-      .run(profileId).lastInsertRowid,
+      .run(
+        profileId,
+        options.catalogEnabled === false ? 0 : 1,
+        options.movies === false ? 0 : 1,
+        options.series === false ? 0 : 1,
+        options.anime === true ? 1 : 0,
+      ).lastInsertRowid,
   );
+}
+
+function createSharedGroup(db: Database.Database, serverId: number, suffix: string) {
+  const groupId = Number(
+    db
+      .prepare(
+        `
+        insert into shared_index_groups (
+          key_hint, name, shared_index_key_hash, host, port, tls_mode, allow_invalid_certificate,
+          root_paths_json, library_layout, catalog_content_json, enabled, auto_link_imports,
+          master_profile_ftp_server_id, created_at, updated_at
+        ) values (?, ?, ?, 'ftp.example.test', 21, 'none', 0, '["/"]', 'auto', ?, 1, 1, ?, 'n', 'n')
+      `,
+      )
+      .run(`shared-${suffix}`, `Shared ${suffix}`, `hash-${suffix}`, JSON.stringify({ movies: true, series: true, anime: true, uncategorized: true }), serverId)
+      .lastInsertRowid,
+  );
+  db.prepare("update profile_ftp_servers set shared_index_group_id = ? where id = ?").run(groupId, serverId);
+  return groupId;
 }
 
 describe("MediaRepository", () => {
@@ -221,6 +246,221 @@ describe("MediaRepository", () => {
     repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), "2026-05-05T00:00:00.000Z");
 
     expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-05-05T00:00:00.000Z", 10).map((item) => item.parsedTitle)).toEqual(["home video"]);
+  });
+
+  it("uses shared master enrichment for linked shared index catalog counts", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const groupId = createSharedGroup(db, serverId, "main");
+    const repo = new MediaRepository(db);
+
+    for (const file of [
+      { ftpPath: "/Movies/The.Matrix.1999.1080p.mkv", title: "matrix", year: 1999 },
+      { ftpPath: "/Movies/The.Matrix.1999.2160p.mkv", title: "matrix", year: 1999 },
+      { ftpPath: "/Other/Home.Video.2024.mp4", title: "home video", year: 2024 },
+    ]) {
+      repo.upsertSharedParsedFile(groupId, {
+        ftpPath: file.ftpPath,
+        filename: file.ftpPath.split("/").at(-1) ?? "",
+        normalizedFilename: file.title,
+        extension: file.ftpPath.endsWith(".mp4") ? "mp4" : "mkv",
+        mediaKind: "movie",
+        catalogKind: "movie",
+        parsedTitle: file.title,
+        parsedYear: file.year,
+        season: null,
+        episode: null,
+        imdbId: null,
+        quality: null,
+        confidence: 70,
+      });
+    }
+
+    const seenAt = "2026-05-04T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.sharedCatalogEnrichmentCandidates(groupId, serverId, ["movie"]), seenAt);
+    const pending = repo.pendingCatalogEnrichment(profileId, serverId, seenAt, 10);
+    repo.saveCatalogEnrichmentMatch(pending.find((item) => item.parsedTitle === "matrix")!.id, { id: "tt0133093", type: "movie", name: "The Matrix" }, seenAt);
+    repo.saveCatalogEnrichmentUnmatched(pending.find((item) => item.parsedTitle === "home video")!.id, seenAt);
+
+    expect(repo.aggregateCountsForProfileWithSharedIndexes(profileId, [groupId])).toEqual({
+      total: 3,
+      movies: 1,
+      series: 0,
+      anime: 0,
+      uncategorized: 1,
+    });
+  });
+
+  it("falls back to parser counts for shared indexes that have no enrichment yet", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const enrichedServerId = createServer(db, profileId);
+    const enrichedGroupId = createSharedGroup(db, enrichedServerId, "enriched");
+    const rawServerId = createServer(db, profileId);
+    const rawGroupId = createSharedGroup(db, rawServerId, "raw");
+    const repo = new MediaRepository(db);
+
+    repo.upsertSharedParsedFile(enrichedGroupId, {
+      ftpPath: "/Movies/The.Matrix.1999.mkv",
+      filename: "The.Matrix.1999.mkv",
+      normalizedFilename: "matrix",
+      extension: "mkv",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "matrix",
+      parsedYear: 1999,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: null,
+      confidence: 70,
+    });
+    repo.upsertSharedParsedFile(rawGroupId, {
+      ftpPath: "/Movies/Shared.Movie.2020.mkv",
+      filename: "Shared.Movie.2020.mkv",
+      normalizedFilename: "shared movie",
+      extension: "mkv",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "shared movie",
+      parsedYear: 2020,
+      season: null,
+      episode: null,
+      imdbId: "tt1234567",
+      quality: null,
+      confidence: 90,
+    });
+
+    const seenAt = "2026-05-04T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(
+      profileId,
+      enrichedServerId,
+      repo.sharedCatalogEnrichmentCandidates(enrichedGroupId, enrichedServerId, ["movie"]),
+      seenAt,
+    );
+    const [candidate] = repo.pendingCatalogEnrichment(profileId, enrichedServerId, seenAt, 10);
+    repo.saveCatalogEnrichmentMatch(candidate.id, { id: "tt0133093", type: "movie", name: "The Matrix" }, seenAt);
+
+    expect(repo.aggregateCountsForProfileWithSharedIndexes(profileId, [enrichedGroupId, rawGroupId])).toEqual({
+      total: 2,
+      movies: 2,
+      series: 0,
+      anime: 0,
+      uncategorized: 0,
+    });
+  });
+
+  it("does not count uncategorized-only shared indexes as unresolved fallback", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const catalogServerId = createServer(db, profileId);
+    const catalogGroupId = createSharedGroup(db, catalogServerId, "catalog");
+    const otherServerId = createServer(db, profileId, { movies: false, series: false, anime: false });
+    const otherGroupId = createSharedGroup(db, otherServerId, "other");
+    const repo = new MediaRepository(db);
+
+    repo.upsertSharedParsedFile(catalogGroupId, {
+      ftpPath: "/Movies/The.Matrix.1999.mkv",
+      filename: "The.Matrix.1999.mkv",
+      normalizedFilename: "matrix",
+      extension: "mkv",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "matrix",
+      parsedYear: 1999,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: null,
+      confidence: 70,
+    });
+    repo.upsertSharedParsedFile(otherGroupId, {
+      ftpPath: "/Adult/Clip.2024.mp4",
+      filename: "Clip.2024.mp4",
+      normalizedFilename: "clip",
+      extension: "mp4",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "clip",
+      parsedYear: 2024,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: null,
+      confidence: 70,
+    });
+
+    const seenAt = "2026-05-04T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(profileId, catalogServerId, repo.sharedCatalogEnrichmentCandidates(catalogGroupId, catalogServerId, ["movie"]), seenAt);
+    const [candidate] = repo.pendingCatalogEnrichment(profileId, catalogServerId, seenAt, 10);
+    repo.saveCatalogEnrichmentUnmatched(candidate.id, seenAt);
+
+    expect(repo.aggregateCountsForProfileWithSharedIndexes(profileId, [catalogGroupId, otherGroupId])).toEqual({
+      total: 2,
+      movies: 0,
+      series: 0,
+      anime: 0,
+      uncategorized: 1,
+    });
+  });
+
+  it("combines enriched shared counts with raw fallback for unenriched unlinked servers", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const sharedServerId = createServer(db, profileId);
+    const sharedGroupId = createSharedGroup(db, sharedServerId, "shared");
+    const localServerId = createServer(db, profileId);
+    const repo = new MediaRepository(db);
+
+    repo.upsertSharedParsedFile(sharedGroupId, {
+      ftpPath: "/Movies/The.Matrix.1999.mkv",
+      filename: "The.Matrix.1999.mkv",
+      normalizedFilename: "matrix",
+      extension: "mkv",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "matrix",
+      parsedYear: 1999,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: null,
+      confidence: 70,
+    });
+    repo.upsertParsedFile(profileId, {
+      ftpServerId: localServerId,
+      ftpPath: "/Movies/Local.Movie.2020.mkv",
+      filename: "Local.Movie.2020.mkv",
+      normalizedFilename: "local movie",
+      extension: "mkv",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "local movie",
+      parsedYear: 2020,
+      season: null,
+      episode: null,
+      imdbId: "tt1234567",
+      quality: null,
+      confidence: 90,
+    });
+
+    const seenAt = "2026-05-04T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(profileId, sharedServerId, repo.sharedCatalogEnrichmentCandidates(sharedGroupId, sharedServerId, ["movie"]), seenAt);
+    const [candidate] = repo.pendingCatalogEnrichment(profileId, sharedServerId, seenAt, 10);
+    repo.saveCatalogEnrichmentMatch(candidate.id, { id: "tt0133093", type: "movie", name: "The Matrix" }, seenAt);
+
+    expect(repo.aggregateCountsForProfileWithSharedIndexes(profileId, [sharedGroupId])).toEqual({
+      total: 2,
+      movies: 2,
+      series: 0,
+      anime: 0,
+      uncategorized: 0,
+    });
   });
 
   it("serves movie fallback enrichment from the movie catalog and movie stream lookup", () => {

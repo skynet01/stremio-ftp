@@ -25,6 +25,28 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-color: rgba(168, 224, 99, 0.55) rgba(255, 255, 255, 0.045);
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid var(--panel);
+  border-radius: 999px;
+  background: rgba(168, 224, 99, 0.55);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 224, 99, 0.78);
 }
 
 html {
@@ -1267,11 +1289,16 @@ input:-webkit-autofill:active {
   flex-wrap: wrap;
 }
 
+.admin-shared-top-actions .danger-button {
+  order: 1;
+}
+
 .admin-tag-toggle {
+  order: 3;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 30px;
+  height: 30px;
   border-radius: 999px;
   border: 1px solid currentColor;
   padding: 0 10px;
@@ -1279,6 +1306,7 @@ input:-webkit-autofill:active {
   font-size: 0.58rem;
   font-weight: 700;
   letter-spacing: 0.12em;
+  line-height: 1;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -1294,27 +1322,30 @@ input:-webkit-autofill:active {
 }
 
 .admin-linked-count-button {
+  order: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 30px;
-  border: 1px solid rgba(116, 210, 255, 0.24);
-  border-radius: 999px;
-  padding: 0 10px;
-  color: var(--accent);
-  background: rgba(116, 210, 255, 0.075);
+  min-width: 28px;
+  height: 30px;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--amber);
+  background: transparent;
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.58rem;
+  font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1;
   white-space: nowrap;
 }
 
 .admin-linked-count-button:hover,
 .admin-linked-count-button:focus-visible {
-  border-color: rgba(116, 210, 255, 0.48);
   color: var(--cream);
+  background: rgba(242, 184, 75, 0.08);
+  box-shadow: 0 0 0 1px rgba(242, 184, 75, 0.18) inset;
 }
 
 .admin-icon-toggle.is-on {
@@ -1368,7 +1399,7 @@ input:-webkit-autofill:active {
 
 .admin-shared-content-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1672,6 +1703,16 @@ input:-webkit-autofill:active {
 .admin-bulk-link-dialog,
 .admin-linked-servers-dialog {
   width: min(720px, 100%);
+}
+
+.admin-linked-servers-dialog {
+  max-height: none;
+  overflow: visible;
+}
+
+.admin-linked-servers-dialog .admin-server-dialog-table-wrap {
+  max-height: none;
+  overflow: visible;
 }
 
 .admin-create-shared-dialog {

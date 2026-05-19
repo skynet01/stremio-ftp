@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import type { FtpClient, FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { MediaRepository } from "../media/mediaRepository.js";
 import type { FtpConfig } from "../profiles/profileService.js";
@@ -9,6 +10,12 @@ const WARM_CLIENT_TTL_MS = 10_000;
 type WarmClient = {
   promise: Promise<FtpClient>;
   timeout: NodeJS.Timeout;
+};
+
+type OpenFtpClientResult = {
+  client: FtpClient;
+  warmed: boolean;
+  clientReadyMs: number;
 };
 
 export function createFtpProxyResolver(
@@ -48,7 +55,8 @@ export function createFtpProxyResolver(
         warmFtpClient(warmClients, warmKey, ftpConfig, ftpClientFactory);
       },
       openReadStream: async ({ start, end, signal }: { start: number; end: number; signal?: AbortSignal }) => {
-        const client = await openFtpClient(warmClients, warmKey, ftpConfig, ftpClientFactory);
+        const openStartedAt = performance.now();
+        const { client, warmed, clientReadyMs } = await openFtpClient(warmClients, warmKey, ftpConfig, ftpClientFactory);
         let closeRequested = false;
         const closeClient = () => {
           closeRequested = true;
@@ -57,7 +65,21 @@ export function createFtpProxyResolver(
         signal?.addEventListener("abort", closeClient, { once: true });
         try {
           if (signal?.aborted) throw new Error("Proxy request aborted");
+          const streamStartedAt = performance.now();
           const stream = await client.openReadStream(file.ftpPath, { start, end });
+          logFtpProxyTiming("stream_opened", {
+            warmed,
+            clientReadyMs,
+            streamOpenMs: elapsedMs(streamStartedAt),
+            totalOpenMs: elapsedMs(openStartedAt),
+            profileId,
+            serverId: file.ftpServerId,
+            host: ftpConfig.host,
+            port: ftpConfig.port,
+            tlsMode: ftpConfig.tlsMode,
+            rangeStart: start,
+            rangeEnd: end === Number.MAX_SAFE_INTEGER ? null : end,
+          });
           signal?.removeEventListener("abort", closeClient);
           if (signal?.aborted) {
             destroyStream(stream);
@@ -69,6 +91,16 @@ export function createFtpProxyResolver(
           signal?.removeEventListener("abort", closeClient);
           if (!closeRequested) await client.close();
           if (signal?.aborted) throw new Error("Proxy request aborted");
+          logFtpProxyTiming("stream_open_failed", {
+            warmed,
+            clientReadyMs,
+            totalOpenMs: elapsedMs(openStartedAt),
+            profileId,
+            serverId: file.ftpServerId,
+            host: ftpConfig.host,
+            port: ftpConfig.port,
+            tlsMode: ftpConfig.tlsMode,
+          });
           throw error;
         }
       },
@@ -81,14 +113,18 @@ async function openFtpClient(
   warmKey: string,
   ftpConfig: FtpConfig,
   ftpClientFactory: FtpClientFactory,
-) {
+): Promise<OpenFtpClientResult> {
+  const startedAt = performance.now();
   const warmClient = takeWarmFtpClient(warmClients, warmKey);
-  if (!warmClient) return ftpClientFactory(ftpConfig);
+  if (!warmClient) {
+    return { client: await ftpClientFactory(ftpConfig), warmed: false, clientReadyMs: elapsedMs(startedAt) };
+  }
 
   try {
-    return await warmClient;
+    return { client: await warmClient, warmed: true, clientReadyMs: elapsedMs(startedAt) };
   } catch {
-    return ftpClientFactory(ftpConfig);
+    const fallbackStartedAt = performance.now();
+    return { client: await ftpClientFactory(ftpConfig), warmed: false, clientReadyMs: elapsedMs(fallbackStartedAt) };
   }
 }
 
@@ -100,7 +136,25 @@ function warmFtpClient(
 ) {
   if (warmClients.has(warmKey)) return;
 
+  const startedAt = performance.now();
   const promise = ftpClientFactory(ftpConfig);
+  void promise
+    .then(() => {
+      logFtpProxyTiming("warm_ready", {
+        warmMs: elapsedMs(startedAt),
+        host: ftpConfig.host,
+        port: ftpConfig.port,
+        tlsMode: ftpConfig.tlsMode,
+      });
+    })
+    .catch(() => {
+      logFtpProxyTiming("warm_failed", {
+        warmMs: elapsedMs(startedAt),
+        host: ftpConfig.host,
+        port: ftpConfig.port,
+        tlsMode: ftpConfig.tlsMode,
+      });
+    });
   const timeout = setTimeout(() => {
     warmClients.delete(warmKey);
     void promise.then((client) => client.close()).catch(() => undefined);
@@ -143,4 +197,12 @@ function destroyStream(stream: NodeJS.ReadableStream) {
   if ("destroy" in stream && typeof stream.destroy === "function") {
     stream.destroy();
   }
+}
+
+function logFtpProxyTiming(event: string, payload: Record<string, unknown>) {
+  console.info("[proxy-ftp-timing]", JSON.stringify({ event, ...payload }));
+}
+
+function elapsedMs(startedAt: number) {
+  return Math.round((performance.now() - startedAt) * 10) / 10;
 }

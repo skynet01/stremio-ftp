@@ -379,6 +379,14 @@ export class ScanQueue {
     const mediaItems = this.mediaRepository.countForSharedIndexGroup(sharedIndexGroupId);
     const mediaItemsAdded = Math.max(0, mediaItems - initialMediaItems);
     this.profileService.saveSharedIndexStatus(sharedIndexGroupId, { lastScanAt, mediaItems });
+    const enrichment = await this.enrichSharedCatalogMetadata(
+      jobId,
+      scanConfig.profileId,
+      scanConfig.serverId,
+      sharedIndexGroupId,
+      lastScanAt,
+      signal,
+    );
     this.db
       .prepare(
         `
@@ -393,7 +401,7 @@ export class ScanQueue {
         where id = ?
       `,
       )
-      .run(filesSeen, mediaItemsAdded, scanFinishedMessage(filesSeen, null), lastScanAt, jobId);
+      .run(filesSeen, mediaItemsAdded, scanFinishedMessage(filesSeen, enrichment), lastScanAt, jobId);
   }
 
   private async runJob(jobId: number, profileId: number, ftpServerId: number, scanMode: ScanMode, signal: AbortSignal) {
@@ -472,6 +480,54 @@ export class ScanQueue {
     if (!catalogKinds.length) return null;
 
     const candidates = this.mediaRepository.catalogEnrichmentCandidates(profileId, ftpServerId, catalogKinds);
+    this.mediaRepository.syncCatalogEnrichmentCandidates(profileId, ftpServerId, candidates, seenAt);
+    const pending = this.mediaRepository.pendingCatalogEnrichment(profileId, ftpServerId, new Date().toISOString(), ENRICHMENT_BATCH_LIMIT);
+    if (!pending.length) return this.mediaRepository.catalogEnrichmentStats(profileId, ftpServerId);
+
+    const apiKey = customization.catalogTmdbApiKey?.trim() || this.config.tmdbApiKey;
+    const total = pending.length;
+    let processed = 0;
+    let retryCount = 0;
+
+    this.saveEnrichmentProgress(jobId, processed, total, null);
+    for (const candidate of pending) {
+      throwIfScanCancelled(signal);
+      const result = await tmdbCatalogEnrichment(candidate, apiKey, candidate.catalogKind);
+      const now = new Date().toISOString();
+      if (result.status === "matched") {
+        this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
+      } else if (result.status === "unmatched") {
+        this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
+      } else {
+        retryCount += 1;
+        const nextAttemptAt = new Date(Date.now() + ENRICHMENT_RETRY_DELAY_MS).toISOString();
+        this.mediaRepository.saveCatalogEnrichmentRetry(candidate.id, result.error, nextAttemptAt, now);
+      }
+      processed += 1;
+      this.saveEnrichmentProgress(jobId, processed, total, candidate);
+    }
+
+    if (retryCount > 0) {
+      this.profileService.schedulePendingScan(profileId, ftpServerId, new Date(Date.now() + ENRICHMENT_RETRY_DELAY_MS).toISOString());
+    }
+    return this.mediaRepository.catalogEnrichmentStats(profileId, ftpServerId);
+  }
+
+  private async enrichSharedCatalogMetadata(
+    jobId: number,
+    profileId: number,
+    ftpServerId: number,
+    sharedIndexGroupId: number,
+    seenAt: string,
+    signal: AbortSignal,
+  ) {
+    const customization = this.profileService.getFtpServerCustomization(profileId, ftpServerId);
+    if (!customization.catalogEnabled) return null;
+
+    const catalogKinds = enabledCatalogKinds(customization.catalogContentTypes);
+    if (!catalogKinds.length) return null;
+
+    const candidates = this.mediaRepository.sharedCatalogEnrichmentCandidates(sharedIndexGroupId, ftpServerId, catalogKinds);
     this.mediaRepository.syncCatalogEnrichmentCandidates(profileId, ftpServerId, candidates, seenAt);
     const pending = this.mediaRepository.pendingCatalogEnrichment(profileId, ftpServerId, new Date().toISOString(), ENRICHMENT_BATCH_LIMIT);
     if (!pending.length) return this.mediaRepository.catalogEnrichmentStats(profileId, ftpServerId);

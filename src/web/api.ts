@@ -346,6 +346,12 @@ export type AdminSharedIndexGroup = {
   autoLinkImports: boolean;
   masterProfileFtpServerId: number | null;
   indexedMediaCount: number;
+  catalogItemCounts: {
+    movies: number;
+    series: number;
+    anime: number;
+    uncategorized: number;
+  };
   lastIndexedAt: string | null;
   linkedServerCount: number;
   createdAt: string;

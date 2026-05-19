@@ -162,7 +162,7 @@ describe("ScanQueue", () => {
   });
 
   it("runs shared index scans through the same queue and writes shared media", async () => {
-    const { profileService, mediaRepository, queue } = createHarness(async () => ({
+    const { db, profileService, mediaRepository, queue } = createHarness(async () => ({
       list: async () => [{ name: "Shared.Movie.2020.mkv", path: "/Shared.Movie.2020.mkv", type: "file", size: 1000 }],
       openReadStream: async () => Readable.from("not used"),
       close: async () => undefined,
@@ -179,7 +179,9 @@ describe("ScanQueue", () => {
     expect(["queued", "running"]).toContain(queued.status);
     const finished = await waitForSharedStatus(queue, group.id, "succeeded");
     expect(finished.mediaItems).toBe(1);
+    expect(finished.message).toBe("Indexed 1 media file.");
     expect(mediaRepository.countForSharedIndexGroup(group.id)).toBe(1);
+    expect(db.prepare("select count(*) as count from catalog_enrichment").get()).toEqual({ count: 0 });
     expect(profileService.getSharedIndexGroup(group.id)?.indexedMediaCount).toBe(1);
   });
 

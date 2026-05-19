@@ -45,6 +45,26 @@ describe("ProfileService", () => {
     expect(service.getFtpConfig(created.profileId)?.host).toBe("ftp.example.test");
   });
 
+  it("uses profile TMDB keys before server TMDB keys", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, key);
+    const created = await service.createProfile("browser-uid", "passphrase");
+    const serverId = service.defaultFtpServerId(created.profileId);
+
+    service.saveFtpServerCustomization(created.profileId, serverId, {
+      catalogEnabled: true,
+      catalogTmdbApiKey: "server-key",
+      catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+    });
+
+    expect(service.getFtpServerCustomization(created.profileId, serverId).catalogTmdbApiKey).toBe("server-key");
+
+    db.prepare("update profiles set catalog_tmdb_api_key = ? where id = ?").run("profile-key", created.profileId);
+
+    expect(service.getFtpServerCustomization(created.profileId, serverId).catalogTmdbApiKey).toBe("profile-key");
+  });
+
   it("throws when saving ftp config for a missing profile", () => {
     const db = new Database(":memory:");
     migrate(db);

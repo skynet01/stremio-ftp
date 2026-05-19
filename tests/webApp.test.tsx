@@ -287,7 +287,7 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Movies")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.41`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.43`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
@@ -1579,6 +1579,7 @@ describe("App", () => {
       autoLinkImports: true,
       masterProfileFtpServerId: 9,
       indexedMediaCount: 1200,
+      catalogItemCounts: { movies: 640, anime: 45, series: 390, uncategorized: 125 },
       lastIndexedAt: "2026-05-16T00:00:00.000Z",
       linkedServerCount: 12,
       createdAt: "2026-05-16T00:00:00.000Z",
@@ -1633,9 +1634,11 @@ describe("App", () => {
     await screen.findByRole("heading", { name: "Admin dashboard" });
     await screen.findByRole("heading", { name: "Shared index groups" });
     expect(screen.getByText("Sputnik Main")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Show linked servers for Sputnik Main" })).toHaveTextContent("Linked 12");
+    expect(screen.getByRole("button", { name: "Show linked servers for Sputnik Main" })).toHaveTextContent("12");
     expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("Movie");
-    expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("Uncategorized");
+    expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("640");
+    expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("Other");
+    expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("125");
     expect(screen.getAllByText("Master").length).toBeGreaterThan(0);
     expect(screen.getByText("bf1f80d7-4971-4 / Server 1")).toBeTruthy();
     expect(screen.queryByRole("columnheader", { name: "Manifest" })).toBeNull();
@@ -1816,6 +1819,7 @@ describe("App", () => {
       autoLinkImports: true,
       masterProfileFtpServerId: 9,
       indexedMediaCount: 1200,
+      catalogItemCounts: { movies: 640, anime: 45, series: 390, uncategorized: 125 },
       lastIndexedAt: "2026-05-16T00:00:00.000Z",
       linkedServerCount: 12,
       createdAt: "2026-05-16T00:00:00.000Z",
