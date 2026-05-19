@@ -6,6 +6,7 @@ import { parseRangeHeader } from "./range.js";
 type ProxyFile = {
   filename: string;
   sizeBytes: number | null;
+  warmReadStream?: () => void;
   openReadStream(input: { start: number; end: number; signal?: AbortSignal }): Promise<NodeJS.ReadableStream>;
 };
 
@@ -76,6 +77,7 @@ async function handleProxyRequest(deps: ProxyDeps, req: Request, res: Response, 
   }
 
   if (headOnly) {
+    file.warmReadStream?.();
     res.end();
     return;
   }

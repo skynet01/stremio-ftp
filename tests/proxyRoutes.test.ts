@@ -57,6 +57,27 @@ describe("proxy routes", () => {
     expect(response.headers["content-type"]).toBe("video/mp4");
   });
 
+  it("warms the stream on HEAD without opening playback", async () => {
+    const warmReadStream = vi.fn();
+    const openReadStream = vi.fn();
+    const router = createProxyRouter({
+      resolve: async () => ({
+        filename: "video.mkv",
+        sizeBytes: 10,
+        warmReadStream,
+        openReadStream,
+      }),
+    });
+
+    const express = (await import("express")).default;
+    const app = express().use(router);
+
+    await request(app).head("/proxy/token/1").expect(200);
+
+    expect(warmReadStream).toHaveBeenCalledTimes(1);
+    expect(openReadStream).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid file ids before calling the resolver", async () => {
     const resolve = vi.fn();
     const router = createProxyRouter({ resolve });
