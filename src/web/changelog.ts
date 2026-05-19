@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { date: "2026-05-19", hash: "v0.4.44", subject: "fix: warm proxy playback connections and limit FTP sessions per credential" },
   { date: "2026-05-11", hash: "41cf1f5", subject: "feat: settings export decrypts passwords; Save & Generate; delete profile; manifest-gated Ready badge" },
   { date: "2026-05-11", hash: "c1d8adf", subject: "feat: persisted draft servers ignored during scans; align strip-creds toggle" },
   { date: "2026-05-11", hash: "9a98c81", subject: "fix: preserve imported host/port for partial-credential servers" },

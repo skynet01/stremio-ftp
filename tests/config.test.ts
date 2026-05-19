@@ -18,7 +18,7 @@ describe("loadConfig", () => {
     expect(config.logLevel).toBe("debug");
     expect(config.sqlitePath).toBe("/tmp/stremio-ftp-test/stremio-ftp.sqlite");
     expect(config.maxOnDemandSearchMs).toBe(4500);
-    expect(config.ftpMaxConnections).toBe(4);
+    expect(config.ftpMaxConnections).toBe(3);
     expect(config.scanGlobalConcurrency).toBe(2);
     expect(config.scanQueueMax).toBe(50);
     expect(config.scanCooldownMs).toBe(900000);

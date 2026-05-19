@@ -78,7 +78,7 @@ TMDB_API_KEY=optional-tmdb-api-key-for-catalog-metadata
 LOG_LEVEL=info
 CRAWLER_CONCURRENCY=2
 FTP_TIMEOUT_MS=15000
-FTP_MAX_CONNECTIONS=4
+FTP_MAX_CONNECTIONS=3
 MAX_ON_DEMAND_SEARCH_MS=4500
 PROFILE_RATE_LIMIT_WINDOW_MS=600000
 PROFILE_RATE_LIMIT_MAX=20
@@ -106,7 +106,7 @@ Notes:
 - `ALLOW_PUBLIC_PROFILE_API=true` preserves the older no-token behavior for trusted or otherwise restricted deployments. If enabled, anyone who can reach the hosted addon can create profiles and submit FTP settings.
 - `TMDB_API_KEY` is optional. Set it if users will enable the FTP catalog option and you want posters, backdrops, descriptions, and release years from TMDB. Users can override it per profile in the portal.
 - SQLite is stored at `$CONFIG_DIR/stremio-ftp.sqlite`.
-- `FTP_MAX_CONNECTIONS` limits simultaneous FTP sessions shared by portal tests, scans, and proxied playback. Lower it for hosts with strict connection caps.
+- `FTP_MAX_CONNECTIONS` limits simultaneous FTP sessions per distinct FTP credential key. Lower it for hosts with strict connection caps.
 - `PROFILE_RATE_LIMIT_MAX` limits profile create/unlock attempts per client IP per rate-limit window.
 - `SCAN_GLOBAL_CONCURRENCY` limits simultaneous FTP scans across the whole instance. Default `2` is sized for public instances where the average catalog is around 2,000 media files.
 - `SCAN_QUEUE_MAX` limits queued scans waiting for workers. Default `50`.
@@ -136,7 +136,7 @@ CONFIG_DIR=/config
 LOG_LEVEL=info
 CRAWLER_CONCURRENCY=2
 FTP_TIMEOUT_MS=15000
-FTP_MAX_CONNECTIONS=4
+FTP_MAX_CONNECTIONS=3
 MAX_ON_DEMAND_SEARCH_MS=4500
 PROFILE_RATE_LIMIT_WINDOW_MS=600000
 PROFILE_RATE_LIMIT_MAX=20

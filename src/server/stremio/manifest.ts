@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization } from "../profiles/profileService.js";
 
-const ADDON_VERSION = "0.4.40";
+const ADDON_VERSION = "0.4.44";
 const ADDON_ID = "community.stremio-ftp";
 const SEARCHABLE_CATALOG_EXTRAS = [{ name: "skip" }, { name: "search" }];
 
