@@ -905,6 +905,10 @@ function configuredServerDetails(profile: AdminProfileSummary) {
   return (profile.ftpServerDetails ?? []).filter((server) => server.host);
 }
 
+function sharedGroupExistsForServer(groups: AdminSharedIndexGroup[], profileId: number, serverId: number) {
+  return groups.some((group) => group.masterServer?.profileId === profileId && group.masterServer.serverId === serverId);
+}
+
 function serverLinkedStatus(server: AdminServerDetail) {
   if (!server.sharedIndex) return "Unlinked";
   return server.sharedIndex.autoLinked ? "Auto-L" : "Linked";
@@ -1247,6 +1251,7 @@ function ProfileServersDialog({
                 const key = serverSelectionKey(profile.id, server.id);
                 const status = serverLinkedStatus(server);
                 const linkedGroupId = server.sharedIndex?.id ?? null;
+                const hasCreatedGroup = sharedGroupExistsForServer(groups, profile.id, server.id);
                 return (
                   <tr key={server.id}>
                     <td data-label="Server">
@@ -1283,10 +1288,12 @@ function ProfileServersDialog({
                           <button type="button" className="secondary-button" disabled={busy || !groups.length} onClick={() => onLink(profile.id, server.id)}>
                             Link
                           </button>
-                          <button type="button" className="secondary-button" disabled={busy || !server.host} onClick={() => onCreateGroup(profile, server)}>
-                            <KeyRound size={15} aria-hidden="true" />
-                            Create group
-                          </button>
+                          {!hasCreatedGroup ? (
+                            <button type="button" className="secondary-button" disabled={busy || !server.host} onClick={() => onCreateGroup(profile, server)}>
+                              <KeyRound size={15} aria-hidden="true" />
+                              Create group
+                            </button>
+                          ) : null}
                         </div>
                       )}
                     </td>

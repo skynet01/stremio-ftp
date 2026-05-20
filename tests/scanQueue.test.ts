@@ -328,6 +328,29 @@ describe("ScanQueue", () => {
     expect(server.pendingScanAfter).toEqual(expect.any(String));
   });
 
+  it("schedules a delayed retry for transient shared index disconnects", async () => {
+    const { profileService, queue } = createHarness(async () => ({
+      list: async () => {
+        throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+      },
+      openReadStream: async () => Readable.from("not used"),
+      close: async () => undefined,
+    }));
+    const profileId = await createProfileWithFtp(profileService);
+    const serverId = profileService.defaultFtpServerId(profileId);
+    const group = profileService.createSharedIndexGroupFromServer(profileId, serverId, {
+      name: "Shared Main",
+      keyHint: "shared-main",
+    }).group;
+
+    queue.enqueueSharedIndexScan(group.id, "manual");
+    const failed = await waitForSharedStatus(queue, group.id, "failed");
+    const server = profileService.getFtpServer(profileId, serverId);
+
+    expect(failed.message).toBe("Shared scan failed: Server sent FIN packet unexpectedly, closing connection. Requeued to rescan in 1m.");
+    expect(server.pendingScanAfter).toEqual(expect.any(String));
+  });
+
   it("uses the previous successful scan size as the repeated scan progress baseline", async () => {
     const releaseNestedList = deferred<Array<{ name: string; path: string; type: "file"; size: number }>>();
     const { db, profileService, queue } = createHarness(

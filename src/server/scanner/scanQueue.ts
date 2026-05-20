@@ -334,8 +334,11 @@ export class ScanQueue {
           return;
         }
         const message = error instanceof Error ? error.message : "Unable to refresh FTP index";
-        if (row.target_kind === "shared_group" && row.shared_index_group_id) this.failSharedJob(row.id, message);
-        else this.failJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), message);
+        if (row.target_kind === "shared_group" && row.shared_index_group_id) {
+          this.failSharedJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), message);
+        } else {
+          this.failJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), message);
+        }
       })
       .finally(() => {
         this.activeControllers.delete(row.id);
@@ -635,7 +638,12 @@ export class ScanQueue {
       .run(error, `Scan failed: ${error}${retryMessage}`, new Date().toISOString(), jobId);
   }
 
-  private failSharedJob(jobId: number, error: string) {
+  private failSharedJob(jobId: number, profileId: number, ftpServerId: number, error: string) {
+    const retryDelayMs = isTransientFtpDisconnect(error) ? this.config.scanTransientRetryDelayMs : 0;
+    const retryMessage = retryDelayMs > 0 ? ` Requeued to rescan in ${formatDuration(retryDelayMs)}.` : "";
+    if (retryDelayMs > 0) {
+      this.profileService.schedulePendingScan(profileId, ftpServerId, new Date(Date.now() + retryDelayMs).toISOString());
+    }
     this.db
       .prepare(
         `
@@ -647,7 +655,7 @@ export class ScanQueue {
         where id = ?
       `,
       )
-      .run(error, `Shared scan failed: ${error}`, new Date().toISOString(), jobId);
+      .run(error, `Shared scan failed: ${error}${retryMessage}`, new Date().toISOString(), jobId);
   }
 
   private lastSuccessfulProgressItems(profileId: number, ftpServerId: number) {

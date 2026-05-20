@@ -1602,7 +1602,18 @@ describe("App", () => {
       masterProfileFtpServerId: null,
       masterServer: null,
     };
-    loadAdminSharedIndexGroupsMock.mockResolvedValue({ groups: [sharedGroup, disabledGroup] });
+    const tamarindGroup = {
+      ...sharedGroup,
+      id: 7,
+      keyHint: "tamarind",
+      name: "Tamarind",
+      host: "tamarind.whatbox.ca",
+      masterProfileFtpServerId: 10,
+      linkedServerCount: 1,
+      linkedServers: [],
+      masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", countryCode: "US", serverId: 10, serverName: "Tamarind" },
+    };
+    loadAdminSharedIndexGroupsMock.mockResolvedValue({ groups: [sharedGroup, tamarindGroup, disabledGroup] });
     setAdminProfileEnabledMock.mockResolvedValue({ profileId: 2, adminEnabled: true, adminSource: "database" });
     rescanAdminProfileMock.mockResolvedValue({ profileId: 2, scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } });
     rescanAdminSharedIndexGroupMock.mockResolvedValue({
@@ -1665,6 +1676,7 @@ describe("App", () => {
     expect(within(serverDialog).getByText("Auto-L")).toBeTruthy();
     expect(within(serverDialog).getByText("Unlinked")).toBeTruthy();
     expect(within(serverDialog).getByText("May 15, 2026, 5:00 PM")).toBeTruthy();
+    expect(within(serverDialog).queryByRole("button", { name: "Create group" })).toBeNull();
     fireEvent.click(within(serverDialog).getByRole("button", { name: "Unlink" }));
     await waitFor(() =>
       expect(unlinkAdminSharedIndexServerMock).toHaveBeenCalledWith({
@@ -1695,7 +1707,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Bulk link servers" }));
     const bulkLinkDialog = await screen.findByRole("dialog", { name: "Link selected servers" });
     expect(within(bulkLinkDialog).getByText("Sputnik")).toBeTruthy();
-    expect(within(bulkLinkDialog).getByText("Tamarind")).toBeTruthy();
+    expect(within(bulkLinkDialog).getAllByText("Tamarind").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Shared index group for Sputnik")).toHaveValue("5");
     linkAdminSharedIndexServerMock.mockRejectedValueOnce(new Error("FTP server does not match shared index group"));
     fireEvent.click(within(bulkLinkDialog).getByRole("button", { name: "Link server buckets" }));
