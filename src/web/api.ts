@@ -237,6 +237,12 @@ export type AdminProfileSummary = {
     name: string;
     host: string | null;
     indexedItems?: number;
+    catalogItemCounts?: {
+      movies: number;
+      series: number;
+      anime: number;
+      uncategorized: number;
+    };
     lastIndexedAt: string | null;
     sharedIndex: {
       id: number;

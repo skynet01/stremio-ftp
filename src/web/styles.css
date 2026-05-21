@@ -1747,14 +1747,25 @@ input:-webkit-autofill:active {
   width: 74px;
 }
 
+.admin-dialog-title-stat {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-2);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .admin-create-shared-dialog {
   width: min(520px, 100%);
 }
 
 .admin-server-dialog {
   width: fit-content;
-  min-width: min(1040px, calc(100vw - 36px));
-  max-width: min(1380px, calc(100vw - 36px));
+  min-width: min(1180px, calc(100vw - 36px));
+  max-width: min(1520px, calc(100vw - 36px));
   max-height: min(74vh, 680px);
 }
 
@@ -2212,32 +2223,52 @@ input:-webkit-autofill:active {
 
 .admin-server-dialog-table th:nth-child(1),
 .admin-server-dialog-table td:nth-child(1) {
-  width: 170px;
+  width: 132px;
 }
 
 .admin-server-dialog-table th:nth-child(2),
 .admin-server-dialog-table td:nth-child(2) {
-  width: 190px;
+  width: 174px;
 }
 
 .admin-server-dialog-table th:nth-child(3),
 .admin-server-dialog-table td:nth-child(3) {
-  width: 86px;
+  width: 76px;
 }
 
 .admin-server-dialog-table th:nth-child(4),
 .admin-server-dialog-table td:nth-child(4) {
-  width: 224px;
+  width: 70px;
 }
 
 .admin-server-dialog-table th:nth-child(5),
 .admin-server-dialog-table td:nth-child(5) {
-  width: 280px;
+  width: 70px;
 }
 
 .admin-server-dialog-table th:nth-child(6),
 .admin-server-dialog-table td:nth-child(6) {
-  width: 170px;
+  width: 70px;
+}
+
+.admin-server-dialog-table th:nth-child(7),
+.admin-server-dialog-table td:nth-child(7) {
+  width: 70px;
+}
+
+.admin-server-dialog-table th:nth-child(8),
+.admin-server-dialog-table td:nth-child(8) {
+  width: 190px;
+}
+
+.admin-server-dialog-table th:nth-child(9),
+.admin-server-dialog-table td:nth-child(9) {
+  width: 190px;
+}
+
+.admin-server-dialog-table th:nth-child(10),
+.admin-server-dialog-table td:nth-child(10) {
+  width: 164px;
 }
 
 .admin-server-dialog-table td {
@@ -2272,6 +2303,13 @@ input:-webkit-autofill:active {
 .admin-server-dialog-table .badge {
   display: inline-flex;
   margin-top: 0;
+}
+
+.admin-server-dialog-table .admin-server-count-cell {
+  color: var(--cream);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .admin-server-dialog-table td[data-label="Status"] span {

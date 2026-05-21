@@ -924,6 +924,35 @@ function serverIndexCount(server: AdminServerDetail) {
   return server.sharedIndex ? (server.sharedIndex.indexedMediaCount ?? 0) : (server.indexedItems ?? 0);
 }
 
+type CatalogItemCounts = {
+  movies: number;
+  series: number;
+  anime: number;
+  uncategorized: number;
+};
+
+const EMPTY_CATALOG_ITEM_COUNTS: CatalogItemCounts = {
+  movies: 0,
+  series: 0,
+  anime: 0,
+  uncategorized: 0,
+};
+
+function catalogCountsForServer(server: AdminServerDetail, groups: AdminSharedIndexGroup[]): CatalogItemCounts {
+  if (server.sharedIndex) {
+    return groups.find((group) => group.id === server.sharedIndex?.id)?.catalogItemCounts ?? server.catalogItemCounts ?? EMPTY_CATALOG_ITEM_COUNTS;
+  }
+  return server.catalogItemCounts ?? EMPTY_CATALOG_ITEM_COUNTS;
+}
+
+function catalogCountTotal(counts: CatalogItemCounts) {
+  return counts.movies + counts.series + counts.anime + counts.uncategorized;
+}
+
+function formatAdminNumber(value: number) {
+  return value.toLocaleString();
+}
+
 function serverLinkSummary(profile: AdminProfileSummary) {
   const configured = configuredServerDetails(profile);
   const linked = configured.filter((server) => server.sharedIndex);
@@ -1221,6 +1250,7 @@ function ProfileServersDialog({
   onClose: () => void;
 }) {
   const servers = profile.ftpServerDetails ?? [];
+  const totalCatalogItems = servers.reduce((sum, server) => sum + catalogCountTotal(catalogCountsForServer(server, groups)), 0);
   return (
     <ModalPortal>
       <div className="admin-bulk-dialog-backdrop">
@@ -1229,6 +1259,7 @@ function ProfileServersDialog({
           <div>
             <span className="section-label">Servers</span>
             <h3 id="admin-server-dialog-heading">{truncateUid(profile.browserUid)}</h3>
+            <span className="admin-dialog-title-stat">{formatAdminNumber(totalCatalogItems)} total</span>
           </div>
           <button type="button" className="icon-button" aria-label="Close server list" onClick={onClose}>
             <X size={16} aria-hidden="true" />
@@ -1241,6 +1272,10 @@ function ProfileServersDialog({
                 <th scope="col">Server</th>
                 <th scope="col">Host</th>
                 <th scope="col">Items</th>
+                <th scope="col">Movie</th>
+                <th scope="col">Series</th>
+                <th scope="col">Anime</th>
+                <th scope="col">Other</th>
                 <th scope="col">Last scan</th>
                 <th scope="col">Status</th>
                 <th scope="col">Action</th>
@@ -1252,6 +1287,7 @@ function ProfileServersDialog({
                 const status = serverLinkedStatus(server);
                 const linkedGroupId = server.sharedIndex?.id ?? null;
                 const hasCreatedGroup = sharedGroupExistsForServer(groups, profile.id, server.id);
+                const catalogCounts = catalogCountsForServer(server, groups);
                 return (
                   <tr key={server.id}>
                     <td data-label="Server">
@@ -1259,7 +1295,11 @@ function ProfileServersDialog({
                       <span>#{server.id}</span>
                     </td>
                     <td data-label="Host">{server.host ?? "Not configured"}</td>
-                    <td data-label="Items">{serverIndexCount(server)}</td>
+                    <td data-label="Items" className="admin-server-count-cell">{formatAdminNumber(serverIndexCount(server))}</td>
+                    <td data-label="Movie" className="admin-server-count-cell">{formatAdminNumber(catalogCounts.movies)}</td>
+                    <td data-label="Series" className="admin-server-count-cell">{formatAdminNumber(catalogCounts.series)}</td>
+                    <td data-label="Anime" className="admin-server-count-cell">{formatAdminNumber(catalogCounts.anime)}</td>
+                    <td data-label="Other" className="admin-server-count-cell">{formatAdminNumber(catalogCounts.uncategorized)}</td>
                     <td data-label="Last scan">{formatScanTime(server.sharedIndex ? server.sharedIndex.lastIndexedAt : server.lastIndexedAt)}</td>
                     <td data-label="Status">
                       <StatusBadge tone={serverStatusTone(status)}>{status}</StatusBadge>

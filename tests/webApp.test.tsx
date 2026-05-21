@@ -1490,10 +1490,19 @@ describe("App", () => {
               id: 9,
               name: "Sputnik",
               host: "sputnik.whatbox.ca",
+              indexedItems: 1200,
               lastIndexedAt: null,
               sharedIndex: { id: 5, name: "Sputnik Main", keyHint: "sputnik-main", autoLinked: true, lastIndexedAt: "2026-05-16T00:00:00.000Z" },
             },
-            { id: 10, name: "Tamarind", host: "tamarind.whatbox.ca", lastIndexedAt: null, sharedIndex: null },
+            {
+              id: 10,
+              name: "Tamarind",
+              host: "tamarind.whatbox.ca",
+              indexedItems: 10,
+              catalogItemCounts: { movies: 4, anime: 2, series: 3, uncategorized: 1 },
+              lastIndexedAt: null,
+              sharedIndex: null,
+            },
           ],
           indexedItems: 44,
           lastScanAt: null,
@@ -1676,6 +1685,21 @@ describe("App", () => {
     expect(within(serverDialog).getByText("Auto-L")).toBeTruthy();
     expect(within(serverDialog).getByText("Unlinked")).toBeTruthy();
     expect(within(serverDialog).getByText("May 15, 2026, 5:00 PM")).toBeTruthy();
+    expect(within(serverDialog).getByText("1,210 total")).toBeTruthy();
+    expect(within(serverDialog).getByRole("columnheader", { name: "Movie" })).toBeTruthy();
+    expect(within(serverDialog).getByRole("columnheader", { name: "Series" })).toBeTruthy();
+    expect(within(serverDialog).getByRole("columnheader", { name: "Anime" })).toBeTruthy();
+    expect(within(serverDialog).getByRole("columnheader", { name: "Other" })).toBeTruthy();
+    const sputnikServerRow = within(serverDialog).getByText("Sputnik").closest("tr")!;
+    expect(within(sputnikServerRow).getByText("640")).toBeTruthy();
+    expect(within(sputnikServerRow).getByText("390")).toBeTruthy();
+    expect(within(sputnikServerRow).getByText("45")).toBeTruthy();
+    expect(within(sputnikServerRow).getByText("125")).toBeTruthy();
+    const tamarindServerRow = within(serverDialog).getAllByText("Tamarind").find((element) => element.tagName === "STRONG")!.closest("tr")!;
+    expect(within(tamarindServerRow).getByText("4")).toBeTruthy();
+    expect(within(tamarindServerRow).getByText("3")).toBeTruthy();
+    expect(within(tamarindServerRow).getByText("2")).toBeTruthy();
+    expect(within(tamarindServerRow).getByText("1")).toBeTruthy();
     expect(within(serverDialog).queryByRole("button", { name: "Create group" })).toBeNull();
     fireEvent.click(within(serverDialog).getByRole("button", { name: "Unlink" }));
     await waitFor(() =>

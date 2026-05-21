@@ -1138,6 +1138,24 @@ export class ProfileService {
     return rows.map((row) => this.ftpServerFromRow(row));
   }
 
+  ftpServerCatalogItemCounts(profileId: number, serverId: number) {
+    const row = this.db
+      .prepare(
+        `
+        select
+          coalesce(sum(case when catalog_kind = 'movie' then 1 else 0 end), 0) as movies,
+          coalesce(sum(case when catalog_kind = 'series' then 1 else 0 end), 0) as series,
+          coalesce(sum(case when catalog_kind = 'anime' then 1 else 0 end), 0) as anime,
+          coalesce(sum(case when catalog_kind not in ('movie', 'series', 'anime') then 1 else 0 end), 0) as uncategorized
+        from media_files
+        where profile_id = ?
+          and ftp_server_id = ?
+      `,
+      )
+      .get(profileId, serverId) as { movies: number; series: number; anime: number; uncategorized: number };
+    return row;
+  }
+
   listFtpServerCatalogSettings(profileId: number): FtpServerCatalogSettings[] {
     const profileCustomization = this.getAddonCustomization(profileId);
     const rows = this.db

@@ -77,12 +77,14 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
 
     const list = service.listAdminProfileSummaries(config.adminBrowserUids);
     const profiles = list.profiles.map((profile) => {
-      const scanStatuses = service.listFtpServers(profile.id).map((server) => scanQueue.getServerScanStatus(profile.id, server.id));
-      const ftpServerDetails = service.listFtpServers(profile.id).map((server) => ({
+      const servers = service.listFtpServers(profile.id);
+      const scanStatuses = servers.map((server) => scanQueue.getServerScanStatus(profile.id, server.id));
+      const ftpServerDetails = servers.map((server) => ({
         id: server.id,
         name: server.name,
         host: server.ftpConfig?.host ?? null,
         indexedItems: server.indexStatus.mediaItems,
+        catalogItemCounts: service.ftpServerCatalogItemCounts(profile.id, server.id),
         lastIndexedAt: server.indexStatus.lastScanAt,
         sharedIndex: server.sharedIndex,
       }));
