@@ -509,7 +509,9 @@ textarea:focus-visible,
 
 .global-other-catalog-toggle {
   align-self: end;
+  justify-self: end;
   margin: 0 0 11px;
+  text-align: right;
 }
 
 .stream-formatter {
