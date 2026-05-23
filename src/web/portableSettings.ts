@@ -5,6 +5,7 @@ export type PortableCustomization = {
   addonLogoUrl?: string;
   addonDescription?: string;
   catalogTmdbApiKey?: string;
+  combineUncategorizedCatalogs?: boolean;
   streamNameTemplate?: string;
   streamDescriptionTemplate?: string;
 };
@@ -37,6 +38,7 @@ export type ExportContext = {
   addonLogoUrl: string;
   addonDescription: string;
   catalogTmdbApiKey: string;
+  combineUncategorizedCatalogs: boolean;
   streamNameTemplate: string;
   streamDescriptionTemplate: string;
   servers: ServerForm[];
@@ -64,6 +66,7 @@ export function serializePortableSettings(ctx: ExportContext, stripCredentials: 
       addonLogoUrl: ctx.addonLogoUrl || undefined,
       addonDescription: ctx.addonDescription || undefined,
       catalogTmdbApiKey: ctx.catalogTmdbApiKey || undefined,
+      combineUncategorizedCatalogs: ctx.combineUncategorizedCatalogs || undefined,
       streamNameTemplate: ctx.streamNameTemplate || undefined,
       streamDescriptionTemplate: ctx.streamDescriptionTemplate || undefined,
     },
@@ -115,6 +118,7 @@ function parseCustomization(value: unknown): PortableCustomization {
     addonLogoUrl: stringOrUndefined(c.addonLogoUrl),
     addonDescription: stringOrUndefined(c.addonDescription),
     catalogTmdbApiKey: stringOrUndefined(c.catalogTmdbApiKey),
+    combineUncategorizedCatalogs: typeof c.combineUncategorizedCatalogs === "boolean" ? c.combineUncategorizedCatalogs : undefined,
     streamNameTemplate: stringOrUndefined(c.streamNameTemplate),
     streamDescriptionTemplate: stringOrUndefined(c.streamDescriptionTemplate),
   };

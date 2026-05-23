@@ -9,6 +9,7 @@ import { publicManifest, tokenManifest } from "./manifest.js";
 import { resolveStreams, streamForMatch } from "./streamResolver.js";
 
 type StremioType = "movie" | "series";
+type ManifestCustomization = AddonCustomization & { otherCatalogs?: Array<{ id: string; name: string }> };
 
 export function stremioRoutes(config: AppConfig, profiles: ProfileService, mediaRepository: MediaRepository) {
   const router = Router();
@@ -37,7 +38,10 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
       serverId ? profiles.getFtpServerConfig(profileId, serverId) : profiles.getFtpConfig(profileId);
     const folderId = internalFolderId(id);
     if (folderId) {
-      const files = mediaRepository.otherCatalogStreams(profileId, folderId, catalogServerScope(profiles, profileId));
+      const files = mediaRepository.otherCatalogStreams(profileId, folderId, {
+        ...catalogServerScope(profiles, profileId),
+        scopeToRepresentativeServer: splitOtherCatalogsEnabled(profiles, profileId, customization),
+      });
       return res.json({
         streams: files.map((file) =>
           streamForMatch({
@@ -56,7 +60,10 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
 
     const fileId = internalFileId(id);
     if (fileId) {
-      const files = mediaRepository.otherCatalogStreams(profileId, fileId, catalogServerScope(profiles, profileId));
+      const files = mediaRepository.otherCatalogStreams(profileId, fileId, {
+        ...catalogServerScope(profiles, profileId),
+        scopeToRepresentativeServer: splitOtherCatalogsEnabled(profiles, profileId, customization),
+      });
       return res.json({
         streams: files.map((file) =>
           streamForMatch({
@@ -107,8 +114,9 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     if (!type || !profileId || !customization?.catalogEnabled || !isCatalogId(type, catalogId)) return res.json({ metas: [] });
 
     const extra = catalogExtraFrom(stringParam(req.params.extra));
-    if (catalogId === "ftp-other") {
-      const scope = catalogServerScope(profiles, profileId);
+    const otherServerId = otherCatalogServerId(catalogId);
+    if (catalogId === "ftp-other" || otherServerId !== null) {
+      const scope = otherServerId === null ? catalogServerScope(profiles, profileId) : catalogServerScopeForServer(profiles, profileId, otherServerId);
       const items = mediaRepository.otherCatalogItems(profileId, 100, extra.skip, { ...scope, search: extra.search });
       return res.json({ metas: items.map((item) => otherCatalogMeta(item, config.baseUrl)) });
     }
@@ -131,7 +139,10 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
 
     const folderId = internalFolderId(id) ?? internalFileId(id);
     if (folderId) {
-      const item = mediaRepository.otherCatalogItem(profileId, folderId, catalogServerScope(profiles, profileId));
+      const item = mediaRepository.otherCatalogItem(profileId, folderId, {
+        ...catalogServerScope(profiles, profileId),
+        scopeToRepresentativeServer: splitOtherCatalogsEnabled(profiles, profileId, customization),
+      });
       return res.json({ meta: item ? otherCatalogMeta(item, config.baseUrl) : null });
     }
 
@@ -161,7 +172,7 @@ function isCatalogId(type: StremioType, catalogId: string) {
     (type === "movie" && catalogId === "ftp-movies") ||
     (type === "series" && catalogId === "ftp-series") ||
     (type === "series" && catalogId === "ftp-anime") ||
-    (type === "movie" && catalogId === "ftp-other")
+    (type === "movie" && (catalogId === "ftp-other" || otherCatalogServerId(catalogId) !== null))
   );
 }
 
@@ -181,7 +192,7 @@ function manifestCustomization(
   profileId: number,
   proxyStreamsDisabled = false,
   adminBrowserUids: ReadonlySet<string> = new Set(),
-): AddonCustomization {
+): ManifestCustomization {
   const base = profiles.getAddonCustomization(profileId);
   const servers = profiles.listFtpServerCatalogSettings(profileId);
   const profileOwnerUid = profiles.browserUidForProfile(profileId);
@@ -198,11 +209,17 @@ function manifestCustomization(
     }),
     { movies: false, series: false, anime: false, uncategorized: false },
   );
+  const otherServers = otherCatalogServers(profiles, profileId);
+  const splitOtherCatalogs = base.combineUncategorizedCatalogs !== true && otherServers.length > 1;
+  const addonName = base.addonName?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonName;
   return {
     ...base,
     catalogEnabled: servers.some((server) => server.customization.catalogEnabled && hasAnyEnabledCatalogType(server.customization)),
     catalogTmdbApiKey: base.catalogTmdbApiKey,
     catalogContentTypes: contentTypes,
+    otherCatalogs: splitOtherCatalogs
+      ? otherServers.map((server) => ({ id: `ftp-other-${server.id}`, name: `${addonName} ${server.name} Other` }))
+      : undefined,
     streamDeliveryMode: forceDirect ? "direct" : base.streamDeliveryMode,
   };
 }
@@ -229,6 +246,36 @@ function catalogServerScope(profiles: ProfileService, profileId: number, catalog
     includeLegacyNullServer: Boolean(defaultServerId && enabledServers.some((server) => server.id === defaultServerId)),
     includeUnenrichedServerIds,
   };
+}
+
+function catalogServerScopeForServer(profiles: ProfileService, profileId: number, serverId: number) {
+  const servers = profiles.listFtpServerCatalogSettings(profileId);
+  const server = servers.find((candidate) => candidate.id === serverId);
+  if (!server || !server.customization.catalogEnabled || !otherCatalogEnabled(server.customization)) {
+    return { ftpServerIds: [], includeLegacyNullServer: false, includeUnenrichedServerIds: [] };
+  }
+  const defaultServerId = servers[0]?.id;
+  return {
+    ftpServerIds: [serverId],
+    includeLegacyNullServer: Boolean(defaultServerId === serverId),
+    includeUnenrichedServerIds: hasAnyTypedCatalogContentType(server.customization) ? [] : [serverId],
+  };
+}
+
+function splitOtherCatalogsEnabled(profiles: ProfileService, profileId: number, customization: Pick<AddonCustomization, "combineUncategorizedCatalogs">) {
+  if (customization.combineUncategorizedCatalogs === true) return false;
+  return otherCatalogServers(profiles, profileId).length > 1;
+}
+
+function otherCatalogServers(profiles: ProfileService, profileId: number) {
+  return profiles
+    .listFtpServerCatalogSettings(profileId)
+    .filter((server) => server.customization.catalogEnabled && otherCatalogEnabled(server.customization));
+}
+
+function otherCatalogServerId(catalogId: string) {
+  const match = catalogId.match(/^ftp-other-(\d+)$/);
+  return match ? Number(match[1]) : null;
 }
 
 function otherCatalogEnabled(customization: Pick<AddonCustomization, "catalogContentTypes">) {
