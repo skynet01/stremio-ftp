@@ -25,6 +25,7 @@ export type AddonCustomization = {
   addonDescription: string;
   catalogEnabled: boolean;
   catalogTmdbApiKey?: string;
+  combineUncategorizedCatalogs?: boolean;
   catalogContentTypes?: CatalogContentTypes;
   libraryLayout?: LibraryLayout;
   streamDeliveryMode?: StreamDeliveryMode;
@@ -88,6 +89,7 @@ export const DEFAULT_ADDON_CUSTOMIZATION: AddonCustomization = {
     "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
   catalogEnabled: false,
   catalogTmdbApiKey: "",
+  combineUncategorizedCatalogs: false,
   catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
   libraryLayout: "auto",
   streamDeliveryMode: "proxy",
@@ -195,7 +197,7 @@ export class ProfileService {
         `
         select addon_name, addon_logo_url, addon_description, catalog_enabled,
                catalog_tmdb_api_key, catalog_content_movies, catalog_content_series,
-               catalog_content_anime, catalog_content_uncategorized, library_layout, stream_delivery_mode,
+               catalog_content_anime, catalog_content_uncategorized, combine_uncategorized_catalogs, library_layout, stream_delivery_mode,
                stream_name_template, stream_description_template
         from profiles
         where id = ?
@@ -212,6 +214,7 @@ export class ProfileService {
           catalog_content_series: number | null;
           catalog_content_anime: number | null;
           catalog_content_uncategorized: number | null;
+          combine_uncategorized_catalogs: number | null;
           library_layout: LibraryLayout | null;
           stream_delivery_mode: StreamDeliveryMode | null;
           stream_name_template: string | null;
@@ -225,6 +228,7 @@ export class ProfileService {
       addonDescription: row.addon_description?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonDescription,
       catalogEnabled: Boolean(row.catalog_enabled),
       catalogTmdbApiKey: row.catalog_tmdb_api_key?.trim() || "",
+      combineUncategorizedCatalogs: Boolean(row.combine_uncategorized_catalogs),
       catalogContentTypes: catalogContentTypesFromRow(row),
       libraryLayout: row.library_layout || "auto",
       streamDeliveryMode: row.stream_delivery_mode || "proxy",
@@ -253,6 +257,7 @@ export class ProfileService {
             catalog_content_series = ?,
             catalog_content_anime = ?,
             catalog_content_uncategorized = ?,
+            combine_uncategorized_catalogs = ?,
             library_layout = ?,
             stream_delivery_mode = ?,
             stream_name_template = ?,
@@ -271,6 +276,7 @@ export class ProfileService {
         contentTypes.series ? 1 : 0,
         contentTypes.anime ? 1 : 0,
         contentTypes.uncategorized === false ? 0 : 1,
+        customization.combineUncategorizedCatalogs ? 1 : 0,
         libraryLayout,
         streamDeliveryMode,
         streamNameTemplate,

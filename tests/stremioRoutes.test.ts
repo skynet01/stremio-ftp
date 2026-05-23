@@ -663,7 +663,7 @@ describe("stremio routes", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("groups duplicate unresolved Other catalog variants into one item with multiple streams", async () => {
+  it("splits unresolved Other catalogs by server by default", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const service = new ProfileService(db, config.encryptionKey);
@@ -673,6 +673,75 @@ describe("stremio routes", () => {
       addonLogoUrl: "",
       addonDescription: "Stream the archive from my FTP server.",
       catalogEnabled: true,
+    });
+    const server1Id = service.defaultFtpServerId(created.profileId);
+    service.renameFtpServer(created.profileId, server1Id, "Alpha");
+    const server2 = service.createFtpServer(created.profileId, {
+      name: "Beta",
+      customization: {
+        catalogEnabled: true,
+        catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+      },
+    });
+    const repository = new MediaRepository(db);
+    for (const [ftpServerId, prefix, filename] of [
+      [server1Id, "/Family Videos", "Home.Video.2024.1080p.mp4"],
+      [server2.id, "/archive/Family Videos", "Home.Video.2024.2160p.mkv"],
+    ] as const) {
+      repository.upsertParsedFile(created.profileId, {
+        ftpServerId,
+        mediaKind: "movie",
+        catalogKind: "movie",
+        ftpPath: `${prefix}/${filename}`,
+        filename,
+        normalizedFilename: filename.toLowerCase(),
+        extension: filename.endsWith(".mp4") ? "mp4" : "mkv",
+        parsedTitle: "home video",
+        parsedYear: 2024,
+        season: null,
+        episode: null,
+        imdbId: null,
+        quality: filename.includes("2160p") ? "2160p" : "1080p",
+        confidence: 45,
+        sizeBytes: 1024 * 1024,
+      });
+    }
+    persistUnmatchedCatalog(repository, created.profileId, server1Id);
+    persistUnmatchedCatalog(repository, created.profileId, server2.id);
+    vi.stubGlobal("fetch", vi.fn());
+    const app = createApp({ ...config, tmdbApiKey: "tmdb-key" }, db);
+
+    const manifest = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
+    expect(manifest.body.catalogs).toEqual(expect.arrayContaining([
+      { type: "movie", id: `ftp-other-${server1Id}`, name: "Archive 3D Alpha Other", extra: CATALOG_EXTRAS },
+      { type: "movie", id: `ftp-other-${server2.id}`, name: "Archive 3D Beta Other", extra: CATALOG_EXTRAS },
+    ]));
+    expect(manifest.body.catalogs.map((catalog: { id: string }) => catalog.id)).not.toContain("ftp-other");
+
+    const alphaCatalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-other-${server1Id}.json`).expect(200);
+    const betaCatalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-other-${server2.id}.json`).expect(200);
+    expect(alphaCatalog.body.metas[0]).toMatchObject({ name: "Family Videos", description: "1 file across 1 server" });
+    expect(betaCatalog.body.metas[0]).toMatchObject({ name: "Family Videos", description: "1 file across 1 server" });
+
+    const alphaStream = await request(app)
+      .get(`/u/${created.installUrlToken}/stream/movie/${alphaCatalog.body.metas[0].id}.json`)
+      .expect(200);
+    expect(alphaStream.body.streams.map((item: { behaviorHints: { filename: string } }) => item.behaviorHints.filename)).toEqual([
+      "Home.Video.2024.1080p.mp4",
+    ]);
+  });
+
+  it("groups duplicate unresolved Other catalog variants into one item with multiple streams when combined", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: true,
+      combineUncategorizedCatalogs: true,
     });
     const server1Id = service.defaultFtpServerId(created.profileId);
     const server2 = service.createFtpServer(created.profileId, {

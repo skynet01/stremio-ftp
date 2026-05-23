@@ -65,6 +65,7 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
     "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
   catalogEnabled: false,
   catalogTmdbApiKey: "",
+  combineUncategorizedCatalogs: false,
   catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
   libraryLayout: "auto",
   streamDeliveryMode: "proxy",
@@ -327,6 +328,7 @@ export function App() {
   const [addonLogoUrl, setAddonLogoUrl] = useState(DEFAULT_CUSTOMIZATION.addonLogoUrl);
   const [addonDescription, setAddonDescription] = useState(DEFAULT_CUSTOMIZATION.addonDescription);
   const [catalogTmdbApiKey, setCatalogTmdbApiKey] = useState(DEFAULT_CUSTOMIZATION.catalogTmdbApiKey ?? "");
+  const [combineUncategorizedCatalogs, setCombineUncategorizedCatalogs] = useState(Boolean(DEFAULT_CUSTOMIZATION.combineUncategorizedCatalogs));
   const [streamNameTemplate, setStreamNameTemplate] = useState(DEFAULT_STREAM_NAME_TEMPLATE);
   const [streamDescriptionTemplate, setStreamDescriptionTemplate] = useState(DEFAULT_STREAM_DESCRIPTION_TEMPLATE);
   const [editingName, setEditingName] = useState(false);
@@ -349,6 +351,12 @@ export function App() {
   const globalScanProgress = useMemo<GlobalScanProgress | null>(() => globalScanProgressForServers(servers), [servers]);
   const hasSavedServer = useMemo(
     () => servers.some((server) => Boolean(server.host) && server.passwordConfigured),
+    [servers],
+  );
+  const showCombineUncategorizedCatalogsToggle = useMemo(
+    () =>
+      servers.length > 1 &&
+      servers.filter((server) => server.catalogEnabled && server.catalogContentTypes.uncategorized !== false).length >= 2,
     [servers],
   );
 
@@ -437,6 +445,7 @@ export function App() {
     setAddonLogoUrl(customization.addonLogoUrl || "");
     setAddonDescription(customization.addonDescription || DEFAULT_CUSTOMIZATION.addonDescription);
     setCatalogTmdbApiKey(customization.catalogTmdbApiKey || "");
+    setCombineUncategorizedCatalogs(Boolean(customization.combineUncategorizedCatalogs));
     setStreamNameTemplate(customization.streamNameTemplate || DEFAULT_STREAM_NAME_TEMPLATE);
     setStreamDescriptionTemplate(customization.streamDescriptionTemplate || DEFAULT_STREAM_DESCRIPTION_TEMPLATE);
   }
@@ -449,6 +458,7 @@ export function App() {
       addonDescription: addonDescription.trim() || DEFAULT_CUSTOMIZATION.addonDescription,
       catalogEnabled: server?.catalogEnabled ?? DEFAULT_CUSTOMIZATION.catalogEnabled,
       catalogTmdbApiKey: catalogTmdbApiKey.trim(),
+      combineUncategorizedCatalogs,
       catalogContentTypes: server?.catalogContentTypes ?? DEFAULT_CUSTOMIZATION.catalogContentTypes,
       libraryLayout: server?.libraryLayout ?? DEFAULT_CUSTOMIZATION.libraryLayout,
       streamDeliveryMode: server?.streamDeliveryMode ?? DEFAULT_CUSTOMIZATION.streamDeliveryMode,
@@ -670,6 +680,24 @@ export function App() {
     }
   }
 
+  async function saveCombineUncategorizedCatalogs(enabled: boolean) {
+    setCombineUncategorizedCatalogs(enabled);
+    if (!profileReady) {
+      setCustomizationMessage("Create or unlock your profile to save catalog grouping.");
+      return;
+    }
+    try {
+      await saveCustomization({
+        browserUid: recoveryUid,
+        passphrase,
+        customization: normalizedCustomization(servers[0], { combineUncategorizedCatalogs: enabled }),
+      });
+      setCustomizationMessage("Uncategorized catalog grouping saved. Refresh the addon in Stremio to update catalogs.");
+    } catch (error) {
+      setCustomizationMessage(error instanceof Error ? error.message : "Unable to save catalog grouping.");
+    }
+  }
+
   async function addServer() {
     const result = await createFtpServer({ browserUid: recoveryUid, passphrase });
     const form = serverFormFromPayload(result.server);
@@ -888,6 +916,7 @@ export function App() {
     if (customization.addonLogoUrl) setAddonLogoUrl(customization.addonLogoUrl);
     if (customization.addonDescription) setAddonDescription(customization.addonDescription);
     if (typeof customization.catalogTmdbApiKey === "string") setCatalogTmdbApiKey(customization.catalogTmdbApiKey);
+    if (typeof customization.combineUncategorizedCatalogs === "boolean") setCombineUncategorizedCatalogs(customization.combineUncategorizedCatalogs);
     if (customization.streamNameTemplate) setStreamNameTemplate(customization.streamNameTemplate);
     if (customization.streamDescriptionTemplate) setStreamDescriptionTemplate(customization.streamDescriptionTemplate);
 
@@ -908,6 +937,7 @@ export function App() {
     setAddonLogoUrl(DEFAULT_CUSTOMIZATION.addonLogoUrl);
     setAddonDescription(DEFAULT_CUSTOMIZATION.addonDescription);
     setCatalogTmdbApiKey(DEFAULT_CUSTOMIZATION.catalogTmdbApiKey ?? "");
+    setCombineUncategorizedCatalogs(Boolean(DEFAULT_CUSTOMIZATION.combineUncategorizedCatalogs));
     setStreamNameTemplate(DEFAULT_STREAM_NAME_TEMPLATE);
     setStreamDescriptionTemplate(DEFAULT_STREAM_DESCRIPTION_TEMPLATE);
   }
@@ -945,6 +975,7 @@ export function App() {
         addonLogoUrl,
         addonDescription,
         catalogTmdbApiKey,
+        combineUncategorizedCatalogs,
         streamNameTemplate,
         streamDescriptionTemplate,
         servers: serversForExport,
@@ -1092,6 +1123,7 @@ export function App() {
     setServers([emptyServerForm()]);
     setExpandedServerId(0);
     setGlobalStats(EMPTY_GLOBAL_STATS);
+    setCombineUncategorizedCatalogs(Boolean(DEFAULT_CUSTOMIZATION.combineUncategorizedCatalogs));
     window.localStorage.removeItem(STORAGE_KEYS.passphrase);
     window.localStorage.removeItem(STORAGE_KEYS.manifestUrl);
     window.localStorage.removeItem(STORAGE_KEYS.stremioInstallUrl);
@@ -1204,6 +1236,17 @@ export function App() {
                       onBlur={(event) => void saveGlobalTmdbApiKey(event.currentTarget.value)}
                     />
                   </div>
+                  {showCombineUncategorizedCatalogsToggle ? (
+                    <label className="toggle-row global-other-catalog-toggle" htmlFor="combineUncategorizedCatalogs">
+                      <input
+                        id="combineUncategorizedCatalogs"
+                        type="checkbox"
+                        checked={combineUncategorizedCatalogs}
+                        onChange={(event) => void saveCombineUncategorizedCatalogs(event.currentTarget.checked)}
+                      />
+                      Combine all uncategorized media into single catalog
+                    </label>
+                  ) : null}
                 </div>
                 <StreamFormatterPanel
                   addonName={addonName}

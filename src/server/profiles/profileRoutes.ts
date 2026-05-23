@@ -43,6 +43,7 @@ const customizationSchema = z.object({
   addonDescription: z.string().trim().min(1).max(260),
   catalogEnabled: z.boolean().default(false),
   catalogTmdbApiKey: z.string().trim().max(128).default(""),
+  combineUncategorizedCatalogs: z.boolean().default(false),
   catalogContentTypes: z
     .object({
       movies: z.boolean().default(true),
@@ -65,6 +66,7 @@ const saveServerSchema = serverIdSchema.extend({
     addonLogoUrl: true,
     addonDescription: true,
     catalogTmdbApiKey: true,
+    combineUncategorizedCatalogs: true,
     streamNameTemplate: true,
     streamDescriptionTemplate: true,
   }),

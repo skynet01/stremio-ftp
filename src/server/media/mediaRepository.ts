@@ -855,13 +855,13 @@ export class MediaRepository {
   otherCatalogStreams(
     profileId: number,
     representativeFileId: number,
-    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; includeUnenrichedServerIds?: number[] } = {},
+    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; includeUnenrichedServerIds?: number[]; scopeToRepresentativeServer?: boolean } = {},
   ): MediaMatch[] {
     const baseUnenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
     const base = this.db
       .prepare(
         `
-        select mf.ftp_path, mf.filename, mf.media_kind
+        select mf.ftp_path, mf.filename, mf.media_kind, mf.ftp_server_id
         from media_files mf
         left join catalog_enrichment ce
           on ce.profile_id = mf.profile_id
@@ -872,11 +872,15 @@ export class MediaRepository {
           and (ce.status = 'unmatched'${baseUnenrichedFilter.sql})
       `,
       )
-      .get(profileId, representativeFileId, ...baseUnenrichedFilter.params) as { ftp_path: string; filename: string; media_kind: "movie" | "series" } | undefined;
+      .get(profileId, representativeFileId, ...baseUnenrichedFilter.params) as
+      | { ftp_path: string; filename: string; media_kind: "movie" | "series"; ftp_server_id: number | null }
+      | undefined;
     if (!base) return [];
 
     const folderKey = otherFolderKey(base.ftp_path, base.filename);
-    const serverFilter = mediaServerFilter("mf", options.ftpServerIds, options.includeLegacyNullServer);
+    const serverFilter = options.scopeToRepresentativeServer
+      ? mediaServerFilter("mf", base.ftp_server_id === null ? [] : [base.ftp_server_id], base.ftp_server_id === null)
+      : mediaServerFilter("mf", options.ftpServerIds, options.includeLegacyNullServer);
     const unenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
     const rows = this.db
       .prepare(
@@ -902,13 +906,13 @@ export class MediaRepository {
   otherCatalogItem(
     profileId: number,
     fileId: number,
-    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; includeUnenrichedServerIds?: number[] } = {},
+    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; includeUnenrichedServerIds?: number[]; scopeToRepresentativeServer?: boolean } = {},
   ): OtherCatalogItem | null {
     const unenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
     const base = this.db
       .prepare(
         `
-        select mf.id
+        select mf.id, mf.ftp_server_id
         from media_files mf
         left join catalog_enrichment ce
           on ce.profile_id = mf.profile_id
@@ -919,10 +923,17 @@ export class MediaRepository {
           and (ce.status = 'unmatched'${unenrichedFilter.sql})
       `,
       )
-      .get(profileId, fileId, ...unenrichedFilter.params) as { id: number } | undefined;
+      .get(profileId, fileId, ...unenrichedFilter.params) as { id: number; ftp_server_id: number | null } | undefined;
 
     if (!base) return null;
-    return this.otherCatalogItems(profileId, Number.MAX_SAFE_INTEGER, 0, options).find((item) => item.id === base.id) ?? null;
+    const scopedOptions = options.scopeToRepresentativeServer
+      ? {
+          ...options,
+          ftpServerIds: base.ftp_server_id === null ? [] : [base.ftp_server_id],
+          includeLegacyNullServer: base.ftp_server_id === null,
+        }
+      : options;
+    return this.otherCatalogItems(profileId, Number.MAX_SAFE_INTEGER, 0, scopedOptions).find((item) => item.id === base.id) ?? null;
   }
 }
 

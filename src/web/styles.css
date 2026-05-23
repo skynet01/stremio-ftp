@@ -502,8 +502,14 @@ textarea:focus-visible,
 .global-settings-row {
   display: grid;
   grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
+  align-items: end;
   gap: 20px;
   margin-top: 22px;
+}
+
+.global-other-catalog-toggle {
+  align-self: end;
+  margin: 0 0 11px;
 }
 
 .stream-formatter {
@@ -697,6 +703,7 @@ textarea:focus-visible,
 .server-accordion-body {
   width: 100%;
   padding: 6px 0 24px;
+  overflow: hidden;
 }
 
 .server-section {
@@ -715,6 +722,12 @@ textarea:focus-visible,
   gap: clamp(34px, 4.4vw, 64px);
   border-top: 1px solid rgba(255, 255, 255, 0.055);
   padding-inline: clamp(22px, 3vw, 30px);
+}
+
+.server-accordion-body *,
+.server-detail-grid,
+.library-settings {
+  min-width: 0;
 }
 
 .server-detail-grid .server-section {
@@ -1968,6 +1981,34 @@ input:-webkit-autofill:active {
     grid-row: 3;
   }
 
+  .server-accordion-body {
+    padding: 4px 0 20px;
+  }
+
+  .server-detail-grid {
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .server-section {
+    padding: 18px 0;
+  }
+
+  .server-section h3,
+  .scan-current-path {
+    overflow-wrap: anywhere;
+  }
+
+  .server-accordion-body .library-settings {
+    margin-top: 16px;
+    padding-top: 16px;
+  }
+
+  .server-accordion-body .library-settings-header,
+  .server-accordion-body .library-settings-grid {
+    padding-inline: 14px;
+  }
+
   .changelog-list li {
     grid-template-columns: 1fr;
     gap: 8px;
@@ -1992,6 +2033,8 @@ input:-webkit-autofill:active {
   .server-button-row .server-scan-action {
     min-width: 0;
     margin-left: 0;
+    padding-inline: 10px;
+    white-space: normal;
   }
 
   .server-button-row .save-server-button {

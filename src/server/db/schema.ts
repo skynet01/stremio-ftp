@@ -100,6 +100,7 @@ export function migrate(db: Database.Database) {
       catalog_content_series integer not null default 1 check (catalog_content_series in (0, 1)),
       catalog_content_anime integer not null default 0 check (catalog_content_anime in (0, 1)),
       catalog_content_uncategorized integer not null default 1 check (catalog_content_uncategorized in (0, 1)),
+      combine_uncategorized_catalogs integer not null default 0 check (combine_uncategorized_catalogs in (0, 1)),
       library_layout text not null default 'auto' check (library_layout in ('auto', 'folders', 'flat')),
       stream_delivery_mode text not null default 'proxy' check (stream_delivery_mode in ('proxy', 'direct')),
       stream_name_template text,
@@ -186,6 +187,7 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureProfileColumn(db, "catalog_content_series", "integer not null default 1");
   ensureProfileColumn(db, "catalog_content_anime", "integer not null default 0");
   ensureProfileColumn(db, "catalog_content_uncategorized", "integer not null default 1");
+  ensureProfileColumn(db, "combine_uncategorized_catalogs", "integer not null default 0");
   ensureProfileColumn(db, "library_layout", "text not null default 'auto'");
   ensureProfileColumn(db, "stream_delivery_mode", "text not null default 'proxy'");
   ensureProfileColumn(db, "stream_name_template", "text");
