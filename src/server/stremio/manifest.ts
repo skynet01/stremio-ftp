@@ -5,7 +5,11 @@ const ADDON_VERSION = "0.4.44";
 const ADDON_ID = "community.stremio-ftp";
 const SEARCHABLE_CATALOG_EXTRAS = [{ name: "skip" }, { name: "search" }];
 
-export function publicManifest(customization: Partial<AddonCustomization> = {}) {
+type ManifestCustomization = Partial<AddonCustomization> & {
+  otherCatalogs?: Array<{ id: string; name: string }>;
+};
+
+export function publicManifest(customization: ManifestCustomization = {}) {
   const addonName = customization.addonName?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonName;
   const addonLogoUrl = customization.addonLogoUrl?.trim() || "";
   const addonDescription = customization.addonDescription?.trim() || DEFAULT_ADDON_CUSTOMIZATION.addonDescription;
@@ -16,7 +20,7 @@ export function publicManifest(customization: Partial<AddonCustomization> = {}) 
     ...(contentTypes.series ? [{ type: "series", id: "ftp-series", name: `${addonName} Series`, extra: SEARCHABLE_CATALOG_EXTRAS }] : []),
     ...(contentTypes.anime ? [{ type: "series", id: "ftp-anime", name: `${addonName} Anime`, extra: SEARCHABLE_CATALOG_EXTRAS }] : []),
     ...(contentTypes.uncategorized !== false
-      ? [{ type: "movie", id: "ftp-other", name: `${addonName} Other`, extra: SEARCHABLE_CATALOG_EXTRAS }]
+      ? otherCatalogEntries(addonName, customization.otherCatalogs)
       : []),
   ];
   return {
@@ -33,12 +37,22 @@ export function publicManifest(customization: Partial<AddonCustomization> = {}) 
   };
 }
 
-export function tokenManifest(customization: Partial<AddonCustomization> = {}, installToken = "") {
+export function tokenManifest(customization: ManifestCustomization = {}, installToken = "") {
   return {
     ...publicManifest(customization),
     id: tokenAddonId(installToken),
     behaviorHints: { configurable: true, configurationRequired: false },
   };
+}
+
+function otherCatalogEntries(addonName: string, otherCatalogs: ManifestCustomization["otherCatalogs"]) {
+  if (!otherCatalogs?.length) return [{ type: "movie", id: "ftp-other", name: `${addonName} Other`, extra: SEARCHABLE_CATALOG_EXTRAS }];
+  return otherCatalogs.map((catalog) => ({
+    type: "movie",
+    id: catalog.id,
+    name: catalog.name,
+    extra: SEARCHABLE_CATALOG_EXTRAS,
+  }));
 }
 
 function tokenAddonId(installToken: string) {

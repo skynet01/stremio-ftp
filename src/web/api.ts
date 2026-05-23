@@ -24,6 +24,7 @@ export type AddonCustomization = {
   addonDescription: string;
   catalogEnabled: boolean;
   catalogTmdbApiKey?: string;
+  combineUncategorizedCatalogs?: boolean;
   catalogContentTypes?: {
     movies: boolean;
     series: boolean;

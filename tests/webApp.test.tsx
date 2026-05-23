@@ -19,6 +19,7 @@ import {
   loadFtpSettings,
   loadServers,
   loadScanStatus,
+  loadServers,
   loadSetupStatus,
   rescanIndex,
   rescanAdminSharedIndexGroup,
@@ -116,6 +117,7 @@ const unlockProfileMock = vi.mocked(unlockProfile);
 const validateSetupTokenMock = vi.mocked(validateSetupToken);
 const defaultCatalogOptions = {
   catalogTmdbApiKey: "",
+  combineUncategorizedCatalogs: false,
   catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
   libraryLayout: "auto",
   streamDeliveryMode: "proxy",
@@ -378,6 +380,7 @@ describe("App", () => {
             "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: false,
           catalogTmdbApiKey: "",
+          combineUncategorizedCatalogs: false,
           catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
           libraryLayout: "auto",
           streamDeliveryMode: "proxy",
@@ -1271,6 +1274,7 @@ describe("App", () => {
             "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: false,
           catalogTmdbApiKey: "profile-tmdb-key",
+          combineUncategorizedCatalogs: false,
           catalogContentTypes: { movies: true, series: true, anime: true, uncategorized: true },
           libraryLayout: "folders",
           streamDeliveryMode: "direct",
@@ -1280,6 +1284,90 @@ describe("App", () => {
       }),
     );
     expect(screen.getByText(/Direct FTP sends FTP URLs to Stremio clients/)).toBeTruthy();
+  });
+
+  it("shows the combined Uncategorized catalog toggle only when multiple catalog servers are eligible", async () => {
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+    loadServersMock.mockResolvedValue({
+      customization: {
+        addonName: "Stremio FTP Addon",
+        addonLogoUrl: "",
+        addonDescription:
+          "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
+        catalogEnabled: true,
+        catalogTmdbApiKey: "",
+        combineUncategorizedCatalogs: false,
+        catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+        libraryLayout: "auto",
+        streamDeliveryMode: "proxy",
+        streamNameTemplate: defaultCatalogOptions.streamNameTemplate,
+        streamDescriptionTemplate: defaultCatalogOptions.streamDescriptionTemplate,
+      },
+      servers: [1, 2].map((id) => ({
+        id,
+        name: id === 1 ? "Alpha" : "Beta",
+        ftpConfig: {
+          host: `ftp${id}.example.test`,
+          port: 21,
+          username: "user",
+          password: "",
+          passwordConfigured: true,
+          tlsMode: "explicit" as const,
+          allowInvalidCertificate: false,
+          roots: ["/"],
+        },
+        customization: {
+          addonName: "Stremio FTP Addon",
+          addonLogoUrl: "",
+          addonDescription: "Stream movies and series episodes from your own FTP server.",
+          catalogEnabled: true,
+          catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+          libraryLayout: "auto" as const,
+          streamDeliveryMode: "proxy" as const,
+        },
+        indexStatus: { lastScanAt: null, mediaItems: 0 },
+        scanStatus: { ...idleScanStatus },
+        scanSchedule: manualScanSchedule,
+        connectionStatus: { lastTestedAt: null, ok: null },
+        pendingScanAfter: null,
+      })),
+      globalStats: {
+        totalItems: 0,
+        movies: 0,
+        series: 0,
+        anime: 0,
+        uncategorized: 0,
+        servers: 2,
+        activeScans: 0,
+        pendingScans: 0,
+        lastCompletedScanAt: null,
+        lastCompletedScanNewItems: null,
+        status: "idle",
+      },
+    });
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    const recoveryUid = screen.getByLabelText("Recovery UID") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    const toggle = await screen.findByLabelText("Combine all uncategorized media into single catalog");
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(saveCustomizationMock).toHaveBeenLastCalledWith({
+        browserUid: recoveryUid.value,
+        passphrase: "passphrase",
+        customization: expect.objectContaining({ combineUncategorizedCatalogs: true }),
+      }),
+    );
   });
 
   it("keeps the FTP catalog enabled when switching to direct stream delivery", async () => {
@@ -1354,6 +1442,7 @@ describe("App", () => {
             "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: true,
           catalogTmdbApiKey: "profile-tmdb-key",
+          combineUncategorizedCatalogs: false,
           catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
           libraryLayout: "auto",
           streamDeliveryMode: "direct",
