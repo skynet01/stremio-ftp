@@ -189,6 +189,53 @@ describe("admin routes", () => {
     );
   });
 
+  it("counts linked shared indexes plus unlinked local indexes in admin profile summaries", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    await createProfile(app, "admin-uid");
+    const user = await createProfile(app, "user-uid");
+    await saveDefaultFtp(app, "user-uid", "shared.example.test");
+    await createAndSaveFtpServer(app, "user-uid", "Local", "local.example.test");
+
+    const sharedServerId = db.prepare("select id from profile_ftp_servers where profile_id = ? and name = 'Server 1'").pluck().get(user.body.profileId) as number;
+    const localServerId = db.prepare("select id from profile_ftp_servers where profile_id = ? and name = 'Local'").pluck().get(user.body.profileId) as number;
+
+    const createdGroup = await request(app)
+      .post("/api/admin/shared-index-groups/create")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "admin-uid",
+        passphrase: "passphrase",
+        profileId: user.body.profileId,
+        serverId: sharedServerId,
+        name: "Shared Library",
+        keyHint: "shared-library",
+      })
+      .expect(200);
+    const groupId = createdGroup.body.group.id;
+
+    db.prepare("update shared_index_groups set indexed_media_count = ?, last_indexed_at = ? where id = ?").run(1000, "2026-05-22T12:00:00.000Z", groupId);
+    db.prepare("update profile_ftp_servers set indexed_media_count = ?, last_indexed_at = ? where id = ?").run(10, "2026-05-01T12:00:00.000Z", sharedServerId);
+    db.prepare("update profile_ftp_servers set indexed_media_count = ?, last_indexed_at = ? where id = ?").run(25, "2026-05-02T12:00:00.000Z", localServerId);
+
+    const response = await request(app)
+      .post("/api/admin/profiles")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(response.body.summary.indexedItems).toBe(1025);
+    expect(response.body.profiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: user.body.profileId,
+          indexedItems: 1025,
+        }),
+      ]),
+    );
+  });
+
   it("promotes a profile to database admin without granting admin API access", async () => {
     const db = new Database(":memory:");
     migrate(db);

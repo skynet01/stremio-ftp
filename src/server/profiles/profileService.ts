@@ -1072,11 +1072,18 @@ export class ProfileService {
           p.admin_enabled,
           count(s.id) as ftp_servers,
           coalesce(sum(case when s.encrypted_ftp_config is not null then 1 else 0 end), 0) as configured_ftp_servers,
-          coalesce(sum(s.indexed_media_count), 0) as indexed_items,
-          max(s.last_indexed_at) as last_scan_at,
+          coalesce(sum(case
+            when s.shared_index_group_id is not null then coalesce(g.indexed_media_count, 0)
+            else coalesce(s.indexed_media_count, 0)
+          end), 0) as indexed_items,
+          max(case
+            when s.shared_index_group_id is not null then g.last_indexed_at
+            else s.last_indexed_at
+          end) as last_scan_at,
           coalesce(sum(case when s.pending_scan_after is not null then 1 else 0 end), 0) as pending_scans
         from profiles p
         left join profile_ftp_servers s on s.profile_id = p.id
+        left join shared_index_groups g on g.id = s.shared_index_group_id
         group by p.id
         order by p.created_at desc, p.id desc
       `,

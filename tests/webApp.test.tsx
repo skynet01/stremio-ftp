@@ -388,8 +388,9 @@ describe("App", () => {
     );
   });
 
-  it("opens a footer changelog drawer with recent commits", () => {
+  it("opens a footer changelog drawer with recent commits", async () => {
     render(<App />);
+    await waitFor(() => expect(loadSetupStatusMock).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("button", { name: "Changelog" }));
 
