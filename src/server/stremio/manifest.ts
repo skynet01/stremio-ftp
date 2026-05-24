@@ -1,9 +1,44 @@
 import { createHash } from "node:crypto";
 import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization } from "../profiles/profileService.js";
 
-const ADDON_VERSION = "0.4.44";
+const ADDON_VERSION = "0.4.45";
 const ADDON_ID = "community.stremio-ftp";
 const SEARCHABLE_CATALOG_EXTRAS = [{ name: "skip" }, { name: "search" }];
+const GENRE_CATALOG_EXTRAS = [
+  ...SEARCHABLE_CATALOG_EXTRAS,
+  {
+    name: "genre",
+    options: [
+      "Action",
+      "Action & Adventure",
+      "Adventure",
+      "Animation",
+      "Comedy",
+      "Crime",
+      "Documentary",
+      "Drama",
+      "Family",
+      "Fantasy",
+      "History",
+      "Horror",
+      "Kids",
+      "Music",
+      "Mystery",
+      "News",
+      "Reality",
+      "Romance",
+      "Science Fiction",
+      "Sci-Fi & Fantasy",
+      "Soap",
+      "Talk",
+      "TV Movie",
+      "Thriller",
+      "War",
+      "War & Politics",
+      "Western",
+    ],
+  },
+];
 
 type ManifestCustomization = Partial<AddonCustomization> & {
   otherCatalogs?: Array<{ id: string; name: string }>;
@@ -16,9 +51,9 @@ export function publicManifest(customization: ManifestCustomization = {}) {
   const catalogEnabled = customization.catalogEnabled === true;
   const contentTypes = customization.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
   const catalogs = [
-    ...(contentTypes.movies ? [{ type: "movie", id: "ftp-movies", name: `${addonName} Movies`, extra: SEARCHABLE_CATALOG_EXTRAS }] : []),
-    ...(contentTypes.series ? [{ type: "series", id: "ftp-series", name: `${addonName} Series`, extra: SEARCHABLE_CATALOG_EXTRAS }] : []),
-    ...(contentTypes.anime ? [{ type: "series", id: "ftp-anime", name: `${addonName} Anime`, extra: SEARCHABLE_CATALOG_EXTRAS }] : []),
+    ...(contentTypes.movies ? [{ type: "movie", id: "ftp-movies", name: `${addonName} Movies`, extra: GENRE_CATALOG_EXTRAS }] : []),
+    ...(contentTypes.series ? [{ type: "series", id: "ftp-series", name: `${addonName} Series`, extra: GENRE_CATALOG_EXTRAS }] : []),
+    ...(contentTypes.anime ? [{ type: "series", id: "ftp-anime", name: `${addonName} Anime`, extra: GENRE_CATALOG_EXTRAS }] : []),
     ...(contentTypes.uncategorized !== false
       ? otherCatalogEntries(addonName, customization.otherCatalogs)
       : []),

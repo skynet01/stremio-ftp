@@ -126,6 +126,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const metas = mediaRepository.catalogMetas(profileId, catalogKind, 100, extra.skip, {
       ...catalogServerScope(profiles, profileId, catalogKind),
       search: extra.search,
+      genre: extra.genre,
     });
     res.json({ metas });
   });
@@ -296,9 +297,11 @@ function catalogExtraFrom(extra: string | undefined) {
   const params = new URLSearchParams((extra ?? "").replace(/^\?/, ""));
   const raw = params.get("skip");
   const search = params.get("search")?.trim() || undefined;
+  const genre = params.get("genre")?.trim() || undefined;
   return {
     skip: raw && /^\d+$/.test(raw) ? Number(raw) : 0,
     search,
+    genre,
   };
 }
 

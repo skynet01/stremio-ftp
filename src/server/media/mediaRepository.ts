@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { ParsedMedia } from "./parser.js";
 
-const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 2;
+const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 3;
 
 export type ParsedMediaFileInput = Omit<ParsedMedia, "catalogKind"> & {
   catalogKind?: ParsedMedia["catalogKind"];
@@ -34,6 +34,7 @@ export type CatalogEnrichmentCandidate = CatalogItem & {
   id: number;
   ftpServerId: number;
   itemKey: string;
+  status?: "pending" | "matched" | "unmatched" | "retry";
 };
 
 export type PersistedCatalogMeta = {
@@ -44,6 +45,7 @@ export type PersistedCatalogMeta = {
   background?: string;
   description?: string;
   releaseInfo?: string;
+  genres?: string[];
 };
 
 export type CatalogEnrichmentStats = {
@@ -607,7 +609,13 @@ export class MediaRepository {
           then 'pending'
           else catalog_enrichment.status
         end,
-        algorithm_version = excluded.algorithm_version,
+        algorithm_version = case
+          when catalog_enrichment.status = 'matched'
+            and catalog_enrichment.algorithm_version < excluded.algorithm_version
+            and catalog_enrichment.genres is null
+          then catalog_enrichment.algorithm_version
+          else excluded.algorithm_version
+        end,
         error = case
           when catalog_enrichment.status = 'unmatched'
             and catalog_enrichment.algorithm_version < excluded.algorithm_version
@@ -649,19 +657,20 @@ export class MediaRepository {
     const rows = this.db
       .prepare(
         `
-        select id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year, source_imdb_id
+        select id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year, source_imdb_id, status
         from catalog_enrichment
         where profile_id = ?
           and ftp_server_id = ?
           and (
             status = 'pending'
             or (status = 'retry' and (next_attempt_at is null or next_attempt_at <= ?))
+            or (status = 'matched' and algorithm_version < ? and genres is null)
           )
         order by updated_at asc, id asc
         limit ?
       `,
       )
-      .all(profileId, ftpServerId, nowIso, limit) as Array<{
+      .all(profileId, ftpServerId, nowIso, CATALOG_ENRICHMENT_ALGORITHM_VERSION, limit) as Array<{
       id: number;
       ftp_server_id: number;
       item_key: string;
@@ -670,6 +679,7 @@ export class MediaRepository {
       parsed_title: string;
       parsed_year: number | null;
       source_imdb_id: string | null;
+      status: "pending" | "matched" | "unmatched" | "retry";
     }>;
     return rows.map((row) => ({
       id: row.id,
@@ -680,6 +690,7 @@ export class MediaRepository {
       parsedTitle: row.parsed_title,
       parsedYear: row.parsed_year,
       imdbId: row.source_imdb_id,
+      status: row.status,
     }));
   }
 
@@ -696,6 +707,8 @@ export class MediaRepository {
             background = ?,
             description = ?,
             release_info = ?,
+            genres = ?,
+            algorithm_version = ?,
             attempts = attempts + 1,
             error = null,
             next_attempt_at = null,
@@ -703,7 +716,35 @@ export class MediaRepository {
         where id = ?
       `,
       )
-      .run(meta.id, meta.type, meta.name, meta.poster ?? null, meta.background ?? null, meta.description ?? null, meta.releaseInfo ?? null, nowIso, enrichmentId);
+      .run(
+        meta.id,
+        meta.type,
+        meta.name,
+        meta.poster ?? null,
+        meta.background ?? null,
+        meta.description ?? null,
+        meta.releaseInfo ?? null,
+        genresJson(meta.genres),
+        CATALOG_ENRICHMENT_ALGORITHM_VERSION,
+        nowIso,
+        enrichmentId,
+      );
+  }
+
+  markCatalogEnrichmentRefreshed(enrichmentId: number, nowIso: string) {
+    this.db
+      .prepare(
+        `
+        update catalog_enrichment
+        set algorithm_version = ?,
+            attempts = attempts + 1,
+            error = null,
+            next_attempt_at = null,
+            updated_at = ?
+        where id = ?
+      `,
+      )
+      .run(CATALOG_ENRICHMENT_ALGORITHM_VERSION, nowIso, enrichmentId);
   }
 
   saveCatalogEnrichmentUnmatched(enrichmentId: number, nowIso: string) {
@@ -774,7 +815,7 @@ export class MediaRepository {
     catalogKind: "movie" | "series" | "anime",
     limit: number,
     skip: number,
-    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; search?: string } = {},
+    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; search?: string; genre?: string } = {},
   ): PersistedCatalogMeta[] {
     const serverFilter = mediaServerFilter("ce", options.ftpServerIds, options.includeLegacyNullServer);
     const catalogFilter =
@@ -782,10 +823,11 @@ export class MediaRepository {
         ? { sql: "and ce.meta_type = 'movie'", params: [] as string[] }
         : { sql: "and ce.catalog_kind = ? and ce.meta_type = 'series'", params: [catalogKind] };
     const searchFilter = catalogSearchFilter("ce", options.search);
+    const genreFilter = catalogGenreFilter("ce", options.genre);
     const rows = this.db
       .prepare(
         `
-        select ce.meta_id, ce.meta_type, ce.meta_name, ce.poster, ce.background, ce.description, ce.release_info, min(ce.id) as first_id
+        select ce.meta_id, ce.meta_type, ce.meta_name, ce.poster, ce.background, ce.description, ce.release_info, max(ce.genres) as genres, min(ce.id) as first_id
         from catalog_enrichment ce
         where ce.profile_id = ?
           and ce.status = 'matched'
@@ -794,12 +836,22 @@ export class MediaRepository {
           ${catalogFilter.sql}
           ${serverFilter.sql}
           ${searchFilter.sql}
+          ${genreFilter.sql}
         group by ce.meta_id, ce.meta_type, ce.meta_name, ce.poster, ce.background, ce.description, ce.release_info
         order by ${searchFilter.orderSql} first_id asc
         limit ? offset ?
       `,
       )
-      .all(profileId, ...catalogFilter.params, ...serverFilter.params, ...searchFilter.params, ...searchFilter.orderParams, limit, skip) as Array<{
+      .all(
+        profileId,
+        ...catalogFilter.params,
+        ...serverFilter.params,
+        ...searchFilter.params,
+        ...genreFilter.params,
+        ...searchFilter.orderParams,
+        limit,
+        skip,
+      ) as Array<{
       meta_id: string;
       meta_type: "movie" | "series";
       meta_name: string;
@@ -807,6 +859,7 @@ export class MediaRepository {
       background: string | null;
       description: string | null;
       release_info: string | null;
+      genres: string | null;
     }>;
     return rows.map((row) => ({
       id: row.meta_id,
@@ -816,6 +869,7 @@ export class MediaRepository {
       background: row.background ?? undefined,
       description: row.description ?? undefined,
       releaseInfo: row.release_info ?? undefined,
+      genres: parseGenres(row.genres),
     }));
   }
 
@@ -1015,8 +1069,34 @@ function catalogSearchFilter(alias: string, search: string | undefined) {
   };
 }
 
+function catalogGenreFilter(alias: string, genre: string | undefined) {
+  const normalized = genre?.trim().toLowerCase();
+  if (!normalized) return { sql: "", params: [] as string[] };
+  return {
+    sql: `and lower(coalesce(${alias}.genres, '')) like ? escape '\\'`,
+    params: [`%"${escapeLike(normalized)}"%`],
+  };
+}
+
 function escapeLike(value: string) {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function genresJson(genres: string[] | undefined) {
+  const normalized = Array.from(new Set((genres ?? []).map((genre) => genre.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  return normalized.length ? JSON.stringify(normalized) : null;
+}
+
+function parseGenres(value: string | null) {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return undefined;
+    const genres = parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+    return genres.length ? genres : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function catalogEnrichmentKey(catalogKind: string, parsedTitle: string, parsedYear: number | null, imdbId: string | null) {

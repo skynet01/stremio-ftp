@@ -119,7 +119,7 @@ describe("schema", () => {
         "estimated_seconds_remaining",
       ]),
     );
-    expect(enrichmentColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["algorithm_version"]));
+    expect(enrichmentColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["algorithm_version", "genres"]));
   });
 
   it("allows halted scan jobs to be stored as cancelled", () => {

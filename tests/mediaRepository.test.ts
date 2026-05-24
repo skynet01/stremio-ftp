@@ -220,7 +220,10 @@ describe("MediaRepository", () => {
     db.prepare("update catalog_enrichment set algorithm_version = 1").run();
     repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), "2026-05-05T00:00:00.000Z");
 
-    expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-05-05T00:00:00.000Z", 10).map((item) => item.parsedTitle)).toEqual(["home video"]);
+    expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-05-05T00:00:00.000Z", 10).map((item) => item.parsedTitle).sort()).toEqual([
+      "home video",
+      "matrix",
+    ]);
   });
 
   it("serves movie fallback enrichment from the movie catalog and movie stream lookup", () => {
@@ -256,6 +259,54 @@ describe("MediaRepository", () => {
     expect(repo.catalogMetas(profileId, "movie", 10, 0)).toEqual([expect.objectContaining({ id: "tt0328832", type: "movie", name: "The Animatrix" })]);
     expect(repo.findMovie(profileId, "tt0328832", "animatrix", 2003)).toEqual([
       expect.objectContaining({ filename: "The Animatrix.S1E01_3DFF_FSBS.mkv" }),
+    ]);
+  });
+
+  it("persists and filters matched catalog metas by TMDB genre", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const repo = new MediaRepository(db);
+
+    for (const [title, year] of [
+      ["waterworld", 1995],
+      ["toy story", 1995],
+    ] as const) {
+      repo.upsertParsedFile(profileId, {
+        ftpServerId: serverId,
+        ftpPath: `/Movies/${title}.${year}.mkv`,
+        filename: `${title}.${year}.mkv`,
+        normalizedFilename: `${title} ${year}`,
+        extension: "mkv",
+        mediaKind: "movie",
+        catalogKind: "movie",
+        parsedTitle: title,
+        parsedYear: year,
+        season: null,
+        episode: null,
+        imdbId: null,
+        quality: null,
+        confidence: 70,
+      });
+    }
+
+    const seenAt = "2026-05-04T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), seenAt);
+    const pending = repo.pendingCatalogEnrichment(profileId, serverId, seenAt, 10);
+    repo.saveCatalogEnrichmentMatch(
+      pending.find((item) => item.parsedTitle === "waterworld")!.id,
+      { id: "tt0114898", type: "movie", name: "Waterworld", genres: ["Action", "Adventure", "Science Fiction"] },
+      seenAt,
+    );
+    repo.saveCatalogEnrichmentMatch(
+      pending.find((item) => item.parsedTitle === "toy story")!.id,
+      { id: "tt0114709", type: "movie", name: "Toy Story", genres: ["Animation", "Family"] },
+      seenAt,
+    );
+
+    expect(repo.catalogMetas(profileId, "movie", 10, 0, { genre: "Science Fiction" })).toEqual([
+      expect.objectContaining({ id: "tt0114898", name: "Waterworld", genres: ["Action", "Adventure", "Science Fiction"] }),
     ]);
   });
 

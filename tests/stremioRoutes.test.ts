@@ -28,7 +28,12 @@ const config: AppConfig = {
   tmdbApiKey: null,
 };
 
-const CATALOG_EXTRAS = [{ name: "skip" }, { name: "search" }];
+const SEARCHABLE_CATALOG_EXTRAS = [{ name: "skip" }, { name: "search" }];
+const TYPED_CATALOG_EXTRAS = [
+  { name: "skip" },
+  { name: "search" },
+  { name: "genre", options: expect.arrayContaining(["Action", "Adventure", "Animation", "Science Fiction"]) },
+];
 
 function attachRowsToDefaultServer(db: Database.Database, profileId: number, service: ProfileService) {
   const serverId = service.defaultFtpServerId(profileId);
@@ -79,7 +84,7 @@ describe("stremio routes", () => {
     const otherResponse = await request(app).get(`/u/${otherProfile.installUrlToken}/manifest.json`).expect(200);
 
     expect(response.body).toMatchObject({
-      version: "0.4.44",
+      version: "0.4.45",
       resources: ["stream"],
       types: ["movie", "series"],
       idPrefixes: ["tt"],
@@ -172,9 +177,9 @@ describe("stremio routes", () => {
 
     expect(manifest.body.resources).toEqual(["stream", "catalog", "meta"]);
     expect(manifest.body.catalogs).toEqual([
-      { type: "movie", id: "ftp-movies", name: "Archive 3D Movies", extra: CATALOG_EXTRAS },
-      { type: "series", id: "ftp-series", name: "Archive 3D Series", extra: CATALOG_EXTRAS },
-      { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: CATALOG_EXTRAS },
+      { type: "movie", id: "ftp-movies", name: "Archive 3D Movies", extra: TYPED_CATALOG_EXTRAS },
+      { type: "series", id: "ftp-series", name: "Archive 3D Series", extra: TYPED_CATALOG_EXTRAS },
+      { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: SEARCHABLE_CATALOG_EXTRAS },
     ]);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(catalog.body.metas).toEqual([
@@ -282,6 +287,66 @@ describe("stremio routes", () => {
 
     expect(catalog.body.metas.map((meta: { name: string }) => meta.name)).toEqual(["The Matrix", "The Animatrix"]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("advertises and filters TMDB-enriched catalogs by genre extra", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: true,
+      catalogContentTypes: { movies: true, series: false, anime: false },
+    });
+    const repository = new MediaRepository(db);
+    for (const [title, year] of [
+      ["waterworld", 1995],
+      ["toy story", 1995],
+    ] as const) {
+      repository.upsertParsedFile(created.profileId, {
+        mediaKind: "movie",
+        catalogKind: "movie",
+        ftpPath: `/Movies/${title}.${year}.mkv`,
+        filename: `${title}.${year}.mkv`,
+        normalizedFilename: `${title} ${year}`,
+        extension: "mkv",
+        parsedTitle: title,
+        parsedYear: year,
+        season: null,
+        episode: null,
+        imdbId: null,
+        quality: "1080p",
+        confidence: 70,
+      });
+    }
+    const serverId = attachRowsToDefaultServer(db, created.profileId, service);
+    const seenAt = new Date().toISOString();
+    repository.syncCatalogEnrichmentCandidates(created.profileId, serverId, repository.catalogEnrichmentCandidates(created.profileId, serverId, ["movie"]), seenAt);
+    for (const candidate of repository.pendingCatalogEnrichment(created.profileId, serverId, seenAt, 100)) {
+      const metaByTitle = {
+        waterworld: { id: "tt0114898", type: "movie" as const, name: "Waterworld", genres: ["Action", "Adventure", "Science Fiction"] },
+        "toy story": { id: "tt0114709", type: "movie" as const, name: "Toy Story", genres: ["Animation", "Family"] },
+      };
+      repository.saveCatalogEnrichmentMatch(candidate.id, metaByTitle[candidate.parsedTitle as keyof typeof metaByTitle], seenAt);
+    }
+    vi.stubGlobal("fetch", vi.fn());
+    const app = createApp({ ...config, tmdbApiKey: "tmdb-key" }, db);
+
+    const manifest = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
+    const catalog = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-movies/genre=Science%20Fiction.json`).expect(200);
+
+    expect(manifest.body.catalogs.find((item: { id: string }) => item.id === "ftp-movies").extra).toEqual(TYPED_CATALOG_EXTRAS);
+    expect(catalog.body.metas).toEqual([
+      expect.objectContaining({
+        id: "tt0114898",
+        type: "movie",
+        name: "Waterworld",
+        genres: ["Action", "Adventure", "Science Fiction"],
+      }),
+    ]);
   });
 
   it("only scans catalog-enabled servers for catalog pages and TMDB lookups", async () => {
@@ -713,8 +778,8 @@ describe("stremio routes", () => {
 
     const manifest = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
     expect(manifest.body.catalogs).toEqual(expect.arrayContaining([
-      { type: "movie", id: `ftp-other-${server1Id}`, name: "Archive 3D Alpha Other", extra: CATALOG_EXTRAS },
-      { type: "movie", id: `ftp-other-${server2.id}`, name: "Archive 3D Beta Other", extra: CATALOG_EXTRAS },
+      { type: "movie", id: `ftp-other-${server1Id}`, name: "Archive 3D Alpha Other", extra: SEARCHABLE_CATALOG_EXTRAS },
+      { type: "movie", id: `ftp-other-${server2.id}`, name: "Archive 3D Beta Other", extra: SEARCHABLE_CATALOG_EXTRAS },
     ]));
     expect(manifest.body.catalogs.map((catalog: { id: string }) => catalog.id)).not.toContain("ftp-other");
 
@@ -873,8 +938,8 @@ describe("stremio routes", () => {
     const catalog = await request(app).get(`/u/${created.installUrlToken}/catalog/series/ftp-anime.json`).expect(200);
 
     expect(manifest.body.catalogs).toEqual([
-      { type: "series", id: "ftp-anime", name: "Archive 3D Anime", extra: CATALOG_EXTRAS },
-      { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: CATALOG_EXTRAS },
+      { type: "series", id: "ftp-anime", name: "Archive 3D Anime", extra: TYPED_CATALOG_EXTRAS },
+      { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: SEARCHABLE_CATALOG_EXTRAS },
     ]);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(catalog.body.metas).toEqual([
@@ -1319,10 +1384,10 @@ describe("stremio routes", () => {
 
     expect(response.body.resources).toEqual(["stream", "catalog", "meta"]);
     expect(response.body.catalogs).toEqual([
-      { type: "movie", id: "ftp-movies", name: "Archive 3D Movies", extra: CATALOG_EXTRAS },
-      { type: "series", id: "ftp-series", name: "Archive 3D Series", extra: CATALOG_EXTRAS },
-      { type: "series", id: "ftp-anime", name: "Archive 3D Anime", extra: CATALOG_EXTRAS },
-      { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: CATALOG_EXTRAS },
+      { type: "movie", id: "ftp-movies", name: "Archive 3D Movies", extra: TYPED_CATALOG_EXTRAS },
+      { type: "series", id: "ftp-series", name: "Archive 3D Series", extra: TYPED_CATALOG_EXTRAS },
+      { type: "series", id: "ftp-anime", name: "Archive 3D Anime", extra: TYPED_CATALOG_EXTRAS },
+      { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: SEARCHABLE_CATALOG_EXTRAS },
     ]);
   });
 

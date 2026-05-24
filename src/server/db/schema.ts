@@ -74,6 +74,7 @@ const CATALOG_ENRICHMENT_COLUMNS = `
       background text,
       description text,
       release_info text,
+      genres text,
       algorithm_version integer not null default 1 check (algorithm_version >= 1),
       attempts integer not null default 0 check (attempts >= 0),
       error text,
@@ -209,6 +210,7 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureDefaultFtpServers(db);
   ensureCatalogEnrichmentTable(db);
   ensureCatalogEnrichmentColumn(db, "algorithm_version", "integer not null default 1");
+  ensureCatalogEnrichmentColumn(db, "genres", "text");
 }
 
 function ensureProfileColumn(db: Database.Database, name: string, definition: string) {

@@ -78,6 +78,91 @@ describe("tmdbCatalogMeta", () => {
     expect(new URL(String(fetchMock.mock.calls[1][0])).searchParams.get("query")).toBe("blade ii");
   });
 
+  it("skips weak first movie search results and uses the exact title/year match", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              id: 999,
+              title: "Waterworld: A Live Sea War Spectacular",
+              release_date: "1999-01-01",
+              genre_ids: [99],
+            },
+            {
+              id: 9804,
+              title: "Waterworld",
+              release_date: "1995-07-28",
+              genre_ids: [28, 12, 878],
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ imdb_id: "tt0114898" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      tmdbCatalogMeta(
+        { mediaKind: "movie", catalogKind: "movie", parsedTitle: "waterworld", parsedYear: 1995, imdbId: null },
+        "tmdb-key",
+        "movie",
+      ),
+    ).resolves.toMatchObject({
+      id: "tt0114898",
+      type: "movie",
+      name: "Waterworld",
+      releaseInfo: "1995",
+      genres: ["Action", "Adventure", "Science Fiction"],
+    });
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/3/movie/9804/external_ids");
+  });
+
+  it("retries movie searches without trailing edition cut labels", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ results: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              id: 9804,
+              title: "Waterworld",
+              release_date: "1995-07-28",
+              genre_ids: [28, 12, 878],
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ imdb_id: "tt0114898" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      tmdbCatalogMeta(
+        { mediaKind: "movie", catalogKind: "movie", parsedTitle: "waterworld ulysses cut", parsedYear: 1995, imdbId: null },
+        "tmdb-key",
+        "movie",
+      ),
+    ).resolves.toMatchObject({
+      id: "tt0114898",
+      type: "movie",
+      name: "Waterworld",
+      releaseInfo: "1995",
+    });
+    expect(new URL(String(fetchMock.mock.calls[1][0])).searchParams.get("query")).toBe("waterworld");
+  });
+
   it("retries year-constrained searches without the year", async () => {
     const fetchMock = vi
       .fn()
