@@ -16,6 +16,7 @@ import { ProfileService } from "./profiles/profileService.js";
 import { profileRoutes } from "./profiles/profileRoutes.js";
 import { createFtpProxyResolver } from "./proxy/ftpProxyResolver.js";
 import { createProxyRouter } from "./proxy/proxyRoutes.js";
+import { ProxyStreamTracker } from "./proxy/streamTracker.js";
 import { ScanQueue } from "./scanner/scanQueue.js";
 import { stremioRoutes } from "./stremio/routes.js";
 
@@ -53,6 +54,7 @@ export function createApp(
   const baseFtpClientFactory = options.ftpClientFactory ?? createBasicFtpClientFactory(config.ftpTimeoutMs);
   const ftpClientFactory = limitFtpClientFactoryByKey(baseFtpClientFactory, config.ftpMaxConnections);
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
+  const streamTracker = new ProxyStreamTracker();
   const scanScheduler = setInterval(() => scanQueue.enqueueDueScheduledScans(), config.scanSchedulerIntervalMs);
   scanScheduler.unref();
   if (config.emptyProfileCleanupDays > 0) {
@@ -88,8 +90,8 @@ export function createApp(
     res.json({ ok: true });
   });
   app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue));
-  app.use("/api/admin", adminRoutes(config, profileService, scanQueue));
-  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
+  app.use("/api/admin", adminRoutes(config, profileService, scanQueue, streamTracker));
+  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory), streamTracker }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 
   app.get("/health", (_req, res) => {

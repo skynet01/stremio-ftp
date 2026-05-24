@@ -276,6 +276,32 @@ export type AdminProfileListResponse = {
   profiles: AdminProfileSummary[];
 };
 
+export type ActiveProxyStream = {
+  id: string;
+  routeKind: "profile" | "shared";
+  method: string;
+  filename: string;
+  sizeBytes: number | null;
+  range: string | null;
+  status: number;
+  profileId: number | null;
+  serverId: number | null;
+  sharedIndexGroupId: number | null;
+  remoteAddress: string | null;
+  userAgent: string | null;
+  startedAt: string;
+  durationSeconds: number;
+};
+
+export type AdminStreamStatusResponse = {
+  activeStreams: ActiveProxyStream[];
+  summary: {
+    active: number;
+    profile: number;
+    shared: number;
+  };
+};
+
 export type AdminManifestTokenResponse = {
   profileId: number;
   manifestUrl: string;
@@ -631,6 +657,15 @@ export async function loadAdminProfiles(request: CreateProfileRequest): Promise<
     body: JSON.stringify(request),
   });
   return readJson<AdminProfileListResponse>(response);
+}
+
+export async function loadAdminStreamStatus(request: CreateProfileRequest): Promise<AdminStreamStatusResponse> {
+  const response = await fetch("/api/admin/streams", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(request),
+  });
+  return readJson<AdminStreamStatusResponse>(response);
 }
 
 export async function issueAdminManifestToken(request: CreateProfileRequest & { profileId: number }): Promise<AdminManifestTokenResponse> {

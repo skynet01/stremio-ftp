@@ -3,16 +3,21 @@ import type { Request, Response } from "express";
 import { Router } from "express";
 import { lookup } from "mime-types";
 import { parseRangeHeader } from "./range.js";
+import type { ProxyStreamTracker } from "./streamTracker.js";
 
 type ProxyFile = {
   filename: string;
   sizeBytes: number | null;
+  profileId?: number | null;
+  ftpServerId?: number | null;
+  sharedIndexGroupId?: number | null;
   warmReadStream?: () => void;
   openReadStream(input: { start: number; end: number; signal?: AbortSignal }): Promise<NodeJS.ReadableStream>;
 };
 
 type ProxyDeps = {
   resolve(input: { installToken: string; fileId: number } | { installToken: string; serverId: number; sharedMediaId: number }): Promise<ProxyFile | null>;
+  streamTracker?: ProxyStreamTracker;
 };
 
 type ProxyTiming = {
@@ -81,7 +86,7 @@ async function handleSharedProxyRequest(deps: ProxyDeps, req: Request, res: Resp
     logProxyTiming(timing, "not_found");
     return;
   }
-  await streamProxyFile(file, req, res, headOnly, timing);
+  await streamProxyFile(deps, file, req, res, headOnly, timing);
 }
 
 async function handleProxyRequest(deps: ProxyDeps, req: Request, res: Response, headOnly: boolean) {
@@ -108,10 +113,10 @@ async function handleProxyRequest(deps: ProxyDeps, req: Request, res: Response, 
     return;
   }
 
-  await streamProxyFile(file, req, res, headOnly, timing);
+  await streamProxyFile(deps, file, req, res, headOnly, timing);
 }
 
-async function streamProxyFile(file: ProxyFile, req: Request, res: Response, headOnly: boolean, timing: ProxyTiming) {
+async function streamProxyFile(deps: ProxyDeps, file: ProxyFile, req: Request, res: Response, headOnly: boolean, timing: ProxyTiming) {
   const rangeHeader = req.header("range");
   const range = parseRangeHeader(rangeHeader, file.sizeBytes);
   timing.range = rangeHeader ?? undefined;
@@ -161,6 +166,20 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
 
   res.flushHeaders();
   timing.headersMs = elapsedMs(timing.startedAt);
+  const streamId =
+    deps.streamTracker?.start({
+      routeKind: timing.routeKind,
+      method: req.method,
+      filename: file.filename,
+      sizeBytes: file.sizeBytes,
+      range: rangeHeader ?? null,
+      status,
+      profileId: file.profileId ?? null,
+      serverId: file.ftpServerId ?? null,
+      sharedIndexGroupId: file.sharedIndexGroupId ?? null,
+      remoteAddress: req.ip || req.socket.remoteAddress || null,
+      userAgent: req.header("user-agent") ?? null,
+    }) ?? null;
 
   const openController = new AbortController();
   let streamOpened = false;
@@ -177,9 +196,11 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
   } catch (error) {
     res.off("close", abortPendingOpen);
     if (openController.signal.aborted) {
+      deps.streamTracker?.finish(streamId);
       logProxyTiming(timing, "client_closed_before_open");
       return;
     }
+    deps.streamTracker?.finish(streamId);
     logProxyTiming(timing, "open_failed");
     throw error;
   }
@@ -187,6 +208,7 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
   res.off("close", abortPendingOpen);
   if (openController.signal.aborted || res.destroyed) {
     destroyStream(stream);
+    deps.streamTracker?.finish(streamId);
     logProxyTiming(timing, "client_closed_after_open");
     return;
   }
@@ -203,9 +225,14 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
     res.off("close", cleanup);
   };
 
-  res.once("finish", () => logProxyTiming(timing, "finish"));
+  const finishTrackedStream = () => deps.streamTracker?.finish(streamId);
+  res.once("finish", () => {
+    finishTrackedStream();
+    logProxyTiming(timing, "finish");
+  });
   res.once("close", () => {
     cleanup();
+    finishTrackedStream();
     logProxyTiming(timing, streamFinished ? "close" : "client_closed");
   });
   stream.once("end", markFinished);

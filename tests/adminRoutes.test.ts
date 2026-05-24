@@ -189,6 +189,24 @@ describe("admin routes", () => {
     );
   });
 
+  it("returns the current admin stream status", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    await createProfile(app, "admin-uid");
+
+    const response = await request(app)
+      .post("/api/admin/streams")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(response.body).toEqual({
+      activeStreams: [],
+      summary: { active: 0, profile: 0, shared: 0 },
+    });
+  });
+
   it("counts linked shared indexes plus unlinked local indexes in admin profile summaries", async () => {
     const db = new Database(":memory:");
     migrate(db);
@@ -481,7 +499,7 @@ describe("admin routes", () => {
       host: "sputnik.whatbox.ca",
       linkedServerCount: 1,
       masterServer: { profileId: master.body.profileId, browserUid: "master-uid", countryCode: "US", serverId: masterServerId, serverName: "Server 1" },
-      scanSchedule: { intervalMinutes: 0, nextScheduledScanAt: null },
+      scanSchedule: { intervalMinutes: 720, nextScheduledScanAt: expect.any(String) },
       scanStatus: expect.objectContaining({ status: "idle" }),
     });
 

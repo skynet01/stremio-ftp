@@ -15,6 +15,7 @@ import {
   linkAdminSharedIndexServer,
   loadAdminSharedIndexGroups,
   loadAdminProfiles,
+  loadAdminStreamStatus,
   loadCustomization,
   loadFtpSettings,
   loadServers,
@@ -54,6 +55,7 @@ vi.mock("../src/web/api", () => ({
   linkAdminSharedIndexServer: vi.fn(),
   loadAdminSharedIndexGroups: vi.fn(),
   loadAdminProfiles: vi.fn(),
+  loadAdminStreamStatus: vi.fn(),
   loadCustomization: vi.fn(),
   loadFtpSettings: vi.fn(),
   loadServers: vi.fn(),
@@ -91,6 +93,7 @@ const issueAdminManifestTokenMock = vi.mocked(issueAdminManifestToken);
 const linkAdminSharedIndexServerMock = vi.mocked(linkAdminSharedIndexServer);
 const loadAdminSharedIndexGroupsMock = vi.mocked(loadAdminSharedIndexGroups);
 const loadAdminProfilesMock = vi.mocked(loadAdminProfiles);
+const loadAdminStreamStatusMock = vi.mocked(loadAdminStreamStatus);
 const loadCustomizationMock = vi.mocked(loadCustomization);
 const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
 const loadServersMock = vi.mocked(loadServers);
@@ -180,6 +183,8 @@ describe("App", () => {
       },
       profiles: [],
     });
+    loadAdminStreamStatusMock.mockReset();
+    loadAdminStreamStatusMock.mockResolvedValue({ activeStreams: [], summary: { active: 0, profile: 0, shared: 0 } });
     loadCustomizationMock.mockReset();
     loadFtpSettingsMock.mockReset();
     loadServersMock.mockReset();

@@ -11,6 +11,7 @@ import {
   linkAdminSharedIndexServer,
   loadAdminSharedIndexGroups,
   loadAdminProfiles,
+  loadAdminStreamStatus,
   rescanAdminSharedIndexGroup,
   rotateAdminSharedIndexKey,
   scheduleAdminSharedIndexGroup,
@@ -21,6 +22,8 @@ import {
   type AdminBulkProfilesResponse,
   type AdminProfileListResponse,
   type AdminProfileSummary,
+  type ActiveProxyStream,
+  type AdminStreamStatusResponse,
   type AdminSharedIndexGroup,
   type AdminSharedIndexLinkedServer,
 } from "../api.js";
@@ -79,6 +82,7 @@ type CreateSharedGroupTarget = {
 
 export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) {
   const [data, setData] = useState<AdminProfileListResponse | null>(null);
+  const [streamStatus, setStreamStatus] = useState<AdminStreamStatusResponse>({ activeStreams: [], summary: { active: 0, profile: 0, shared: 0 } });
   const [message, setMessage] = useState("Loading admin profile list...");
   const [loading, setLoading] = useState(false);
   const [busyProfileId, setBusyProfileId] = useState<number | null>(null);
@@ -125,9 +129,18 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
+  async function refreshStreamStatus() {
+    try {
+      setStreamStatus(await loadAdminStreamStatus({ browserUid, passphrase }));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load stream status.");
+    }
+  }
+
   async function refreshAdminData() {
     await refreshProfiles();
     await refreshSharedGroups();
+    await refreshStreamStatus();
   }
 
   async function refreshUnlinkedIndexes(targetProfiles: AdminProfileSummary[], label: string) {
@@ -577,9 +590,12 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
         <SummaryStat label="Profiles" value={displayStats.nonEmptyProfiles} title={`${displayStats.totalProfiles} total profiles - ${displayStats.createdToday} created today`} />
         <SummaryStat label="FTP servers" value={displayStats.uniqueServers} title={`${displayStats.totalServers} total server rows`} />
         <SummaryStat label="Indexed items" value={displayStats.uniqueIndexedItems} title={`${displayStats.totalIndexedItems} total indexed rows before dedupe`} />
+        <SummaryStat label="Running streams" value={streamStatus.summary.active} title={`${streamStatus.summary.profile} profile, ${streamStatus.summary.shared} shared`} />
         <SummaryStat label="Active scans" value={summary?.activeScans ?? 0} />
         <SummaryStat label="Pending scans" value={summary?.pendingScans ?? 0} />
       </dl>
+
+      {streamStatus.activeStreams.length ? <ActiveStreamsPanel streams={streamStatus.activeStreams} /> : null}
 
       <Notice className="admin-dashboard-notice">{message}</Notice>
 
@@ -953,6 +969,16 @@ function formatAdminNumber(value: number) {
   return value.toLocaleString();
 }
 
+function formatDurationSeconds(seconds: number) {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
 function serverLinkSummary(profile: AdminProfileSummary) {
   const configured = configuredServerDetails(profile);
   const linked = configured.filter((server) => server.sharedIndex);
@@ -997,6 +1023,37 @@ function nextSharedScanLabel(group: AdminSharedIndexGroup) {
   if (group.scanStatus.status === "queued") return formatScanTime(group.scanStatus.queuedAt);
   if (group.scanStatus.status === "running") return "Running now";
   return formatNextScan(group.scanSchedule.nextScheduledScanAt);
+}
+
+function ActiveStreamsPanel({ streams }: { streams: ActiveProxyStream[] }) {
+  return (
+    <section className="admin-stream-status" aria-label="Running proxy streams">
+      <div className="admin-subsection-header">
+        <div>
+          <span className="section-label">Proxy streams</span>
+          <h3>Currently running</h3>
+        </div>
+      </div>
+      <div className="admin-stream-list">
+        {streams.map((stream) => (
+          <div key={stream.id} className="admin-stream-row">
+            <div>
+              <strong>{stream.filename}</strong>
+              <span>
+                {stream.routeKind === "shared" ? "Shared" : "Profile"} stream
+                {stream.profileId ? ` / profile ${stream.profileId}` : ""}
+                {stream.serverId ? ` / server ${stream.serverId}` : ""}
+              </span>
+            </div>
+            <div>
+              <span>{stream.range || "Full file"}</span>
+              <strong>{formatDurationSeconds(stream.durationSeconds)}</strong>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function ModalPortal({ children }: { children: ReactNode }) {
@@ -1176,7 +1233,7 @@ function SharedIndexAdminSection({
                     >
                       <option value="0">Manual only</option>
                       <option value="360">Every 6 hours</option>
-                      <option value="720">Every 12 hours</option>
+                      <option value="720">Twice a day</option>
                       <option value="1440">Daily</option>
                       <option value="4320">Every 3 days</option>
                       <option value="10080">Weekly</option>

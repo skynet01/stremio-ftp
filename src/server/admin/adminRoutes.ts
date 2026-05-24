@@ -4,7 +4,9 @@ import type { AppConfig } from "../config.js";
 import { countryCodeFromRequest } from "../http/requestMetadata.js";
 import type { ProfileScanStatus } from "../scanner/scanQueue.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
+import { nextAlignedScanAt } from "../scanner/schedule.js";
 import { ProfileNotFoundError, ProfileService, type FtpServer, type SharedIndexGroup } from "../profiles/profileService.js";
+import type { ProxyStreamTracker } from "../proxy/streamTracker.js";
 
 const adminAuthSchema = z.object({
   browserUid: z.string().min(8),
@@ -53,7 +55,7 @@ function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: stri
   return !ftpConfig.username?.trim() || !ftpConfig.password;
 }
 
-export function adminRoutes(config: AppConfig, service: ProfileService, scanQueue: ScanQueue) {
+export function adminRoutes(config: AppConfig, service: ProfileService, scanQueue: ScanQueue, streamTracker?: ProxyStreamTracker) {
   const router = Router();
 
   async function authorize(req: Request) {
@@ -109,6 +111,13 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
       },
       profiles,
     });
+  });
+
+  router.post("/streams", async (req, res) => {
+    const auth = await authorize(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+    res.json(streamTracker?.snapshot() ?? { activeStreams: [], summary: { active: 0, profile: 0, shared: 0 } });
   });
 
   router.post("/shared-index-groups", async (req, res) => {
@@ -222,11 +231,9 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     }
 
     try {
-      const nextScheduledScanAt =
-        parsed.data.intervalMinutes > 0 ? new Date(Date.now() + parsed.data.intervalMinutes * 60_000).toISOString() : null;
       const scanSchedule = service.saveSharedIndexGroupScanSchedule(groupId.data, {
         intervalMinutes: parsed.data.intervalMinutes,
-        nextScheduledScanAt,
+        nextScheduledScanAt: nextAlignedScanAt(parsed.data.intervalMinutes),
       });
       const group = service.getSharedIndexGroup(groupId.data);
       if (!group) return res.status(404).json({ error: "Shared index group not found" });

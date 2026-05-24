@@ -174,6 +174,7 @@ describe("ScanQueue", () => {
       keyHint: "shared-main",
     }).group;
 
+    expect(profileService.sharedIndexGroupScanSchedule(group.id).intervalMinutes).toBe(720);
     const queued = queue.enqueueSharedIndexScan(group.id, "manual");
 
     expect(["queued", "running"]).toContain(queued.status);
@@ -183,6 +184,56 @@ describe("ScanQueue", () => {
     expect(mediaRepository.countForSharedIndexGroup(group.id)).toBe(1);
     expect(db.prepare("select count(*) as count from catalog_enrichment").get()).toEqual({ count: 0 });
     expect(profileService.getSharedIndexGroup(group.id)?.indexedMediaCount).toBe(1);
+  });
+
+  it("queues scheduled shared index groups as one aligned batch", async () => {
+    const seenRoots: string[] = [];
+    const { profileService, queue } = createHarness(
+      async () => ({
+        list: async (path) => {
+          seenRoots.push(path);
+          return [{ name: "Shared.Movie.2020.mkv", path: `${path === "/" ? "" : path}/Shared.Movie.2020.mkv`, type: "file", size: 1000 }];
+        },
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, scanCooldownMs: 0 },
+    );
+    const firstProfileId = await createProfileWithFtp(profileService);
+    const firstServerId = profileService.defaultFtpServerId(firstProfileId);
+    const firstGroup = profileService.createSharedIndexGroupFromServer(firstProfileId, firstServerId, {
+      name: "Shared A",
+      keyHint: "shared-a",
+    }).group;
+    const secondProfileId = await createProfileWithFtp(profileService);
+    const secondServerId = profileService.defaultFtpServerId(secondProfileId);
+    const secondGroup = profileService.createSharedIndexGroupFromServer(secondProfileId, secondServerId, {
+      name: "Shared B",
+      keyHint: "shared-b",
+    }).group;
+
+    profileService.saveSharedIndexGroupScanSchedule(firstGroup.id, {
+      intervalMinutes: 720,
+      nextScheduledScanAt: "2026-05-24T12:00:00.000Z",
+    });
+    profileService.saveSharedIndexGroupScanSchedule(secondGroup.id, {
+      intervalMinutes: 720,
+      nextScheduledScanAt: "2026-05-24T23:00:00.000Z",
+    });
+
+    queue.enqueueDueScheduledScans("2026-05-24T12:00:00.000Z");
+    await waitForSharedStatus(queue, firstGroup.id, "succeeded");
+    await waitForSharedStatus(queue, secondGroup.id, "succeeded");
+
+    expect(seenRoots).toEqual(["/", "/"]);
+    expect(profileService.sharedIndexGroupScanSchedule(firstGroup.id)).toEqual({
+      intervalMinutes: 720,
+      nextScheduledScanAt: "2026-05-25T00:00:00.000Z",
+    });
+    expect(profileService.sharedIndexGroupScanSchedule(secondGroup.id)).toEqual({
+      intervalMinutes: 720,
+      nextScheduledScanAt: "2026-05-25T00:00:00.000Z",
+    });
   });
 
   it("cancels a running profile scan and closes the FTP client", async () => {

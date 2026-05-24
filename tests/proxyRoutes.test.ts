@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createProxyRouter } from "../src/server/proxy/proxyRoutes";
+import { ProxyStreamTracker } from "../src/server/proxy/streamTracker";
 
 describe("proxy routes", () => {
   it("returns partial content for range requests", async () => {
@@ -299,6 +300,58 @@ describe("proxy routes", () => {
       });
     }
   });
+
+  it("tracks active proxy streams until the response closes", async () => {
+    const tracker = new ProxyStreamTracker();
+    const stream = new Readable({ read() {} });
+    const router = createProxyRouter({
+      streamTracker: tracker,
+      resolve: async () => ({
+        filename: "video.mkv",
+        sizeBytes: 10,
+        profileId: 4,
+        ftpServerId: 9,
+        openReadStream: async () => stream,
+      }),
+    });
+
+    const express = (await import("express")).default;
+    const app = express().use(router);
+    const server = app.listen(0);
+
+    try {
+      const port = (server.address() as AddressInfo).port;
+      await new Promise<void>((resolve, reject) => {
+        const req = httpRequest({ host: "127.0.0.1", port, path: "/proxy/token/1" }, (res) => {
+          waitFor(() => tracker.snapshot().summary.active === 1)
+            .then(() => {
+              expect(tracker.snapshot().activeStreams[0]).toEqual(
+                expect.objectContaining({
+                  filename: "video.mkv",
+                  routeKind: "profile",
+                  profileId: 4,
+                  serverId: 9,
+                }),
+              );
+              stream.push("0123456789");
+              stream.push(null);
+            })
+            .catch(reject);
+          res.resume();
+          res.once("end", resolve);
+        });
+        req.once("error", reject);
+        req.end();
+      });
+
+      await waitFor(() => tracker.snapshot().summary.active === 0);
+      expect(tracker.snapshot().activeStreams).toEqual([]);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
 });
 
 async function waitFor(predicate: () => boolean) {
@@ -306,6 +359,7 @@ async function waitFor(predicate: () => boolean) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+  throw new Error("Timed out waiting for predicate");
 }
 
 function deferred<T>() {

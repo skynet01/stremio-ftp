@@ -15,6 +15,7 @@ import {
   keyHintFromName,
   serverMatchesSharedIndexGroup,
 } from "../shared/sharedIndex.js";
+import { nextAlignedScanAt, SHARED_INDEX_DEFAULT_SCAN_INTERVAL_MINUTES } from "../scanner/schedule.js";
 
 export type FtpConfig = {
   host: string;
@@ -605,11 +606,12 @@ export class ProfileService {
     return rows.map((row) => row.id);
   }
 
-  dueScheduledScanServerIds(nowIso: string): Array<{ profileId: number; serverId: number }> {
+  dueScheduledScanServerIds(nowIso: string): Array<{ profileId: number; serverId: number; dueReason: "pending" | "scheduled" }> {
     const rows = this.db
       .prepare(
         `
-        select profile_id, id
+        select profile_id, id,
+          case when pending_scan_after is not null and pending_scan_after <= ? then 'pending' else 'scheduled' end as due_reason
         from profile_ftp_servers
         where encrypted_ftp_config is not null
           and (
@@ -619,8 +621,30 @@ export class ProfileService {
         order by coalesce(pending_scan_after, next_scheduled_scan_at) asc, profile_id asc, id asc
       `,
       )
-      .all(nowIso, nowIso) as { profile_id: number; id: number }[];
-    return rows.map((row) => ({ profileId: row.profile_id, serverId: row.id }));
+      .all(nowIso, nowIso, nowIso) as { profile_id: number; id: number; due_reason: "pending" | "scheduled" }[];
+    return rows.map((row) => ({ profileId: row.profile_id, serverId: row.id, dueReason: row.due_reason }));
+  }
+
+  scheduledSharedIndexScanServerIds(): Array<{ profileId: number; serverId: number; sharedIndexGroupId: number; intervalMinutes: number }> {
+    const rows = this.db
+      .prepare(
+        `
+        select s.profile_id, s.id as server_id, g.id as shared_index_group_id, s.scan_interval_minutes
+        from shared_index_groups g
+        join profile_ftp_servers s on s.id = g.master_profile_ftp_server_id
+        where g.enabled = 1
+          and s.encrypted_ftp_config is not null
+          and s.scan_interval_minutes > 0
+        order by g.id asc
+      `,
+      )
+      .all() as Array<{ profile_id: number; server_id: number; shared_index_group_id: number; scan_interval_minutes: number }>;
+    return rows.map((row) => ({
+      profileId: row.profile_id,
+      serverId: row.server_id,
+      sharedIndexGroupId: row.shared_index_group_id,
+      intervalMinutes: row.scan_interval_minutes,
+    }));
   }
 
   getConnectionStatus(profileId: number): ConnectionStatus {
@@ -724,9 +748,13 @@ export class ProfileService {
         serverId,
         now,
         now,
-      );
+    );
     const groupId = Number(result.lastInsertRowid);
     this.linkServerToSharedGroup(profileId, serverId, groupId);
+    this.saveFtpServerScanSchedule(profileId, serverId, {
+      intervalMinutes: SHARED_INDEX_DEFAULT_SCAN_INTERVAL_MINUTES,
+      nextScheduledScanAt: nextAlignedScanAt(SHARED_INDEX_DEFAULT_SCAN_INTERVAL_MINUTES),
+    });
     return { group: this.getSharedIndexGroup(groupId)!, sharedIndexKey };
   }
 
@@ -946,11 +974,13 @@ export class ProfileService {
     if (!group || !server.ftpConfig || !serverMatchesSharedIndexGroup(server.ftpConfig, group)) {
       throw new Error("FTP server does not match shared index group");
     }
+    const existingSchedule = this.sharedIndexGroupScanSchedule(groupId);
     const result = this.db
       .prepare("update shared_index_groups set master_profile_ftp_server_id = ?, updated_at = ? where id = ?")
       .run(serverId, new Date().toISOString(), groupId);
     if (result.changes === 0) throw new ProfileNotFoundError();
     this.linkServerToSharedGroup(profileId, serverId, groupId);
+    this.saveFtpServerScanSchedule(profileId, serverId, existingSchedule);
     return this.getSharedIndexGroup(groupId)!;
   }
 

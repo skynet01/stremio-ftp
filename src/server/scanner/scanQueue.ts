@@ -5,6 +5,7 @@ import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { CatalogEnrichmentCandidate, MediaRepository } from "../media/mediaRepository.js";
 import { tmdbCatalogEnrichment } from "../metadata/tmdbClient.js";
 import type { ProfileService } from "../profiles/profileService.js";
+import { nextAlignedScanAt } from "./schedule.js";
 
 const MAX_ESTIMATED_SECONDS_REMAINING = 24 * 60 * 60;
 const SCAN_JOB_ROW_ERROR = "Invalid scan job row";
@@ -273,7 +274,28 @@ export class ScanQueue {
   }
 
   enqueueDueScheduledScans(nowIso = new Date().toISOString()) {
-    for (const { profileId, serverId } of this.profileService.dueScheduledScanServerIds(nowIso)) {
+    const now = new Date(nowIso);
+    const dueTargets = this.profileService.dueScheduledScanServerIds(nowIso);
+    const handledServers = new Set<string>();
+    if (dueTargets.some(({ profileId, serverId, dueReason }) => dueReason === "scheduled" && this.profileService.getFtpServer(profileId, serverId).sharedIndex)) {
+      for (const target of this.profileService.scheduledSharedIndexScanServerIds()) {
+        handledServers.add(`${target.profileId}:${target.serverId}`);
+        const ftpConfig = this.profileService.getFtpServerConfig(target.profileId, target.serverId);
+        if (!ftpConfig || !ftpConfig.username?.trim() || !ftpConfig.password) {
+          this.profileService.clearPendingScan(target.profileId, target.serverId);
+          continue;
+        }
+        this.profileService.clearPendingScan(target.profileId, target.serverId);
+        this.profileService.saveFtpServerScanSchedule(target.profileId, target.serverId, {
+          intervalMinutes: target.intervalMinutes,
+          nextScheduledScanAt: nextAlignedScanAt(target.intervalMinutes, now),
+        });
+        this.enqueueSharedIndexScan(target.sharedIndexGroupId, "scheduled");
+      }
+    }
+
+    for (const { profileId, serverId } of dueTargets) {
+      if (handledServers.has(`${profileId}:${serverId}`)) continue;
       const ftpConfig = this.profileService.getFtpServerConfig(profileId, serverId);
       if (!ftpConfig || !ftpConfig.username?.trim() || !ftpConfig.password) {
         this.profileService.clearPendingScan(profileId, serverId);
@@ -281,12 +303,15 @@ export class ScanQueue {
       }
       const schedule = this.profileService.getFtpServerScanSchedule(profileId, serverId);
       this.profileService.clearPendingScan(profileId, serverId);
+      const server = this.profileService.getFtpServer(profileId, serverId);
       this.profileService.saveFtpServerScanSchedule(profileId, serverId, {
         intervalMinutes: schedule.intervalMinutes,
-        nextScheduledScanAt:
-          schedule.intervalMinutes > 0 ? new Date(new Date(nowIso).getTime() + schedule.intervalMinutes * 60_000).toISOString() : null,
+        nextScheduledScanAt: server.sharedIndex
+          ? nextAlignedScanAt(schedule.intervalMinutes, now)
+          : schedule.intervalMinutes > 0
+            ? new Date(new Date(nowIso).getTime() + schedule.intervalMinutes * 60_000).toISOString()
+            : null,
       });
-      const server = this.profileService.getFtpServer(profileId, serverId);
       if (server.sharedIndex) this.enqueueSharedIndexScan(server.sharedIndex.id, "scheduled");
       else this.enqueueProfileScan(profileId, "scheduled", serverId);
     }

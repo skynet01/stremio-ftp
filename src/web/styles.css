@@ -1225,7 +1225,7 @@ input:-webkit-autofill:active {
 }
 
 .admin-summary-list {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .admin-summary-list div {
@@ -1256,6 +1256,55 @@ input:-webkit-autofill:active {
 .admin-subsection-header h3 {
   margin: 4px 0 0;
   font-size: 1.06rem;
+}
+
+.admin-stream-status {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.admin-stream-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-stream-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.admin-stream-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.admin-stream-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-stream-row strong,
+.admin-stream-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-stream-row strong {
+  color: var(--text);
+}
+
+.admin-stream-row span {
+  color: var(--muted-2);
+  font-size: 0.78rem;
 }
 
 .admin-shared-index-section {
@@ -3257,6 +3306,10 @@ input:-webkit-autofill:active {
   }
 
   .admin-shared-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-stream-row {
     grid-template-columns: 1fr;
   }
 

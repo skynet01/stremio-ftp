@@ -52,16 +52,33 @@ describe("web API setup token handling", () => {
     expect(window.location.search).toBe("");
   });
 
-  it("posts admin profile requests with setup token auth", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ summary: {}, profiles: [] }));
+  it("posts admin profile and stream requests with setup token auth", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ summary: {}, profiles: [] }))
+      .mockResolvedValueOnce(jsonResponse({ activeStreams: [], summary: { active: 0, profile: 0, shared: 0 } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { loadAdminProfiles, saveSetupToken } = await import("../src/web/api");
+    const { loadAdminProfiles, loadAdminStreamStatus, saveSetupToken } = await import("../src/web/api");
     saveSetupToken("setup-secret-123");
     await loadAdminProfiles({ browserUid: "admin-uid", passphrase: "passphrase" });
+    await loadAdminStreamStatus({ browserUid: "admin-uid", passphrase: "passphrase" });
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
       "/api/admin/profiles",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-setup-token": "setup-secret-123",
+        },
+        body: JSON.stringify({ browserUid: "admin-uid", passphrase: "passphrase" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/admin/streams",
       expect.objectContaining({
         method: "POST",
         headers: {
