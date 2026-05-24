@@ -3,13 +3,16 @@ import { describe, expect, it } from "vitest";
 import { migrate } from "../src/server/db/schema";
 import { MediaRepository } from "../src/server/media/mediaRepository";
 
+let profileSequence = 0;
+
 function createProfile(db: Database.Database) {
+  profileSequence += 1;
   return Number(
     db
       .prepare(
-        "insert into profiles (browser_uid, passphrase_verifier, install_token_hash, created_at, updated_at) values ('uid', 'v', 'h', 'n', 'n')",
+        "insert into profiles (browser_uid, passphrase_verifier, install_token_hash, created_at, updated_at) values (?, 'v', ?, 'n', 'n')",
       )
-      .run().lastInsertRowid,
+      .run(`uid-${profileSequence}`, `h-${profileSequence}`).lastInsertRowid,
   );
 }
 
@@ -291,6 +294,74 @@ describe("MediaRepository", () => {
       anime: 0,
       uncategorized: 1,
     });
+  });
+
+  it("uses shared master enrichment for linked shared index catalog metas", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const masterProfileId = createProfile(db);
+    const masterServerId = createServer(db, masterProfileId);
+    const groupId = createSharedGroup(db, masterServerId, "catalog-metas");
+    const linkedProfileId = createProfile(db);
+    const linkedServerId = createServer(db, linkedProfileId);
+    db.prepare("update profile_ftp_servers set shared_index_group_id = ? where id = ?").run(groupId, linkedServerId);
+    const repo = new MediaRepository(db);
+
+    repo.upsertSharedParsedFile(groupId, {
+      ftpPath: "/TV/Shared.Show/Shared.Show.S01E01.mkv",
+      filename: "Shared.Show.S01E01.mkv",
+      normalizedFilename: "shared show s01e01",
+      extension: "mkv",
+      mediaKind: "series",
+      catalogKind: "series",
+      parsedTitle: "shared show",
+      parsedYear: null,
+      season: 1,
+      episode: 1,
+      imdbId: null,
+      quality: null,
+      confidence: 85,
+    });
+    repo.upsertParsedFile(linkedProfileId, {
+      ftpServerId: linkedServerId,
+      ftpPath: "/TV/Stale.Show/Stale.Show.S01E01.mkv",
+      filename: "Stale.Show.S01E01.mkv",
+      normalizedFilename: "stale show s01e01",
+      extension: "mkv",
+      mediaKind: "series",
+      catalogKind: "series",
+      parsedTitle: "stale show",
+      parsedYear: null,
+      season: 1,
+      episode: 1,
+      imdbId: null,
+      quality: null,
+      confidence: 85,
+    });
+
+    const seenAt = "2026-05-04T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(
+      masterProfileId,
+      masterServerId,
+      repo.sharedCatalogEnrichmentCandidates(groupId, masterServerId, ["series"]),
+      seenAt,
+    );
+    repo.syncCatalogEnrichmentCandidates(linkedProfileId, linkedServerId, repo.catalogEnrichmentCandidates(linkedProfileId, linkedServerId, ["series"]), seenAt);
+    repo.saveCatalogEnrichmentMatch(repo.pendingCatalogEnrichment(masterProfileId, masterServerId, seenAt, 10)[0].id, {
+      id: "tt1111111",
+      type: "series",
+      name: "Shared Show",
+    }, seenAt);
+    repo.saveCatalogEnrichmentMatch(repo.pendingCatalogEnrichment(linkedProfileId, linkedServerId, seenAt, 10)[0].id, {
+      id: "tt2222222",
+      type: "series",
+      name: "Stale Show",
+    }, seenAt);
+
+    expect(repo.catalogMetas(linkedProfileId, "series", 10, 0, { ftpServerIds: [linkedServerId] })).toEqual([
+      expect.objectContaining({ id: "tt1111111", type: "series", name: "Shared Show" }),
+    ]);
+    expect(repo.catalogMetas(linkedProfileId, "series", 10, 0, { ftpServerIds: [linkedServerId], search: "stale" })).toEqual([]);
   });
 
   it("falls back to parser counts for shared indexes that have no enrichment yet", () => {

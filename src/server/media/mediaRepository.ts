@@ -1309,30 +1309,87 @@ export class MediaRepository {
     skip: number,
     options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; search?: string } = {},
   ): PersistedCatalogMeta[] {
-    const serverFilter = mediaServerFilter("ce", options.ftpServerIds, options.includeLegacyNullServer);
+    const localServerFilter = mediaServerFilter("ce", options.ftpServerIds, options.includeLegacyNullServer);
+    const sharedServerFilter = profileServerFilter("linked", options.ftpServerIds);
     const catalogFilter =
       catalogKind === "movie"
-        ? { sql: "and ce.meta_type = 'movie'", params: [] as string[] }
-        : { sql: "and ce.catalog_kind = ? and ce.meta_type = 'series'", params: [catalogKind] };
-    const searchFilter = catalogSearchFilter("ce", options.search);
+        ? { sql: "and entry.meta_type = 'movie'", params: [] as string[] }
+        : { sql: "and entry.catalog_kind = ? and entry.meta_type = 'series'", params: [catalogKind] };
+    const searchFilter = catalogSearchFilter("entry", options.search);
     const rows = this.db
       .prepare(
         `
-        select ce.meta_id, ce.meta_type, ce.meta_name, ce.poster, ce.background, ce.description, ce.release_info, min(ce.id) as first_id
-        from catalog_enrichment ce
-        where ce.profile_id = ?
-          and ce.status = 'matched'
-          and ce.meta_id is not null
-          and ce.meta_name is not null
+        with catalog_entries as (
+          select
+            ce.id as source_id,
+            ce.catalog_kind,
+            ce.status,
+            ce.meta_id,
+            ce.meta_type,
+            ce.meta_name,
+            ce.poster,
+            ce.background,
+            ce.description,
+            ce.release_info
+          from catalog_enrichment ce
+          left join profile_ftp_servers local_server on local_server.id = ce.ftp_server_id
+          where ce.profile_id = ?
+            and (ce.ftp_server_id is null or local_server.shared_index_group_id is null)
+            ${localServerFilter.sql}
+          union all
+          select
+            ce.id as source_id,
+            ce.catalog_kind,
+            ce.status,
+            ce.meta_id,
+            ce.meta_type,
+            ce.meta_name,
+            ce.poster,
+            ce.background,
+            ce.description,
+            ce.release_info
+          from profile_ftp_servers linked
+          join shared_index_groups g on g.id = linked.shared_index_group_id and g.enabled = 1
+          join profile_ftp_servers master on master.id = g.master_profile_ftp_server_id
+          join shared_media_files sm on sm.shared_index_group_id = g.id
+          join catalog_enrichment ce
+            on ce.profile_id = master.profile_id
+           and ce.ftp_server_id = master.id
+           and ce.item_key = ${catalogEnrichmentSqlKey("sm")}
+          where linked.profile_id = ?
+            ${sharedServerFilter.sql}
+        )
+        select
+          entry.meta_id,
+          entry.meta_type,
+          entry.meta_name,
+          entry.poster,
+          entry.background,
+          entry.description,
+          entry.release_info,
+          min(entry.source_id) as first_id
+        from catalog_entries entry
+        where entry.status = 'matched'
+          and entry.meta_id is not null
+          and entry.meta_name is not null
           ${catalogFilter.sql}
-          ${serverFilter.sql}
           ${searchFilter.sql}
-        group by ce.meta_id, ce.meta_type, ce.meta_name, ce.poster, ce.background, ce.description, ce.release_info
+        group by entry.meta_id, entry.meta_type, entry.meta_name, entry.poster, entry.background, entry.description, entry.release_info
         order by ${searchFilter.orderSql} first_id asc
         limit ? offset ?
       `,
       )
-      .all(profileId, ...catalogFilter.params, ...serverFilter.params, ...searchFilter.params, ...searchFilter.orderParams, limit, skip) as Array<{
+      .all(
+        profileId,
+        ...localServerFilter.params,
+        profileId,
+        ...sharedServerFilter.params,
+        ...catalogFilter.params,
+        ...searchFilter.params,
+        ...searchFilter.orderParams,
+        limit,
+        skip,
+      ) as Array<{
       meta_id: string;
       meta_type: "movie" | "series";
       meta_name: string;
@@ -1526,6 +1583,15 @@ function mediaServerFilter(alias: string, ftpServerIds: number[] | undefined, in
   if (includeLegacyNullServer) parts.push(`${alias}.ftp_server_id is null`);
   if (!parts.length) return { sql: "and 1 = 0", params };
   return { sql: `and (${parts.join(" or ")})`, params };
+}
+
+function profileServerFilter(alias: string, ftpServerIds: number[] | undefined) {
+  if (!ftpServerIds) return { sql: "", params: [] as number[] };
+  if (!ftpServerIds.length) return { sql: "and 1 = 0", params: [] as number[] };
+  return {
+    sql: `and ${alias}.id in (${ftpServerIds.map(() => "?").join(", ")})`,
+    params: ftpServerIds,
+  };
 }
 
 function unenrichedOtherFilter(alias: string, ftpServerIds: number[] | undefined) {
