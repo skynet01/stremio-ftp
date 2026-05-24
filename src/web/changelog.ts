@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { date: "2026-05-24", hash: "v0.4.46", subject: "feat: add TMDB genre filters and tighter movie catalog matching" },
   { date: "2026-05-23", hash: "v0.4.45", subject: "feat: split Uncategorized catalogs by server with an optional combined view" },
   { date: "2026-05-19", hash: "v0.4.44", subject: "fix: tune FTP playback concurrency and shared index count display" },
   { date: "2026-05-19", hash: "v0.4.43", subject: "feat: master index groups with linked server management" },

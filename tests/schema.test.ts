@@ -140,7 +140,7 @@ describe("schema", () => {
         "auto_link_imports",
       ]),
     );
-    expect(enrichmentColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["algorithm_version"]));
+    expect(enrichmentColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["algorithm_version", "genres"]));
   });
 
   it("stores shared index groups, shared media, and scan target rows", () => {

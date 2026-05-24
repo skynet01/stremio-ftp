@@ -189,6 +189,7 @@ describe("App", () => {
     loadFtpSettingsMock.mockReset();
     loadServersMock.mockReset();
     loadScanStatusMock.mockReset();
+    loadServersMock.mockReset();
     loadSetupStatusMock.mockReset();
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: true });
     rescanIndexMock.mockReset();
@@ -294,7 +295,7 @@ describe("App", () => {
     expect(within(serverContent).getByLabelText("Movies")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
     expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.45`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.46`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(
