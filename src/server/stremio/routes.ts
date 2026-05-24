@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { AppConfig } from "../config.js";
-import type { MediaRepository } from "../media/mediaRepository.js";
+import type { MediaRepository, OtherCatalogFileRef } from "../media/mediaRepository.js";
 import { fetchCinemetaMeta } from "../metadata/cinemetaClient.js";
 import { tmdbCatalogMeta, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
 import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization, type ProfileService } from "../profiles/profileService.js";
@@ -37,9 +37,9 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const customization = manifestCustomization(profiles, profileId, config.proxyStreamsDisabled, config.adminBrowserUids);
     const ftpConfigForServer = (serverId: number | null | undefined) =>
       serverId ? profiles.getFtpServerConfig(profileId, serverId) : profiles.getFtpConfig(profileId);
-    const folderId = internalFolderId(id);
-    if (folderId) {
-      const files = mediaRepository.otherCatalogStreams(profileId, folderId, {
+    const folderRef = internalFolderRef(id);
+    if (folderRef) {
+      const files = mediaRepository.otherCatalogStreams(profileId, folderRef, {
         ...catalogServerScope(profiles, profileId),
         scopeToRepresentativeServer: splitOtherCatalogsEnabled(profiles, profileId, customization),
       });
@@ -138,9 +138,9 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const customization = profileId ? manifestCustomization(profiles, profileId, config.proxyStreamsDisabled, config.adminBrowserUids) : null;
     if (!type || !profileId || !customization?.catalogEnabled) return res.json({ meta: null });
 
-    const folderId = internalFolderId(id) ?? internalFileId(id);
-    if (folderId) {
-      const item = mediaRepository.otherCatalogItem(profileId, folderId, {
+    const folderRef = internalFolderRef(id) ?? internalFileId(id);
+    if (folderRef) {
+      const item = mediaRepository.otherCatalogItem(profileId, folderRef, {
         ...catalogServerScope(profiles, profileId),
         scopeToRepresentativeServer: splitOtherCatalogsEnabled(profiles, profileId, customization),
       });
@@ -312,7 +312,9 @@ function internalFileId(id: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
-function internalFolderId(id: string): number | null {
+function internalFolderRef(id: string): OtherCatalogFileRef | null {
+  const shared = id.match(/^ftp-folder:shared:(\d+):(\d+)$/);
+  if (shared) return { source: "shared", serverId: Number(shared[1]), id: Number(shared[2]) };
   const match = id.match(/^ftp-folder:(\d+)$/);
   return match ? Number(match[1]) : null;
 }
@@ -323,7 +325,7 @@ function loggableError(error: unknown): string {
 }
 
 function otherCatalogMeta(item: {
-  id: number;
+  id: string;
   folderName: string;
   parsedYear: number | null;
   fileCount: number;

@@ -57,7 +57,7 @@ export type CatalogEnrichmentStats = {
 };
 
 export type OtherCatalogItem = {
-  id: number;
+  id: string;
   mediaKind: "movie" | "series";
   folderName: string;
   folderKey: string;
@@ -66,6 +66,8 @@ export type OtherCatalogItem = {
   fileCount: number;
   serverCount: number;
 };
+
+export type OtherCatalogFileRef = number | { source: "shared"; serverId: number; id: number };
 
 export type DirectorySnapshotInput = {
   dirPath: string;
@@ -1415,106 +1417,129 @@ export class MediaRepository {
     skip: number,
     options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; includeUnenrichedServerIds?: number[]; search?: string } = {},
   ): OtherCatalogItem[] {
-    const serverFilter = mediaServerFilter("mf", options.ftpServerIds, options.includeLegacyNullServer);
-    const unenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
+    const localServerFilter = mediaServerFilter("mf", options.ftpServerIds, options.includeLegacyNullServer);
+    const sharedServerFilter = profileServerFilter("linked", options.ftpServerIds);
+    const localUnenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
+    const sharedUnenrichedFilter = unenrichedProfileServerFilter("linked", options.includeUnenrichedServerIds);
     const rows = this.db
       .prepare(
         `
-        select mf.id, mf.ftp_server_id, mf.media_kind, mf.filename, mf.ftp_path, mf.parsed_title, mf.parsed_year
+        select mf.id, mf.ftp_server_id, 'profile' as source, mf.media_kind, mf.filename, mf.ftp_path, mf.parsed_title, mf.parsed_year
         from media_files mf
+        left join profile_ftp_servers local_server on local_server.id = mf.ftp_server_id
         left join catalog_enrichment ce
           on ce.profile_id = mf.profile_id
          and ce.ftp_server_id = mf.ftp_server_id
          and ce.item_key = ${catalogEnrichmentSqlKey("mf")}
         where mf.profile_id = ?
+          and (mf.ftp_server_id is null or local_server.shared_index_group_id is null)
           and mf.parsed_title is not null
-          ${serverFilter.sql}
-          and (ce.status = 'unmatched'${unenrichedFilter.sql})
-        order by mf.filename asc, mf.id asc
+          ${localServerFilter.sql}
+          and (ce.status = 'unmatched'${localUnenrichedFilter.sql})
+        union all
+        select sm.id, linked.id as ftp_server_id, 'shared' as source, sm.media_kind, sm.filename, sm.ftp_path, sm.parsed_title, sm.parsed_year
+        from profile_ftp_servers linked
+        join shared_index_groups g on g.id = linked.shared_index_group_id and g.enabled = 1
+        join profile_ftp_servers master on master.id = g.master_profile_ftp_server_id
+        join shared_media_files sm on sm.shared_index_group_id = g.id
+        left join catalog_enrichment ce
+          on ce.profile_id = master.profile_id
+         and ce.ftp_server_id = master.id
+         and ce.item_key = ${catalogEnrichmentSqlKey("sm")}
+        where linked.profile_id = ?
+          and sm.parsed_title is not null
+          ${sharedServerFilter.sql}
+          and (ce.status = 'unmatched'${sharedUnenrichedFilter.sql})
+        order by 5 asc, 1 asc
       `,
       )
-      .all(profileId, ...serverFilter.params, ...unenrichedFilter.params) as OtherCatalogRow[];
+      .all(
+        profileId,
+        ...localServerFilter.params,
+        ...localUnenrichedFilter.params,
+        profileId,
+        ...sharedServerFilter.params,
+        ...sharedUnenrichedFilter.params,
+      ) as OtherCatalogRow[];
 
     const search = normalizedSearch(options.search);
     return Array.from(groupOtherCatalogRows(rows).values())
       .filter((item) => !search || item.searchText.includes(search))
-      .sort((a, b) => a.folderName.localeCompare(b.folderName) || a.id - b.id)
+      .sort((a, b) => a.folderName.localeCompare(b.folderName) || a.sortKey.localeCompare(b.sortKey))
       .slice(skip, skip + limit);
   }
 
   otherCatalogStreams(
     profileId: number,
-    representativeFileId: number,
+    representativeFile: OtherCatalogFileRef,
     options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; includeUnenrichedServerIds?: number[]; scopeToRepresentativeServer?: boolean } = {},
   ): MediaMatch[] {
-    const baseUnenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
-    const base = this.db
-      .prepare(
-        `
-        select mf.ftp_path, mf.filename, mf.media_kind, mf.ftp_server_id
-        from media_files mf
-        left join catalog_enrichment ce
-          on ce.profile_id = mf.profile_id
-         and ce.ftp_server_id = mf.ftp_server_id
-         and ce.item_key = ${catalogEnrichmentSqlKey("mf")}
-        where mf.profile_id = ?
-          and mf.id = ?
-          and (ce.status = 'unmatched'${baseUnenrichedFilter.sql})
-      `,
-      )
-      .get(profileId, representativeFileId, ...baseUnenrichedFilter.params) as
-      | { ftp_path: string; filename: string; media_kind: "movie" | "series"; ftp_server_id: number | null }
-      | undefined;
+    const base = this.otherCatalogBaseRow(profileId, representativeFile, options.includeUnenrichedServerIds);
     if (!base) return [];
 
     const folderKey = otherFolderKey(base.ftp_path, base.filename);
-    const serverFilter = options.scopeToRepresentativeServer
-      ? mediaServerFilter("mf", base.ftp_server_id === null ? [] : [base.ftp_server_id], base.ftp_server_id === null)
+    const scopedFtpServerIds = options.scopeToRepresentativeServer && base.ftp_server_id !== null ? [base.ftp_server_id] : options.ftpServerIds;
+    const includeScopedLegacy = options.scopeToRepresentativeServer ? base.ftp_server_id === null : options.includeLegacyNullServer;
+    const localServerFilter = options.scopeToRepresentativeServer
+      ? mediaServerFilter("mf", scopedFtpServerIds ?? [], includeScopedLegacy)
       : mediaServerFilter("mf", options.ftpServerIds, options.includeLegacyNullServer);
-    const unenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
+    const sharedServerFilter = profileServerFilter("linked", scopedFtpServerIds);
+    const localUnenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
+    const sharedUnenrichedFilter = unenrichedProfileServerFilter("linked", options.includeUnenrichedServerIds);
     const rows = this.db
       .prepare(
         `
-        select mf.id, mf.ftp_server_id, s.name as server_name, s.stream_delivery_mode, mf.ftp_path, mf.filename, mf.quality, mf.size_bytes
+        select mf.id, mf.ftp_server_id, null as shared_index_group_id, 'profile' as source,
+               s.name as server_name, s.stream_delivery_mode, mf.ftp_path, mf.filename, mf.quality, mf.size_bytes
         from media_files mf
+        left join profile_ftp_servers local_server on local_server.id = mf.ftp_server_id
         left join catalog_enrichment ce
           on ce.profile_id = mf.profile_id
          and ce.ftp_server_id = mf.ftp_server_id
          and ce.item_key = ${catalogEnrichmentSqlKey("mf")}
         left join profile_ftp_servers s on s.id = mf.ftp_server_id
         where mf.profile_id = ?
+          and (mf.ftp_server_id is null or local_server.shared_index_group_id is null)
           and mf.media_kind = ?
-          ${serverFilter.sql}
-          and (ce.status = 'unmatched'${unenrichedFilter.sql})
-        order by s.name asc, mf.size_bytes desc, mf.filename asc
+          ${localServerFilter.sql}
+          and (ce.status = 'unmatched'${localUnenrichedFilter.sql})
+        union all
+        select sm.id, linked.id as ftp_server_id, sm.shared_index_group_id, 'shared' as source,
+               linked.name as server_name, linked.stream_delivery_mode, sm.ftp_path, sm.filename, sm.quality, sm.size_bytes
+        from profile_ftp_servers linked
+        join shared_index_groups g on g.id = linked.shared_index_group_id and g.enabled = 1
+        join profile_ftp_servers master on master.id = g.master_profile_ftp_server_id
+        join shared_media_files sm on sm.shared_index_group_id = g.id
+        left join catalog_enrichment ce
+          on ce.profile_id = master.profile_id
+         and ce.ftp_server_id = master.id
+         and ce.item_key = ${catalogEnrichmentSqlKey("sm")}
+        where linked.profile_id = ?
+          and sm.media_kind = ?
+          ${sharedServerFilter.sql}
+          and (ce.status = 'unmatched'${sharedUnenrichedFilter.sql})
+        order by 5 asc, 10 desc, 8 asc
       `,
       )
-      .all(profileId, base.media_kind, ...serverFilter.params, ...unenrichedFilter.params) as MediaFileRow[];
+      .all(
+        profileId,
+        base.media_kind,
+        ...localServerFilter.params,
+        ...localUnenrichedFilter.params,
+        profileId,
+        base.media_kind,
+        ...sharedServerFilter.params,
+        ...sharedUnenrichedFilter.params,
+      ) as MediaFileRow[];
     return rows.filter((row) => otherFolderKey(row.ftp_path, row.filename) === folderKey).map(toMediaMatch);
   }
 
   otherCatalogItem(
     profileId: number,
-    fileId: number,
+    representativeFile: OtherCatalogFileRef,
     options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; includeUnenrichedServerIds?: number[]; scopeToRepresentativeServer?: boolean } = {},
   ): OtherCatalogItem | null {
-    const unenrichedFilter = unenrichedOtherFilter("mf", options.includeUnenrichedServerIds);
-    const base = this.db
-      .prepare(
-        `
-        select mf.id, mf.ftp_server_id
-        from media_files mf
-        left join catalog_enrichment ce
-          on ce.profile_id = mf.profile_id
-         and ce.ftp_server_id = mf.ftp_server_id
-         and ce.item_key = ${catalogEnrichmentSqlKey("mf")}
-        where mf.profile_id = ?
-          and mf.id = ?
-          and (ce.status = 'unmatched'${unenrichedFilter.sql})
-      `,
-      )
-      .get(profileId, fileId, ...unenrichedFilter.params) as { id: number; ftp_server_id: number | null } | undefined;
-
+    const base = this.otherCatalogBaseRow(profileId, representativeFile, options.includeUnenrichedServerIds);
     if (!base) return null;
     const scopedOptions = options.scopeToRepresentativeServer
       ? {
@@ -1523,13 +1548,58 @@ export class MediaRepository {
           includeLegacyNullServer: base.ftp_server_id === null,
         }
       : options;
-    return this.otherCatalogItems(profileId, Number.MAX_SAFE_INTEGER, 0, scopedOptions).find((item) => item.id === base.id) ?? null;
+    return this.otherCatalogItems(profileId, Number.MAX_SAFE_INTEGER, 0, scopedOptions).find((item) => item.id === otherCatalogRowId(base)) ?? null;
+  }
+
+  private otherCatalogBaseRow(profileId: number, representativeFile: OtherCatalogFileRef, includeUnenrichedServerIds?: number[]) {
+    if (typeof representativeFile === "number") {
+      const unenrichedFilter = unenrichedOtherFilter("mf", includeUnenrichedServerIds);
+      return this.db
+        .prepare(
+          `
+          select mf.id, mf.ftp_server_id, 'profile' as source, mf.ftp_path, mf.filename, mf.media_kind
+          from media_files mf
+          left join profile_ftp_servers local_server on local_server.id = mf.ftp_server_id
+          left join catalog_enrichment ce
+            on ce.profile_id = mf.profile_id
+           and ce.ftp_server_id = mf.ftp_server_id
+           and ce.item_key = ${catalogEnrichmentSqlKey("mf")}
+          where mf.profile_id = ?
+            and mf.id = ?
+            and (mf.ftp_server_id is null or local_server.shared_index_group_id is null)
+            and (ce.status = 'unmatched'${unenrichedFilter.sql})
+        `,
+        )
+        .get(profileId, representativeFile, ...unenrichedFilter.params) as OtherCatalogBaseRow | undefined;
+    }
+
+    const unenrichedFilter = unenrichedProfileServerFilter("linked", includeUnenrichedServerIds);
+    return this.db
+      .prepare(
+        `
+        select sm.id, linked.id as ftp_server_id, 'shared' as source, sm.ftp_path, sm.filename, sm.media_kind
+        from profile_ftp_servers linked
+        join shared_index_groups g on g.id = linked.shared_index_group_id and g.enabled = 1
+        join profile_ftp_servers master on master.id = g.master_profile_ftp_server_id
+        join shared_media_files sm on sm.shared_index_group_id = g.id
+        left join catalog_enrichment ce
+          on ce.profile_id = master.profile_id
+         and ce.ftp_server_id = master.id
+         and ce.item_key = ${catalogEnrichmentSqlKey("sm")}
+        where linked.profile_id = ?
+          and linked.id = ?
+          and sm.id = ?
+          and (ce.status = 'unmatched'${unenrichedFilter.sql})
+      `,
+      )
+      .get(profileId, representativeFile.serverId, representativeFile.id, ...unenrichedFilter.params) as OtherCatalogBaseRow | undefined;
   }
 }
 
 type OtherCatalogRow = {
   id: number;
   ftp_server_id: number | null;
+  source?: "profile" | "shared";
   media_kind: "movie" | "series";
   filename: string;
   ftp_path: string;
@@ -1537,7 +1607,9 @@ type OtherCatalogRow = {
   parsed_year: number | null;
 };
 
-type OtherCatalogGroup = OtherCatalogItem & { searchText: string; serverIds: Set<string> };
+type OtherCatalogBaseRow = Pick<OtherCatalogRow, "id" | "ftp_server_id" | "source" | "ftp_path" | "filename" | "media_kind">;
+
+type OtherCatalogGroup = OtherCatalogItem & { searchText: string; serverIds: Set<string>; sortKey: string };
 
 function groupOtherCatalogRows(rows: OtherCatalogRow[]) {
   const groups = new Map<string, OtherCatalogGroup>();
@@ -1547,7 +1619,7 @@ function groupOtherCatalogRows(rows: OtherCatalogRow[]) {
     const existing = groups.get(folderKey);
     if (!existing) {
       groups.set(folderKey, {
-        id: row.id,
+        id: otherCatalogRowId(row),
         mediaKind: row.media_kind,
         folderName,
         folderKey,
@@ -1557,6 +1629,7 @@ function groupOtherCatalogRows(rows: OtherCatalogRow[]) {
         serverCount: 1,
         searchText: otherSearchText(folderName, row),
         serverIds: new Set([String(row.ftp_server_id ?? "legacy")]),
+        sortKey: otherCatalogSortKey(row),
       });
       continue;
     }
@@ -1564,12 +1637,24 @@ function groupOtherCatalogRows(rows: OtherCatalogRow[]) {
     existing.serverIds.add(String(row.ftp_server_id ?? "legacy"));
     existing.serverCount = existing.serverIds.size;
     existing.searchText = `${existing.searchText} ${otherSearchText(folderName, row)}`;
-    if (row.id < existing.id) existing.id = row.id;
+    const sortKey = otherCatalogSortKey(row);
+    if (sortKey < existing.sortKey) {
+      existing.id = otherCatalogRowId(row);
+      existing.sortKey = sortKey;
+    }
   }
   for (const group of groups.values()) {
     delete (group as Partial<OtherCatalogGroup>).serverIds;
   }
   return groups;
+}
+
+function otherCatalogRowId(row: Pick<OtherCatalogRow, "id" | "ftp_server_id" | "source">) {
+  return row.source === "shared" ? `shared:${row.ftp_server_id}:${row.id}` : String(row.id);
+}
+
+function otherCatalogSortKey(row: Pick<OtherCatalogRow, "id" | "ftp_server_id" | "source">) {
+  return `${row.source ?? "profile"}:${row.ftp_server_id ?? 0}:${row.id}`;
 }
 
 function mediaServerFilter(alias: string, ftpServerIds: number[] | undefined, includeLegacyNullServer: boolean | undefined) {
@@ -1598,6 +1683,14 @@ function unenrichedOtherFilter(alias: string, ftpServerIds: number[] | undefined
   if (!ftpServerIds?.length) return { sql: "", params: [] as number[] };
   return {
     sql: ` or ${alias}.ftp_server_id in (${ftpServerIds.map(() => "?").join(", ")})`,
+    params: ftpServerIds,
+  };
+}
+
+function unenrichedProfileServerFilter(alias: string, ftpServerIds: number[] | undefined) {
+  if (!ftpServerIds?.length) return { sql: "", params: [] as number[] };
+  return {
+    sql: ` or ${alias}.id in (${ftpServerIds.map(() => "?").join(", ")})`,
     params: ftpServerIds,
   };
 }

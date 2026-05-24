@@ -364,6 +364,61 @@ describe("MediaRepository", () => {
     expect(repo.catalogMetas(linkedProfileId, "series", 10, 0, { ftpServerIds: [linkedServerId], search: "stale" })).toEqual([]);
   });
 
+  it("serves other catalog items and streams from linked shared indexes", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const masterProfileId = createProfile(db);
+    const masterServerId = createServer(db, masterProfileId, { movies: false, series: false, anime: false });
+    const groupId = createSharedGroup(db, masterServerId, "shared-other");
+    const linkedProfileId = createProfile(db);
+    const linkedServerId = createServer(db, linkedProfileId, { movies: false, series: false, anime: false });
+    db.prepare("update profile_ftp_servers set shared_index_group_id = ? where id = ?").run(groupId, linkedServerId);
+    const repo = new MediaRepository(db);
+
+    repo.upsertSharedParsedFile(groupId, {
+      ftpPath: "/Adult/Scenes/Scene.One.3D.mp4",
+      filename: "Scene.One.3D.mp4",
+      normalizedFilename: "scene one 3d",
+      extension: "mp4",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "scene one",
+      parsedYear: null,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: "1080p",
+      confidence: 45,
+      sizeBytes: 1024,
+    });
+
+    const items = repo.otherCatalogItems(linkedProfileId, 10, 0, {
+      ftpServerIds: [linkedServerId],
+      includeUnenrichedServerIds: [linkedServerId],
+    });
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: expect.stringMatching(/^shared:\d+:\d+$/),
+        folderName: "Scenes",
+        fileCount: 1,
+        serverCount: 1,
+      }),
+    ]);
+
+    const streams = repo.otherCatalogStreams(linkedProfileId, { source: "shared", serverId: linkedServerId, id: Number(items[0].id.split(":")[2]) }, {
+      ftpServerIds: [linkedServerId],
+      includeUnenrichedServerIds: [linkedServerId],
+      scopeToRepresentativeServer: true,
+    });
+    expect(streams).toEqual([
+      expect.objectContaining({
+        source: "shared",
+        ftpServerId: linkedServerId,
+        filename: "Scene.One.3D.mp4",
+      }),
+    ]);
+  });
+
   it("falls back to parser counts for shared indexes that have no enrichment yet", () => {
     const db = new Database(":memory:");
     migrate(db);

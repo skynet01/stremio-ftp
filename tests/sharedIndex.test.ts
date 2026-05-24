@@ -125,6 +125,30 @@ describe("shared index groups", () => {
     expect(service.getFtpServerConfig(profileId, serverId)?.password).toBe("secret");
   });
 
+  it("syncs linked server catalog content from the shared group", async () => {
+    const { db, service, profileId, serverId } = await serviceWithServer();
+    const created = service.createSharedIndexGroupFromServer(profileId, serverId, {
+      name: "Adult Sputnik",
+      keyHint: "adult-sputnik",
+    });
+    db.prepare("update shared_index_groups set catalog_content_json = ? where id = ?").run(
+      JSON.stringify({ movies: false, series: false, anime: false, uncategorized: true }),
+      created.group.id,
+    );
+    const linked = await service.createProfile("linked-browser", "passphrase");
+    const linkedServerId = service.defaultFtpServerId(linked.profileId);
+    service.saveFtpServerConfig(linked.profileId, linkedServerId, service.getFtpServerConfig(profileId, serverId)!, false);
+
+    service.linkServerToSharedGroup(linked.profileId, linkedServerId, created.group.id, created.sharedIndexKey);
+
+    expect(service.getFtpServer(linked.profileId, linkedServerId).customization.catalogContentTypes).toEqual({
+      movies: false,
+      series: false,
+      anime: false,
+      uncategorized: true,
+    });
+  });
+
   it("syncs master server renames only when the shared group still uses the old server name", async () => {
     const { service, profileId, serverId } = await serviceWithServer();
     const serverName = service.getFtpServer(profileId, serverId).name;

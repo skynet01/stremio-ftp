@@ -732,6 +732,67 @@ describe("stremio routes", () => {
     ]);
   });
 
+  it("serves linked shared index files from the Other catalog", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const ftpConfig = {
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "explicit" as const,
+      allowInvalidCertificate: false,
+      roots: ["/"],
+    };
+    const master = await service.createProfile("master-uid", "passphrase");
+    const masterServerId = service.defaultFtpServerId(master.profileId);
+    service.saveFtpServerConfig(master.profileId, masterServerId, ftpConfig, false);
+    service.saveFtpServer(master.profileId, masterServerId, {
+      customization: {
+        catalogEnabled: true,
+        catalogContentTypes: { movies: false, series: false, anime: false, uncategorized: true },
+      },
+    });
+    const group = service.createSharedIndexGroupFromServer(master.profileId, masterServerId, {
+      name: "Adult Sputnik",
+      keyHint: "adult-sputnik",
+    });
+    const linked = await service.createProfile("linked-uid", "passphrase");
+    const linkedServerId = service.defaultFtpServerId(linked.profileId);
+    service.saveFtpServerConfig(linked.profileId, linkedServerId, ftpConfig, false);
+    service.saveFtpServer(linked.profileId, linkedServerId, {
+      customization: {
+        catalogEnabled: true,
+        catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+      },
+    });
+    service.linkServerToSharedGroup(linked.profileId, linkedServerId, group.group.id, group.sharedIndexKey);
+    db.prepare(
+      `
+      insert into shared_media_files (
+        shared_index_group_id, ftp_path, filename, normalized_filename, extension, size_bytes,
+        media_kind, catalog_kind, parsed_title, parsed_year, imdb_id, confidence, last_seen_at
+      ) values (?, '/Adult/Scenes/Scene.One.3D.mp4', 'Scene.One.3D.mp4', 'scene one 3d', 'mp4', 1024,
+        'movie', 'movie', 'scene one', null, null, 45, '2026-05-24T00:00:00.000Z')
+    `,
+    ).run(group.group.id);
+    const app = createApp({ ...config, tmdbApiKey: "tmdb-key" }, db);
+
+    const otherCatalog = await request(app).get(`/u/${linked.installUrlToken}/catalog/movie/ftp-other.json`).expect(200);
+
+    expect(otherCatalog.body.metas).toHaveLength(1);
+    expect(otherCatalog.body.metas[0]).toMatchObject({
+      id: `ftp-folder:shared:${linkedServerId}:1`,
+      name: "Scenes",
+      description: "1 file across 1 server",
+    });
+    const stream = await request(app)
+      .get(`/u/${linked.installUrlToken}/stream/movie/${otherCatalog.body.metas[0].id}.json`)
+      .expect(200);
+    expect(stream.body.streams.map((item: { behaviorHints: { filename: string } }) => item.behaviorHints.filename)).toEqual(["Scene.One.3D.mp4"]);
+  });
+
   it("groups duplicate unresolved Other catalog variants into one item with multiple streams when combined", async () => {
     const db = new Database(":memory:");
     migrate(db);
