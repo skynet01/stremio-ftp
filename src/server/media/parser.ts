@@ -36,6 +36,7 @@ function qualityOf(value: string): string | null {
 
 function stripKnownTokens(value: string): string {
   return value
+    .replace(/^\s*\[[^\]]+\]\s*/g, " ")
     .replace(/[\._-]+/g, " ")
     .replace(/\b\d{3,5}x\d{3,5}\b/gi, " ")
     .replace(/\bweb[\s._-]?dl\b/gi, " ")
@@ -45,11 +46,13 @@ function stripKnownTokens(value: string): string {
     .replace(/\bhalf[\s._-]?ou\b/gi, " ")
     .replace(/\bai[\s._-]?upscaled\b/gi, " ")
     .replace(/\bdts[\s._-]?hd\b/gi, " ")
+    .replace(/\b(?:ddp|eac3|ac3|aac|dts|truehd)\s*\d(?:\s+\d)?\b/gi, " ")
+    .replace(/\b(?:h|x)\s*26[45]\b/gi, " ")
     .replace(/\b(?:de\s+en|en\s+de)\b/gi, " ")
     .replace(/\b(?:dc|wd)\s+s\b/gi, " ")
     .replace(/^\s*0\s+(?=[a-z])/i, " ")
     .replace(
-      /\b(2160p|1080p|720p|480p|3840p|4k|8k|bluray|webrip|hdtv|x264|x265|h264|h265|hevc|av1|aac|dts|truehd|atmos|ma|rife|remastered|multiaudio\d*|dirtyhippie|fgt|3dff|3dom|fsbs|hsbs|sbs|hou|ou|3d|3840x|isorip|ldf|decker|bit)\b/gi,
+      /\b(2160p|1080p|720p|480p|3840p|4k|8k|uhd|hdr|sdr|dv|dual|bluray|webrip|web|hdtv|remux|x264|x265|h264|h265|hevc|av1|aac|dts|truehd|atmos|ma|rife|remastered|multiaudio\d*|dirtyhippie|fgt|3dff|3dom|fsbs|hsbs|sbs|hou|ou|3d|3840x|isorip|ldf|decker|bit|amzn|nf|dsnp|hulu|tving|iq|linetv|kocowa|viki|viu|hbo|max|atvp)\b/gi,
       " ",
     )
     .replace(/\b\d+(?:fps|v\d+)\b/gi, " ")
@@ -69,7 +72,7 @@ function folderTitleOf(ftpPath: string): string | null {
 }
 
 function stripSeriesFolderTokens(value: string): string {
-  return value.replace(/\bs\d{1,2}(?:\s*[-–]\s*\d{1,2})?\b/gi, " ");
+  return value.replace(/\bs\d{1,2}(?:\s*[-–]\s*\d{1,2})?\b.*$/i, " ");
 }
 
 function seriesFolderTitleOf(ftpPath: string): string | null {
@@ -219,9 +222,9 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
     };
   }
 
-  const titleEpisode = withoutExtension.match(/^(?<title>.+?)[\s._-]+e(?<episode>\d{1,3})\b/i);
+  const titleEpisode = withoutExtension.match(/^(?<title>.+?)[\s._-]+(?:e(?<shortEpisode>\d{2,3})|ep(?<longEpisode>\d{1,3}))\b/i);
   if (titleEpisode?.groups && shouldUseBareEpisodePattern(ftpPath, options)) {
-    const episode = positiveInteger(titleEpisode.groups.episode);
+    const episode = positiveInteger(titleEpisode.groups.shortEpisode || titleEpisode.groups.longEpisode);
     if (!episode) return null;
     return {
       mediaKind: "series",
@@ -317,6 +320,7 @@ function hasStrongEpisodeMarker(value: string) {
     /(?:^|[\s._-])s\d{1,2}e\d{1,3}(?=$|[\s._-]|[A-Z])/i.test(value) ||
     /(?:^|[\s._-])s\d{1,2}[\s._-]+e?\d{1,3}\b/i.test(value) ||
     /(?:^|[\s._-])\d{1,2}x\d{1,3}\b/i.test(value) ||
+    /(?:^|[\s._-])(?:e\d{2,3}|ep\d{1,3})\b/i.test(value) ||
     /\bseason[\s._-]*\d{1,2}[\s._-]*(?:episode|ep)[\s._-]*\d{1,3}\b/i.test(value)
   );
 }

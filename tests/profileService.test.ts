@@ -65,6 +65,34 @@ describe("ProfileService", () => {
     expect(service.getFtpServerCustomization(created.profileId, serverId).catalogTmdbApiKey).toBe("profile-key");
   });
 
+  it("uses enrichment results for per-server catalog counts when available", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, key);
+    const created = await service.createProfile("browser-uid", "passphrase");
+    const serverId = service.defaultFtpServerId(created.profileId);
+    const now = "2026-05-24T00:00:00.000Z";
+
+    db.prepare(
+      `
+      insert into catalog_enrichment (
+        profile_id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, status,
+        meta_id, meta_type, meta_name, algorithm_version, attempts, last_seen_at, created_at, updated_at
+      ) values
+        (?, ?, 'movie||waterworld|1995', 'movie', 'movie', 'waterworld', 'matched', 'tt0114898', 'movie', 'Waterworld', 3, 1, ?, ?, ?),
+        (?, ?, 'series||prisoner of beauty|', 'series', 'series', 'prisoner of beauty', 'unmatched', null, null, null, 3, 1, ?, ?, ?),
+        (?, ?, 'series||anime show|', 'series', 'anime', 'anime show', 'matched', 'tt1234567', 'series', 'Anime Show', 3, 1, ?, ?, ?)
+    `,
+    ).run(created.profileId, serverId, now, now, now, created.profileId, serverId, now, now, now, created.profileId, serverId, now, now, now);
+
+    expect(service.ftpServerCatalogItemCounts(created.profileId, serverId)).toEqual({
+      movies: 1,
+      series: 0,
+      anime: 1,
+      uncategorized: 1,
+    });
+  });
+
   it("throws when saving ftp config for a missing profile", () => {
     const db = new Database(":memory:");
     migrate(db);

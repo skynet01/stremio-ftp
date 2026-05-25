@@ -1228,6 +1228,30 @@ export class ProfileService {
   }
 
   ftpServerCatalogItemCounts(profileId: number, serverId: number) {
+    const enriched = this.db
+      .prepare(
+        `
+        select
+          count(*) as rows,
+          count(distinct case when status = 'matched' and catalog_kind = 'movie' then coalesce(meta_id, item_key) end) as movies,
+          count(distinct case when status = 'matched' and catalog_kind = 'series' then coalesce(meta_id, item_key) end) as series,
+          count(distinct case when status = 'matched' and catalog_kind = 'anime' then coalesce(meta_id, item_key) end) as anime,
+          count(distinct case when status = 'unmatched' then item_key end) as uncategorized
+        from catalog_enrichment
+        where profile_id = ?
+          and ftp_server_id = ?
+      `,
+      )
+      .get(profileId, serverId) as { rows: number; movies: number; series: number; anime: number; uncategorized: number };
+    if (enriched.rows > 0) {
+      return {
+        movies: enriched.movies,
+        series: enriched.series,
+        anime: enriched.anime,
+        uncategorized: enriched.uncategorized,
+      };
+    }
+
     const row = this.db
       .prepare(
         `

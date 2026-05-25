@@ -372,6 +372,30 @@ describe("media parser", () => {
       season: 2,
       episode: 1,
     });
+    expect(parseMediaPath("/TV Shows/The.Prisoner.of.Beauty.S01.2160p.iQ.WEB-DL.DDP2.0.H.265-MrHulk/The.Prisoner.of.Beauty.S01E01.2160p.iQ.WEB-DL.DDP2.0.H.265-MrHulk.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "prisoner of beauty",
+      season: 1,
+      episode: 1,
+    });
+    expect(parseMediaPath("/TV Shows/A.Galaxy.Next.Door.S01.1080p.AMZN.WEB-DL.DDP2.0.H.264-Wendy/A.Galaxy.Next.Door..S01E01.1080p.AMZN.WEB-DL.DDP2.0.H.264-Wendy.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "a galaxy next door",
+      season: 1,
+      episode: 1,
+    });
+    expect(parseMediaPath("/TV Shows/[SBS] Temperature.of.Love.2017.1080p.WEB-DL.H264.AAC-AppleTor/Temperature.of.Love.2017.E01.1080p.WEB-DL.H264.AAC-AppleTor.mp4", options)).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "temperature of love",
+      season: 1,
+      episode: 1,
+    });
+    expect(parseMediaPath("/TV Shows/Call.Me.By.No.Name.S01.1080p.AMZN.WEB-DL.DDP2.0.H.264-MagicStar/Call.Me.By.No.Name.EP01.1080p.AMZN.WEB-DL.DDP2.0.H.264-MagicStar.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      parsedTitle: "call me by no name",
+      season: 1,
+      episode: 1,
+    });
   });
 
   it("strips release years and source tokens from bare folder-layout episode titles", () => {
