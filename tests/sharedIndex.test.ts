@@ -180,6 +180,43 @@ describe("shared index groups", () => {
     });
   });
 
+  it("uses master enrichment for shared group catalog counts", async () => {
+    const { db, service, profileId, serverId } = await serviceWithServer();
+    const created = service.createSharedIndexGroupFromServer(profileId, serverId, {
+      name: "Sputnik Main",
+      keyHint: "sputnik-main",
+    });
+    const now = "2026-05-24T00:00:00.000Z";
+    const insertShared = db.prepare(
+      `
+        insert into shared_media_files (
+          shared_index_group_id, ftp_path, filename, normalized_filename, extension, size_bytes,
+          media_kind, catalog_kind, parsed_title, parsed_year, imdb_id, confidence, last_seen_at
+        ) values (?, ?, ?, ?, 'mkv', 1024, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    );
+    insertShared.run(created.group.id, "/media/Waterworld.1995.mkv", "Waterworld.1995.mkv", "waterworld.1995.mkv", "movie", "movie", "waterworld", 1995, null, 90, now);
+    insertShared.run(created.group.id, "/media/Mystery.Show.S01E01.mkv", "Mystery.Show.S01E01.mkv", "mystery.show.s01e01.mkv", "series", "series", "mystery show", null, null, 95, now);
+
+    db.prepare(
+      `
+        insert into catalog_enrichment (
+          profile_id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year,
+          status, meta_id, meta_type, meta_name, algorithm_version, attempts, last_seen_at, created_at, updated_at
+        ) values
+          (?, ?, 'movie||waterworld|1995', 'movie', 'movie', 'waterworld', 1995, 'matched', 'tt0114898', 'movie', 'Waterworld', 3, 1, ?, ?, ?),
+          (?, ?, 'series||mystery show|', 'series', 'series', 'mystery show', null, 'unmatched', null, null, null, 3, 1, ?, ?, ?)
+      `,
+    ).run(profileId, serverId, now, now, now, profileId, serverId, now, now, now);
+
+    expect(service.getSharedIndexGroup(created.group.id)?.catalogItemCounts).toEqual({
+      movies: 1,
+      series: 0,
+      anime: 0,
+      uncategorized: 1,
+    });
+  });
+
   it("syncs master server renames only when the shared group still uses the old server name", async () => {
     const { service, profileId, serverId } = await serviceWithServer();
     const serverName = service.getFtpServer(profileId, serverId).name;

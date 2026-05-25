@@ -1615,6 +1615,41 @@ export class ProfileService {
   }
 
   private sharedIndexGroupCatalogItemCounts(groupId: number) {
+    const enriched = this.db
+      .prepare(
+        `
+        with shared_keys as (
+          select distinct
+            catalog_kind || '|' || coalesce(imdb_id, '') || '|' || lower(parsed_title) || '|' || coalesce(parsed_year, '') as item_key
+          from shared_media_files
+          where shared_index_group_id = ?
+            and parsed_title is not null
+        )
+        select
+          count(*) as rows,
+          count(distinct case when ce.status = 'matched' and ce.catalog_kind = 'movie' then coalesce(ce.meta_id, ce.item_key) end) as movies,
+          count(distinct case when ce.status = 'matched' and ce.catalog_kind = 'series' then coalesce(ce.meta_id, ce.item_key) end) as series,
+          count(distinct case when ce.status = 'matched' and ce.catalog_kind = 'anime' then coalesce(ce.meta_id, ce.item_key) end) as anime,
+          count(distinct case when ce.status = 'unmatched' then ce.item_key end) as uncategorized
+        from shared_index_groups g
+        join profile_ftp_servers master on master.id = g.master_profile_ftp_server_id
+        join catalog_enrichment ce
+          on ce.profile_id = master.profile_id
+         and ce.ftp_server_id = master.id
+        join shared_keys sk on sk.item_key = ce.item_key
+        where g.id = ?
+      `,
+      )
+      .get(groupId, groupId) as { rows: number; movies: number; series: number; anime: number; uncategorized: number };
+    if (enriched.rows > 0) {
+      return {
+        movies: enriched.movies,
+        series: enriched.series,
+        anime: enriched.anime,
+        uncategorized: enriched.uncategorized,
+      };
+    }
+
     const row = this.db
       .prepare(
         `

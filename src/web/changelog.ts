@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { date: "2026-05-24", hash: "v0.4.48", subject: "fix: show shared-index Other counts in admin linked rows" },
   { date: "2026-05-24", hash: "v0.4.47", subject: "fix: align admin Other counts and clean folder-series matching" },
   { date: "2026-05-24", hash: "v0.4.46", subject: "feat: add TMDB genre filters and tighter movie catalog matching" },
   { date: "2026-05-23", hash: "v0.4.45", subject: "feat: split Uncategorized catalogs by server with an optional combined view" },
