@@ -91,6 +91,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<number>>(() => new Set());
   const [bulkLinkOpen, setBulkLinkOpen] = useState(false);
   const [bulkLinkMappings, setBulkLinkMappings] = useState<Record<string, string>>({});
+  const [bulkForceLink, setBulkForceLink] = useState(false);
   const [bulkLinkResult, setBulkLinkResult] = useState<BulkLinkResult | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sort, setSort] = useState<AdminSort | null>(null);
@@ -428,11 +429,12 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       buckets.map((bucket) => [bucket.key, String(defaultGroupIdForBucket(bucket, sharedGroups) ?? "")]),
     );
     setBulkLinkMappings(nextMappings);
+    setBulkForceLink(false);
     setBulkLinkResult(null);
     setBulkLinkOpen(true);
   }
 
-  async function linkServerBuckets(buckets: ServerBucket[]) {
+  async function linkServerBuckets(buckets: ServerBucket[], force = false) {
     if (!buckets.length) return;
 
     setBulkBusy(true);
@@ -450,7 +452,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
         }
         for (const server of bucket.servers) {
           try {
-            const result = await linkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId: server.profileId, serverId: server.serverId });
+            const result = await linkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId: server.profileId, serverId: server.serverId, ...(force ? { force: true } : {}) });
             updatedGroup = result.group;
             linked += 1;
           } catch (error) {
@@ -489,6 +491,35 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     } catch (error) {
       const serverName = profiles.find((profile) => profile.id === profileId)?.ftpServerDetails?.find((server) => server.id === serverId)?.name ?? "Server";
       setMessage(`${serverName} link failed: ${error instanceof Error ? error.message : "Unable to link server."}`);
+    } finally {
+      setBusyProfileId(null);
+    }
+  }
+
+  async function forceLinkServerFromModal(profileId: number, serverId: number) {
+    const key = serverSelectionKey(profileId, serverId);
+    const groupId = Number(serverLinkSelections[key]);
+    if (!groupId) {
+      setMessage("Choose a shared index group before linking this server.");
+      return;
+    }
+    const group = sharedGroups.find((candidate) => candidate.id === groupId);
+    const confirmed = await confirm({
+      title: "Force link server?",
+      body: `This will replace the server's root paths with ${group?.name ?? "the selected shared index"} roots, then link it to the shared index.`,
+      confirmLabel: "Force link",
+      danger: true,
+    });
+    if (!confirmed) return;
+    setBusyProfileId(profileId);
+    try {
+      const result = await linkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId, serverId, force: true });
+      setSharedGroups((current) => upsertSharedGroup(current, result.group));
+      setMessage("Server force-linked to shared index group.");
+      await refreshAdminData();
+    } catch (error) {
+      const serverName = profiles.find((profile) => profile.id === profileId)?.ftpServerDetails?.find((server) => server.id === serverId)?.name ?? "Server";
+      setMessage(`${serverName} force link failed: ${error instanceof Error ? error.message : "Unable to link server."}`);
     } finally {
       setBusyProfileId(null);
     }
@@ -776,6 +807,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
           busy={busyProfileId === serverModalProfile.id}
           onSelectionChange={(key, groupId) => setServerLinkSelections((current) => ({ ...current, [key]: groupId }))}
           onLink={linkServerFromModal}
+          onForceLink={forceLinkServerFromModal}
           onUnlink={unlinkServerFromModal}
           onCreateGroup={openCreateSharedGroupDialog}
           onClose={() => setServerModalProfileId(null)}
@@ -808,8 +840,10 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
           groups={sharedGroups}
           mappings={bulkLinkMappings}
           busy={bulkBusy}
+          force={bulkForceLink}
           result={bulkLinkResult}
           onMappingChange={(bucketKey, groupId) => setBulkLinkMappings((current) => ({ ...current, [bucketKey]: groupId }))}
+          onForceChange={setBulkForceLink}
           onLink={linkServerBuckets}
           onClose={() => setBulkLinkOpen(false)}
         />
@@ -1292,6 +1326,7 @@ function ProfileServersDialog({
   busy,
   onSelectionChange,
   onLink,
+  onForceLink,
   onUnlink,
   onCreateGroup,
   onClose,
@@ -1302,6 +1337,7 @@ function ProfileServersDialog({
   busy: boolean;
   onSelectionChange: (key: string, groupId: string) => void;
   onLink: (profileId: number, serverId: number) => void;
+  onForceLink: (profileId: number, serverId: number) => void;
   onUnlink: (profileId: number, serverId: number, groupId: number) => void;
   onCreateGroup: (profile: AdminProfileSummary, server: AdminServerDetail) => void;
   onClose: () => void;
@@ -1384,6 +1420,9 @@ function ProfileServersDialog({
                           </select>
                           <button type="button" className="secondary-button" disabled={busy || !groups.length} onClick={() => onLink(profile.id, server.id)}>
                             Link
+                          </button>
+                          <button type="button" className="secondary-button danger-button" disabled={busy || !groups.length} onClick={() => onForceLink(profile.id, server.id)}>
+                            Force link
                           </button>
                           {!hasCreatedGroup ? (
                             <button type="button" className="secondary-button" disabled={busy || !server.host} onClick={() => onCreateGroup(profile, server)}>
@@ -1656,8 +1695,10 @@ function BulkLinkDialog({
   groups,
   mappings,
   busy,
+  force,
   result,
   onMappingChange,
+  onForceChange,
   onLink,
   onClose,
 }: {
@@ -1665,9 +1706,11 @@ function BulkLinkDialog({
   groups: AdminSharedIndexGroup[];
   mappings: Record<string, string>;
   busy: boolean;
+  force: boolean;
   result: BulkLinkResult | null;
   onMappingChange: (bucketKey: string, groupId: string) => void;
-  onLink: (buckets: ServerBucket[]) => void;
+  onForceChange: (force: boolean) => void;
+  onLink: (buckets: ServerBucket[], force?: boolean) => void;
   onClose: () => void;
 }) {
   const serverCount = buckets.reduce((total, bucket) => total + bucket.servers.length, 0);
@@ -1720,6 +1763,10 @@ function BulkLinkDialog({
             );
           })}
         </div>
+        <label className="admin-bulk-link-force">
+          <input type="checkbox" checked={force} disabled={busy} onChange={(event) => onForceChange(event.target.checked)} />
+          <span>Force shared index roots onto linked servers</span>
+        </label>
         {result ? (
           <div className="admin-bulk-link-result" aria-live="polite">
             <span>{result.linked} linked</span>
@@ -1739,9 +1786,9 @@ function BulkLinkDialog({
           </ul>
         ) : null}
         <div className="admin-bulk-link-footer">
-          <button type="button" className="secondary-button" disabled={busy || !buckets.length} onClick={() => onLink(buckets)}>
+          <button type="button" className="secondary-button" disabled={busy || !buckets.length} onClick={() => onLink(buckets, force)}>
             <Link2 size={15} aria-hidden="true" />
-            {busy ? "Linking..." : "Link server buckets"}
+            {busy ? "Linking..." : force ? "Force link server buckets" : "Link server buckets"}
           </button>
           <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>
             Close

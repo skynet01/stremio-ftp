@@ -1900,6 +1900,20 @@ input:-webkit-autofill:active {
   margin: 0;
 }
 
+.admin-bulk-link-force {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.admin-bulk-link-force input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
 .admin-bulk-link-result {
   display: flex;
   gap: 8px;

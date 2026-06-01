@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
+import { decryptJson, encryptJson } from "../src/server/security/crypto";
 
 function config(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -537,6 +538,37 @@ describe("admin routes", () => {
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: other.body.profileId, serverId: otherServerId })
       .expect(400);
+
+    db.prepare("update shared_index_groups set root_paths_json = ? where id = ?").run(JSON.stringify(["/"]), groupId);
+    db.prepare("update profile_ftp_servers set encrypted_ftp_config = ? where id = ?").run(
+      encryptJson({
+        host: "sputnik.whatbox.ca",
+        port: 21,
+        username: "user",
+        password: "secret",
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/JFC"],
+      }, config().encryptionKey),
+      linkedServerId,
+    );
+    await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/link-server`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: linked.body.profileId, serverId: linkedServerId })
+      .expect(400);
+
+    const forcedResponse = await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/link-server`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: linked.body.profileId, serverId: linkedServerId, force: true })
+      .expect(200);
+    expect(forcedResponse.body.group.linkedServerCount).toBe(2);
+    const forcedConfig = decryptJson<{ roots: string[] }>(
+      db.prepare("select encrypted_ftp_config from profile_ftp_servers where id = ?").pluck().get(linkedServerId) as string,
+      config().encryptionKey,
+    );
+    expect(forcedConfig.roots).toEqual(["/"]);
 
     const linkedResponse = await request(app)
       .post(`/api/admin/shared-index-groups/${groupId}/link-server`)

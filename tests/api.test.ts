@@ -188,7 +188,7 @@ describe("web API setup token handling", () => {
     await updateAdminSharedIndexGroup({ ...auth, groupId: 3, name: "Sputnik 2", autoLinkImports: false });
     await scheduleAdminSharedIndexGroup({ ...auth, groupId: 3, intervalMinutes: 360 });
     await rotateAdminSharedIndexKey({ ...auth, groupId: 3 });
-    await linkAdminSharedIndexServer({ ...auth, groupId: 3, profileId: 7, serverId: 9 });
+    await linkAdminSharedIndexServer({ ...auth, groupId: 3, profileId: 7, serverId: 9, force: true });
     await unlinkAdminSharedIndexServer({ ...auth, groupId: 3, profileId: 7, serverId: 9 });
     await setAdminSharedIndexMaster({ ...auth, groupId: 3, profileId: 7, serverId: 9 });
     await rescanAdminSharedIndexGroup({ ...auth, groupId: 3 });
@@ -218,7 +218,7 @@ describe("web API setup token handling", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
       "/api/admin/shared-index-groups/3/link-server",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ ...auth, profileId: 7, serverId: 9 }) }),
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ ...auth, profileId: 7, serverId: 9, force: true }) }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       7,

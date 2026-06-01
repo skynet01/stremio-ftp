@@ -807,7 +807,7 @@ export async function scheduleAdminSharedIndexGroup(
 }
 
 export async function linkAdminSharedIndexServer(
-  request: CreateProfileRequest & { groupId: number; profileId: number; serverId: number },
+  request: CreateProfileRequest & { groupId: number; profileId: number; serverId: number; force?: boolean },
 ): Promise<AdminSharedIndexGroupResponse> {
   const response = await fetch(`/api/admin/shared-index-groups/${request.groupId}/link-server`, {
     method: "POST",
@@ -817,6 +817,7 @@ export async function linkAdminSharedIndexServer(
       passphrase: request.passphrase,
       profileId: request.profileId,
       serverId: request.serverId,
+      force: request.force,
     }),
   });
   return readJson<AdminSharedIndexGroupResponse>(response);

@@ -41,6 +41,7 @@ const sharedIndexScheduleSchema = adminAuthSchema.extend({
 const sharedIndexServerTargetSchema = adminAuthSchema.extend({
   profileId: z.number().int().positive(),
   serverId: z.number().int().positive(),
+  force: z.boolean().optional(),
 });
 
 function urls(baseUrl: string, token: string) {
@@ -190,7 +191,8 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
     try {
-      service.linkServerToSharedGroup(parsed.data.profileId, parsed.data.serverId, groupId.data);
+      if (parsed.data.force) service.forceLinkServerToSharedGroup(parsed.data.profileId, parsed.data.serverId, groupId.data);
+      else service.linkServerToSharedGroup(parsed.data.profileId, parsed.data.serverId, groupId.data);
       const group = service.getSharedIndexGroup(groupId.data);
       if (!group) return res.status(404).json({ error: "Shared index group not found" });
       res.json({ group: sharedIndexGroupView(service, scanQueue, group) });

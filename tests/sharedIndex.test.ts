@@ -149,6 +149,35 @@ describe("shared index groups", () => {
     });
   });
 
+  it("force-links by replacing linked server roots with the shared group roots", async () => {
+    const { service, profileId, serverId } = await serviceWithServer();
+    const created = service.createSharedIndexGroupFromServer(profileId, serverId, {
+      name: "Sputnik Main",
+      keyHint: "sputnik-main",
+    });
+    const linked = await service.createProfile("force-linked-browser", "passphrase");
+    const linkedServerId = service.defaultFtpServerId(linked.profileId);
+    service.saveFtpServerConfig(linked.profileId, linkedServerId, {
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      username: "linked",
+      password: "secret",
+      tlsMode: "explicit",
+      allowInvalidCertificate: false,
+      roots: ["/JFC"],
+    }, false);
+
+    expect(() => service.linkServerToSharedGroup(linked.profileId, linkedServerId, created.group.id)).toThrow(
+      "FTP server does not match shared index group",
+    );
+
+    service.forceLinkServerToSharedGroup(linked.profileId, linkedServerId, created.group.id);
+
+    expect(service.getFtpServer(linked.profileId, linkedServerId).sharedIndex?.id).toBe(created.group.id);
+    expect(service.getFtpServerConfig(linked.profileId, linkedServerId)?.roots).toEqual(["/media", "/TV"]);
+    expect(service.getFtpServerConfig(linked.profileId, linkedServerId)?.username).toBe("linked");
+  });
+
   it("syncs shared group catalog content when auto-linking with a shared index key", async () => {
     const { db, service, profileId, serverId } = await serviceWithServer();
     const created = service.createSharedIndexGroupFromServer(profileId, serverId, {

@@ -1049,6 +1049,17 @@ export class ProfileService {
     return this.getFtpServer(profileId, serverId);
   }
 
+  forceLinkServerToSharedGroup(profileId: number, serverId: number, groupId: number) {
+    const server = this.getFtpServer(profileId, serverId);
+    const group = this.getSharedIndexGroup(groupId);
+    if (!server.ftpConfig || !group || !sharedIndexTransportMatches(server.ftpConfig, group)) {
+      throw new Error("FTP server does not match shared index group");
+    }
+
+    this.saveFtpServerConfig(profileId, serverId, { ...server.ftpConfig, roots: canonicalRootPaths(group.rootPaths) }, false);
+    return this.linkServerToSharedGroup(profileId, serverId, groupId);
+  }
+
   private syncLinkedServerCatalogSettingsFromGroup(groupId: number, libraryLayout: LibraryLayout, content: CatalogContentTypes, updatedAt: string) {
     this.db
       .prepare(
