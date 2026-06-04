@@ -66,10 +66,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     const entries = await listDirectoryWithRetries(input, client, normalizedPath);
 
     const fingerprint = fingerprintEntries(entries);
-    if (
-      canTrustDirectoryFingerprint(entries) &&
-      snapshotMatchesDirectoryFingerprint(input.repo, input, normalizedPath, entries.length, fingerprint)
-    ) {
+    if (canSkipDirectoryTraversalWithSnapshot(input, normalizedPath, entries, fingerprint)) {
       entriesSeen += entries.length;
       filesSeen += markSeenUnderRoot(input, normalizedPath, crawlStartedAt);
       pendingSnapshots.push({
@@ -174,6 +171,19 @@ function normalizeFtpPath(path: string) {
 
 function canTrustDirectoryFingerprint(entries: FtpEntry[]) {
   return entries.every((entry) => entry.type === "file" || Boolean(entry.modifiedAt));
+}
+
+function canSkipDirectoryTraversalWithSnapshot(input: CrawlProfileRootInput, dirPath: string, entries: FtpEntry[], fingerprint: string) {
+  return (
+    canTrustDirectoryFingerprint(entries) &&
+    !isBroadConfiguredScanRoot(input, dirPath, entries) &&
+    snapshotMatchesDirectoryFingerprint(input.repo, input, dirPath, entries.length, fingerprint)
+  );
+}
+
+function isBroadConfiguredScanRoot(input: CrawlProfileRootInput, dirPath: string, entries: FtpEntry[]) {
+  if (normalizeFtpPath(input.rootPath) !== dirPath) return false;
+  return entries.some((entry) => entry.type === "directory" && entry.name !== "." && entry.name !== "..");
 }
 
 function fingerprintEntries(entries: FtpEntry[]) {

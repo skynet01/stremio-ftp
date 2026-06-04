@@ -309,7 +309,7 @@ describe("ScanQueue", () => {
     await waitForStatus(queue, profileId, "succeeded");
 
     expect(listings.get("/")).toBe(2);
-    expect(listings.get("/Movies")).toBe(1);
+    expect(listings.get("/Movies")).toBe(2);
   });
 
   it("labels first scans as full scans and repeated scans as difference updates", async () => {

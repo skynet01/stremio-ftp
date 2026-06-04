@@ -25,6 +25,24 @@ const ftpConfig = {
   roots: ["/"],
 };
 
+function createSharedIndexGroup(db: Database.Database, profileId: number) {
+  db.prepare("insert into profile_ftp_servers (profile_id, name, created_at, updated_at) values (?, 'Server 1', 'n', 'n')").run(profileId);
+  const server = db.prepare("select id from profile_ftp_servers where profile_id = ?").get(profileId) as { id: number };
+  return Number(
+    db
+      .prepare(
+        `
+        insert into shared_index_groups (
+          key_hint, name, shared_index_key_hash, host, port, tls_mode, allow_invalid_certificate,
+          root_paths_json, library_layout, catalog_content_json, enabled, auto_link_imports,
+          master_profile_ftp_server_id, created_at, updated_at
+        ) values ('shared', 'Shared', 'hash', 'x', 21, 'none', 0, '["/"]', 'auto', '{}', 1, 1, ?, 'n', 'n')
+      `,
+      )
+      .run(server.id).lastInsertRowid,
+  );
+}
+
 describe("crawler", () => {
   it("walks directories and indexes media files", async () => {
     const db = new Database(":memory:");
@@ -58,21 +76,7 @@ describe("crawler", () => {
     const db = new Database(":memory:");
     migrate(db);
     const profileId = createProfile(db);
-    db.prepare("insert into profile_ftp_servers (profile_id, name, created_at, updated_at) values (?, 'Server 1', 'n', 'n')").run(profileId);
-    const server = db.prepare("select id from profile_ftp_servers where profile_id = ?").get(profileId) as { id: number };
-    const sharedIndexGroupId = Number(
-      db
-        .prepare(
-          `
-          insert into shared_index_groups (
-            key_hint, name, shared_index_key_hash, host, port, tls_mode, allow_invalid_certificate,
-            root_paths_json, library_layout, catalog_content_json, enabled, auto_link_imports,
-            master_profile_ftp_server_id, created_at, updated_at
-          ) values ('shared', 'Shared', 'hash', 'x', 21, 'none', 0, '["/"]', 'auto', '{}', 1, 1, ?, 'n', 'n')
-        `,
-        )
-        .run(server.id).lastInsertRowid,
-    );
+    const sharedIndexGroupId = createSharedIndexGroup(db, profileId);
     const repo = new MediaRepository(db);
     const factory: FtpClientFactory = async () => ({
       list: async () => [{ name: "Shared.Movie.2020.mkv", path: "/Shared.Movie.2020.mkv", type: "file", size: 1000 }],
@@ -97,7 +101,48 @@ describe("crawler", () => {
   });
 
 
-  it("skips unchanged directory subtrees using saved scan snapshots", async () => {
+  it("does not let an unchanged shared configured root snapshot hide changed child directories", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const sharedIndexGroupId = createSharedIndexGroup(db, profileId);
+    const repo = new MediaRepository(db);
+    const listings = new Map<string, number>();
+    const factory: FtpClientFactory = async () => ({
+      list: async (path) => {
+        listings.set(path, (listings.get(path) ?? 0) + 1);
+        if (path === "/") {
+          return [{ name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" }];
+        }
+        if (path === "/Movies") {
+          const listCount = listings.get(path) ?? 0;
+          return listCount === 1
+            ? [{ name: "The.Matrix.1999.mkv", path: "/Movies/The.Matrix.1999.mkv", type: "file", size: 1000 }]
+            : [{ name: "Avatar.2009.mkv", path: "/Movies/Avatar.2009.mkv", type: "file", size: 1000 }];
+        }
+        throw new Error(`unexpected list ${path}`);
+      },
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
+      close: async () => undefined,
+    });
+
+    await crawlProfileRoot({ profileId, sharedIndexGroupId, rootPath: "/", ftpConfig, factory, repo });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await crawlProfileRoot({ profileId, sharedIndexGroupId, rootPath: "/", ftpConfig, factory, repo });
+
+    expect(listings.get("/")).toBe(2);
+    expect(listings.get("/Movies")).toBe(2);
+    expect(repo.countForSharedIndexGroup(sharedIndexGroupId)).toBe(1);
+    const rows = db
+      .prepare("select parsed_title, parsed_year from shared_media_files where shared_index_group_id = ? order by parsed_title")
+      .all(sharedIndexGroupId) as Array<{ parsed_title: string; parsed_year: number }>;
+    expect(rows).toEqual([{ parsed_title: "avatar", parsed_year: 2009 }]);
+  });
+
+
+  it("does not let an unchanged configured root snapshot hide changed child directories", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const profileId = createProfile(db);
@@ -110,7 +155,50 @@ describe("crawler", () => {
           return [{ name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" }];
         }
         if (path === "/Movies") {
-          return [{ name: "The.Matrix.1999.mkv", path: "/Movies/The.Matrix.1999.mkv", type: "file", size: 1000 }];
+          const listCount = listings.get(path) ?? 0;
+          return listCount === 1
+            ? [{ name: "The.Matrix.1999.mkv", path: "/Movies/The.Matrix.1999.mkv", type: "file", size: 1000 }]
+            : [{ name: "Avatar.2009.mkv", path: "/Movies/Avatar.2009.mkv", type: "file", size: 1000 }];
+        }
+        throw new Error(`unexpected list ${path}`);
+      },
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
+      close: async () => undefined,
+    });
+
+    await crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo });
+
+    expect(listings.get("/")).toBe(2);
+    expect(listings.get("/Movies")).toBe(2);
+    expect(repo.findMovie(profileId, "tt0000000", "matrix", 1999)).toHaveLength(0);
+    expect(repo.findMovie(profileId, "tt0000000", "avatar", 2009)).toHaveLength(1);
+    const snapshot = db.prepare("select fingerprint from scan_directory_snapshots where profile_id = ? and dir_path = '/' order by id desc limit 1").get(profileId) as {
+      fingerprint: string;
+    };
+    expect(snapshot.fingerprint).not.toMatch(/^parser-\d{4}/);
+  });
+
+  it("still skips unchanged nested directory subtrees using saved scan snapshots", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+    const listings = new Map<string, number>();
+    const factory: FtpClientFactory = async () => ({
+      list: async (path) => {
+        listings.set(path, (listings.get(path) ?? 0) + 1);
+        if (path === "/") {
+          return [{ name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" }];
+        }
+        if (path === "/Movies") {
+          return [{ name: "Collection", path: "/Movies/Collection", type: "directory", modifiedAt: "2026-05-02T00:00:00.000Z" }];
+        }
+        if (path === "/Movies/Collection") {
+          return [{ name: "The.Matrix.1999.mkv", path: "/Movies/Collection/The.Matrix.1999.mkv", type: "file", size: 1000 }];
         }
         throw new Error(`unexpected list ${path}`);
       },
@@ -124,12 +212,9 @@ describe("crawler", () => {
     await crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo });
 
     expect(listings.get("/")).toBe(2);
-    expect(listings.get("/Movies")).toBe(1);
+    expect(listings.get("/Movies")).toBe(2);
+    expect(listings.get("/Movies/Collection")).toBe(1);
     expect(repo.findMovie(profileId, "tt0000000", "matrix", 1999)).toHaveLength(1);
-    const snapshot = db.prepare("select fingerprint from scan_directory_snapshots where profile_id = ? and dir_path = '/' order by id desc limit 1").get(profileId) as {
-      fingerprint: string;
-    };
-    expect(snapshot.fingerprint).not.toMatch(/^parser-\d{4}/);
   });
 
   it("accepts legacy parser-versioned snapshots and rewrites them as stable directory fingerprints", async () => {
@@ -158,10 +243,10 @@ describe("crawler", () => {
     });
     repo.saveDirectorySnapshot(profileId, {
       ftpServerId: null,
-      dirPath: "/",
+      dirPath: "/Movies",
       entryCount: 1,
-      fingerprint: "parser-2026-05-04-3\ndirectory\tMovies\t/Movies\t\t2026-05-01T00:00:00.000Z",
-      modifiedAt: null,
+      fingerprint: "parser-2026-05-04-3\nfile\tThe.Matrix.1999.mkv\t/Movies/The.Matrix.1999.mkv\t1000\t",
+      modifiedAt: "2026-05-01T00:00:00.000Z",
       lastSeenAt: "2026-05-01T00:00:00.000Z",
     });
     const factory: FtpClientFactory = async () => ({
@@ -169,6 +254,9 @@ describe("crawler", () => {
         listings.set(path, (listings.get(path) ?? 0) + 1);
         if (path === "/") {
           return [{ name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" }];
+        }
+        if (path === "/Movies") {
+          return [{ name: "The.Matrix.1999.mkv", path: "/Movies/The.Matrix.1999.mkv", type: "file", size: 1000 }];
         }
         throw new Error(`unexpected list ${path}`);
       },
@@ -182,11 +270,11 @@ describe("crawler", () => {
 
     expect(result.filesSeen).toBe(1);
     expect(listings.get("/")).toBe(1);
-    expect(listings.has("/Movies")).toBe(false);
-    const snapshot = db.prepare("select fingerprint from scan_directory_snapshots where profile_id = ? and dir_path = '/' order by id desc limit 1").get(profileId) as {
+    expect(listings.get("/Movies")).toBe(1);
+    const snapshot = db.prepare("select fingerprint from scan_directory_snapshots where profile_id = ? and dir_path = '/Movies' order by id desc limit 1").get(profileId) as {
       fingerprint: string;
     };
-    expect(snapshot.fingerprint).toBe("directory\tMovies\t/Movies\t\t2026-05-01T00:00:00.000Z");
+    expect(snapshot.fingerprint).toBe("file\tThe.Matrix.1999.mkv\t/Movies/The.Matrix.1999.mkv\t1000\t");
   });
 
   it("skips invalid zero-numbered episodes without failing the crawl", async () => {
