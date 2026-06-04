@@ -311,7 +311,7 @@ function shouldUseBareEpisodePattern(ftpPath: string, options: ParseMediaOptions
 
 function shouldPreferFolderMovie(ftpPath: string, withoutExtension: string, options: ParseMediaOptions) {
   if (!clearFolderMovieTitle(ftpPath, withoutExtension, options)) return false;
-  return !hasStrongEpisodeMarker(withoutExtension);
+  return !hasMovieBlockingEpisodeMarker(withoutExtension);
 }
 
 function clearFolderMovieTitle(ftpPath: string, withoutExtension: string, options: ParseMediaOptions) {
@@ -325,11 +325,11 @@ function clearFolderMovieTitle(ftpPath: string, withoutExtension: string, option
   return new RegExp(`(?:^|[^\\d])${folderYear}(?=$|[^\\d])`).test(withoutExtension) ? folderTitle : null;
 }
 
-function hasStrongEpisodeMarker(value: string) {
+function hasMovieBlockingEpisodeMarker(value: string) {
   return (
     /(?:^|[\s._-])s\d{1,2}e\d{1,3}(?=$|[\s._-]|[A-Z])/i.test(value) ||
     /(?:^|[\s._-])s\d{1,2}[\s._-]+e?\d{1,3}\b/i.test(value) ||
-    /(?:^|[\s._-])\d{1,2}x\d{1,3}\b/i.test(value) ||
+    /(?:^|[\s._-])\d{1,2}x\d{2,3}\b/i.test(value) ||
     /(?:^|[\s._-])(?:e\d{2,3}|ep\d{1,3})\b/i.test(value) ||
     /\bseason[\s._-]*\d{1,2}[\s._-]*(?:episode|ep)[\s._-]*\d{1,3}\b/i.test(value)
   );

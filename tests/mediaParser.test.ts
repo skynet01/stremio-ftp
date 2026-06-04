@@ -362,6 +362,20 @@ describe("media parser", () => {
     });
   });
 
+  it("ignores one-digit 2x1 release suffixes in clear movie folders", () => {
+    expect(
+      parseMediaPath("/Blockbuster Movies/Moonwalker (1988)/Moonwalker (1988)_3DCONV_FSBS_CLOWNSEC_2x1.mkv", {
+        contentTypes: { movies: true, series: true, anime: true },
+        libraryLayout: "folders",
+      }),
+    ).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "moonwalker",
+      parsedYear: 1988,
+    });
+  });
+
   it("falls back to filename parsing inside generic folder-layout movie folders", () => {
     const options = {
       contentTypes: { movies: true, series: true, anime: false },
