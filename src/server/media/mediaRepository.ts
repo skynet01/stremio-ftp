@@ -415,7 +415,13 @@ export class MediaRepository {
                s.name as server_name, s.stream_delivery_mode, sm.ftp_path, sm.filename, sm.quality, sm.size_bytes
         from profile_ftp_servers s
         join shared_index_groups g on g.id = s.shared_index_group_id and g.enabled = 1
+        left join profile_ftp_servers master on master.id = g.master_profile_ftp_server_id
         join shared_media_files sm on sm.shared_index_group_id = g.id
+        left join catalog_enrichment ce
+          on ce.profile_id = master.profile_id
+         and ce.ftp_server_id = master.id
+         and ce.item_key = ${catalogEnrichmentSqlKey("sm")}
+         and ce.status = 'matched'
         where s.profile_id = ?
           and sm.media_kind = 'movie'
           and (
@@ -424,11 +430,15 @@ export class MediaRepository {
               sm.parsed_title = ?
               and (? is null or sm.parsed_year is null or sm.parsed_year = ?)
             )
+            or (
+              ce.meta_type = 'movie'
+              and ce.meta_id = ?
+            )
           )
         order by s.name asc, sm.confidence desc, sm.size_bytes desc
       `,
       )
-      .all(profileId, imdbId, normalizedTitle, year, year) as MediaFileRow[];
+      .all(profileId, imdbId, normalizedTitle, year, year, imdbId) as MediaFileRow[];
     return rows.map(toMediaMatch);
   }
 

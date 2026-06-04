@@ -367,6 +367,69 @@ describe("MediaRepository", () => {
     expect(repo.catalogMetas(linkedProfileId, "series", 10, 0, { ftpServerIds: [linkedServerId], search: "stale" })).toEqual([]);
   });
 
+  it("uses shared master enrichment for linked shared index movie streams", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const masterProfileId = createProfile(db);
+    const masterServerId = createServer(db, masterProfileId);
+    const groupId = createSharedGroup(db, masterServerId, "movie-streams");
+    const linkedProfileId = createProfile(db);
+    const linkedServerId = createServer(db, linkedProfileId);
+    db.prepare("update profile_ftp_servers set shared_index_group_id = ? where id = ?").run(groupId, linkedServerId);
+    const repo = new MediaRepository(db);
+
+    for (const filename of [
+      "Ghost in the Shell S.A.C. Solid State Society (2006).FSBS.mkv",
+      "Ghost in the Shell S.A.C. Solid State Society (2006).HSBS.mkv",
+    ]) {
+      repo.upsertSharedParsedFile(groupId, {
+        ftpPath: `/Anime Movies/Ghost in the Shell S.A.C. Solid State Society (2006)/${filename}`,
+        filename,
+        normalizedFilename: filename.toLowerCase(),
+        extension: "mkv",
+        mediaKind: "movie",
+        catalogKind: "movie",
+        parsedTitle: "ghost in shell s a c solid state society",
+        parsedYear: 2006,
+        season: null,
+        episode: null,
+        imdbId: null,
+        quality: null,
+        confidence: 70,
+      });
+    }
+
+    const seenAt = "2026-06-04T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(
+      masterProfileId,
+      masterServerId,
+      repo.sharedCatalogEnrichmentCandidates(groupId, masterServerId, ["movie"]),
+      seenAt,
+    );
+    const [candidate] = repo.pendingCatalogEnrichment(masterProfileId, masterServerId, seenAt, 10);
+    repo.saveCatalogEnrichmentMatch(candidate.id, {
+      id: "tt0856797",
+      type: "movie",
+      name: "Ghost in the Shell: Stand Alone Complex - Solid State Society",
+      releaseInfo: "2007",
+    }, seenAt);
+
+    expect(repo.findMovie(linkedProfileId, "tt0856797", "ghost in shell stand alone complex solid state society", 2007)).toEqual([
+      expect.objectContaining({
+        id: expect.any(Number),
+        source: "shared",
+        ftpServerId: linkedServerId,
+        filename: "Ghost in the Shell S.A.C. Solid State Society (2006).FSBS.mkv",
+      }),
+      expect.objectContaining({
+        id: expect.any(Number),
+        source: "shared",
+        ftpServerId: linkedServerId,
+        filename: "Ghost in the Shell S.A.C. Solid State Society (2006).HSBS.mkv",
+      }),
+    ]);
+  });
+
   it("serves other catalog items and streams from linked shared indexes", () => {
     const db = new Database(":memory:");
     migrate(db);
