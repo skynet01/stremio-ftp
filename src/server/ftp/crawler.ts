@@ -5,6 +5,7 @@ import type { FtpClientFactory, FtpEntry } from "./ftpTypes.js";
 
 const MAX_CRAWL_DEPTH = 64;
 const MAX_CRAWL_ENTRIES = 100000;
+const MAX_TRANSIENT_LIST_ATTEMPTS = 3;
 const LEGACY_CRAWL_SNAPSHOT_PREFIXES = ["parser-2026-05-04-3"];
 
 export type CrawlProfileRootInput = {
@@ -27,6 +28,14 @@ export type CrawlProgress = {
   currentPath: string;
 };
 
+type PendingDirectorySnapshot = {
+  dirPath: string;
+  entryCount: number;
+  fingerprint: string;
+  modifiedAt?: string | null;
+  lastSeenAt: string;
+};
+
 export async function crawlProfileRoot(input: CrawlProfileRootInput) {
   const client = await input.factory(input.ftpConfig);
   const closeClientOnAbort = () => {
@@ -35,6 +44,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
   input.signal?.addEventListener("abort", closeClientOnAbort, { once: true });
   const crawlStartedAt = new Date().toISOString();
   const visitedDirectories = new Set<string>();
+  const pendingSnapshots: PendingDirectorySnapshot[] = [];
   let filesSeen = 0;
   let entriesSeen = 0;
   let directoriesSeen = 0;
@@ -53,13 +63,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     directoriesSeen += 1;
     report(normalizedPath);
 
-    let entries;
-    try {
-      entries = await client.list(normalizedPath);
-    } catch (error) {
-      if (input.signal?.aborted) throw new ScanCancelledError();
-      throw error;
-    }
+    const entries = await listDirectoryWithRetries(input, client, normalizedPath);
 
     const fingerprint = fingerprintEntries(entries);
     if (
@@ -68,7 +72,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     ) {
       entriesSeen += entries.length;
       filesSeen += markSeenUnderRoot(input, normalizedPath, crawlStartedAt);
-      saveDirectorySnapshot(input, {
+      pendingSnapshots.push({
         dirPath: normalizedPath,
         entryCount: entries.length,
         fingerprint,
@@ -103,7 +107,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
       }
     }
 
-    saveDirectorySnapshot(input, {
+    pendingSnapshots.push({
       dirPath: normalizedPath,
       entryCount: entries.length,
       fingerprint,
@@ -115,11 +119,32 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
   try {
     await walk(input.rootPath, 0);
     deleteStaleUnderRoot(input, input.rootPath, crawlStartedAt);
+    for (const snapshot of pendingSnapshots) {
+      saveDirectorySnapshot(input, snapshot);
+    }
     return { filesSeen };
   } finally {
     input.signal?.removeEventListener("abort", closeClientOnAbort);
     await client.close();
   }
+}
+
+async function listDirectoryWithRetries(
+  input: CrawlProfileRootInput,
+  client: Awaited<ReturnType<FtpClientFactory>>,
+  path: string,
+) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_TRANSIENT_LIST_ATTEMPTS; attempt += 1) {
+    try {
+      return await client.list(path);
+    } catch (error) {
+      if (input.signal?.aborted) throw new ScanCancelledError();
+      lastError = error;
+      if (!isTransientFtpDisconnect(error) || attempt === MAX_TRANSIENT_LIST_ATTEMPTS) throw error;
+    }
+  }
+  throw lastError;
 }
 
 export class ScanCancelledError extends Error {
@@ -134,6 +159,11 @@ export function isScanCancelledError(error: unknown): error is ScanCancelledErro
 
 function throwIfScanCancelled(signal?: AbortSignal) {
   if (signal?.aborted) throw new ScanCancelledError();
+}
+
+function isTransientFtpDisconnect(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(FIN packet|ECONNRESET|ETIMEDOUT|EPIPE|socket.*closed|connection.*(?:closed|reset|timeout|timed out))\b/i.test(message);
 }
 
 function normalizeFtpPath(path: string) {

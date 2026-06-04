@@ -17,6 +17,7 @@ export type ScanJobStatus = "idle" | "queued" | "running" | "succeeded" | "faile
 export type ScanMode = "full" | "incremental" | "force";
 export type EnqueueScanOptions = {
   force?: boolean;
+  retryMode?: ScanMode;
 };
 
 export type ProfileScanStatus = {
@@ -100,7 +101,7 @@ export class ScanQueue {
       }
 
       if (trigger === "manual") this.profileService.clearPendingScan(profileId, ftpServerId);
-      const scanMode = this.scanModeForNextJob(profileId, ftpServerId, Boolean(options.force));
+      const scanMode = options.retryMode ?? this.scanModeForNextJob(profileId, ftpServerId, Boolean(options.force));
       if (options.force) this.mediaRepository.clearDirectorySnapshots(profileId, ftpServerId);
 
       const now = new Date().toISOString();
@@ -135,7 +136,7 @@ export class ScanQueue {
       }
 
       const scanConfig = this.profileService.sharedIndexScanConfig(sharedIndexGroupId);
-      const scanMode = this.scanModeForNextSharedJob(sharedIndexGroupId, Boolean(options.force));
+      const scanMode = options.retryMode ?? this.scanModeForNextSharedJob(sharedIndexGroupId, Boolean(options.force));
       if (options.force) this.mediaRepository.clearSharedDirectorySnapshots(sharedIndexGroupId);
 
       const now = new Date().toISOString();
@@ -294,7 +295,7 @@ export class ScanQueue {
       }
     }
 
-    for (const { profileId, serverId } of dueTargets) {
+    for (const { profileId, serverId, dueReason } of dueTargets) {
       if (handledServers.has(`${profileId}:${serverId}`)) continue;
       const ftpConfig = this.profileService.getFtpServerConfig(profileId, serverId);
       if (!ftpConfig || !ftpConfig.username?.trim() || !ftpConfig.password) {
@@ -304,6 +305,12 @@ export class ScanQueue {
       const schedule = this.profileService.getFtpServerScanSchedule(profileId, serverId);
       this.profileService.clearPendingScan(profileId, serverId);
       const server = this.profileService.getFtpServer(profileId, serverId);
+      const retryMode =
+        dueReason === "pending"
+          ? server.sharedIndex
+            ? this.latestFailedScanModeForSharedIndex(server.sharedIndex.id)
+            : this.latestFailedScanModeForServer(profileId, serverId)
+          : null;
       this.profileService.saveFtpServerScanSchedule(profileId, serverId, {
         intervalMinutes: schedule.intervalMinutes,
         nextScheduledScanAt: server.sharedIndex
@@ -312,8 +319,8 @@ export class ScanQueue {
             ? new Date(new Date(nowIso).getTime() + schedule.intervalMinutes * 60_000).toISOString()
             : null,
       });
-      if (server.sharedIndex) this.enqueueSharedIndexScan(server.sharedIndex.id, "scheduled");
-      else this.enqueueProfileScan(profileId, "scheduled", serverId);
+      if (server.sharedIndex) this.enqueueSharedIndexScan(server.sharedIndex.id, "scheduled", { retryMode: retryMode ?? undefined });
+      else this.enqueueProfileScan(profileId, "scheduled", serverId, { retryMode: retryMode ?? undefined });
     }
   }
 
@@ -360,9 +367,9 @@ export class ScanQueue {
         }
         const message = error instanceof Error ? error.message : "Unable to refresh FTP index";
         if (row.target_kind === "shared_group" && row.shared_index_group_id) {
-          this.failSharedJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), message);
+          this.failSharedJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), row.scan_mode ?? "full", message);
         } else {
-          this.failJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), message);
+          this.failJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), row.scan_mode ?? "full", message);
         }
       })
       .finally(() => {
@@ -647,9 +654,9 @@ export class ScanQueue {
       );
   }
 
-  private failJob(jobId: number, profileId: number, ftpServerId: number, error: string) {
+  private failJob(jobId: number, profileId: number, ftpServerId: number, scanMode: ScanMode, error: string) {
     const retryDelayMs = isTransientFtpDisconnect(error) ? this.config.scanTransientRetryDelayMs : 0;
-    const retryMessage = retryDelayMs > 0 ? ` Requeued to rescan in ${formatDuration(retryDelayMs)}.` : "";
+    const retryMessage = retryDelayMs > 0 ? ` Requeued to retry ${retryScanLabel(scanMode)} in ${formatDuration(retryDelayMs)} using verified directory snapshots only.` : "";
     if (retryDelayMs > 0) {
       this.profileService.schedulePendingScan(profileId, ftpServerId, new Date(Date.now() + retryDelayMs).toISOString());
     }
@@ -667,9 +674,9 @@ export class ScanQueue {
       .run(error, `Scan failed: ${error}${retryMessage}`, new Date().toISOString(), jobId);
   }
 
-  private failSharedJob(jobId: number, profileId: number, ftpServerId: number, error: string) {
+  private failSharedJob(jobId: number, profileId: number, ftpServerId: number, scanMode: ScanMode, error: string) {
     const retryDelayMs = isTransientFtpDisconnect(error) ? this.config.scanTransientRetryDelayMs : 0;
-    const retryMessage = retryDelayMs > 0 ? ` Requeued to rescan in ${formatDuration(retryDelayMs)}.` : "";
+    const retryMessage = retryDelayMs > 0 ? ` Requeued to retry ${retryScanLabel(scanMode)} in ${formatDuration(retryDelayMs)} using verified directory snapshots only.` : "";
     if (retryDelayMs > 0) {
       this.profileService.schedulePendingScan(profileId, ftpServerId, new Date(Date.now() + retryDelayMs).toISOString());
     }
@@ -792,6 +799,43 @@ export class ScanQueue {
     return this.mediaRepository.countSharedDirectorySnapshots(sharedIndexGroupId) > 0 ? "incremental" : "full";
   }
 
+  private latestFailedScanModeForServer(profileId: number, ftpServerId: number): ScanMode | null {
+    const row = this.db
+      .prepare(
+        `
+        select scan_mode
+        from scan_jobs
+        where target_kind = 'profile_server'
+          and profile_id = ?
+          and ftp_server_id = ?
+          and status = 'failed'
+          and scan_mode is not null
+        order by finished_at desc, id desc
+        limit 1
+      `,
+      )
+      .get(profileId, ftpServerId) as { scan_mode: ScanMode } | undefined;
+    return row?.scan_mode ?? null;
+  }
+
+  private latestFailedScanModeForSharedIndex(sharedIndexGroupId: number): ScanMode | null {
+    const row = this.db
+      .prepare(
+        `
+        select scan_mode
+        from scan_jobs
+        where target_kind = 'shared_group'
+          and shared_index_group_id = ?
+          and status = 'failed'
+          and scan_mode is not null
+        order by finished_at desc, id desc
+        limit 1
+      `,
+      )
+      .get(sharedIndexGroupId) as { scan_mode: ScanMode } | undefined;
+    return row?.scan_mode ?? null;
+  }
+
   private activeJobForServer(profileId: number, ftpServerId: number) {
     const row = this.db
       .prepare(
@@ -896,6 +940,12 @@ function scanModeWorkerLabel(scanMode: ScanMode) {
   if (scanMode === "incremental") return "difference update";
   if (scanMode === "force") return "force reindex";
   return "full scan";
+}
+
+function retryScanLabel(scanMode: ScanMode) {
+  if (scanMode === "incremental") return "the difference update";
+  if (scanMode === "force") return "the force reindex";
+  return "the full scan";
 }
 
 function scanFinishedMessage(

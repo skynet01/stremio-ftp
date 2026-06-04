@@ -364,6 +364,32 @@ describe("crawler", () => {
     expect(closed).toBe(true);
   });
 
+  it("retries transient directory list failures before failing the crawl", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+    let rootListCalls = 0;
+    const factory: FtpClientFactory = async () => ({
+      list: async (path) => {
+        if (path !== "/") throw new Error(`unexpected path ${path}`);
+        rootListCalls += 1;
+        if (rootListCalls === 1) throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+        return [{ name: "Movie.2020.mkv", path: "/Movie.2020.mkv", type: "file", size: 1000 }];
+      },
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
+      close: async () => undefined,
+    });
+
+    const result = await crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo });
+
+    expect(rootListCalls).toBe(2);
+    expect(result.filesSeen).toBe(1);
+    expect(repo.findMovie(profileId, "", "movie", 2020)).toHaveLength(1);
+  });
+
   it("throws a clear error when maximum crawl depth is exceeded", async () => {
     const db = new Database(":memory:");
     migrate(db);

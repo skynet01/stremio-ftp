@@ -375,8 +375,91 @@ describe("ScanQueue", () => {
     const failed = await waitForStatus(queue, profileId, "failed");
     const server = profileService.getFtpServer(profileId, profileService.defaultFtpServerId(profileId));
 
-    expect(failed.message).toBe("Scan failed: Server sent FIN packet unexpectedly, closing connection. Requeued to rescan in 1m.");
+    expect(failed.message).toBe(
+      "Scan failed: Server sent FIN packet unexpectedly, closing connection. Requeued to retry the full scan in 1m using verified directory snapshots only.",
+    );
     expect(server.pendingScanAfter).toEqual(expect.any(String));
+  });
+
+  it("retries failed full scans as full scans without trusting partial snapshots", async () => {
+    let rootCalls = 0;
+    const retryRootList = deferred<Array<{ name: string; path: string; type: "directory"; modifiedAt: string }>>();
+    const { db, profileService, mediaRepository, queue } = createHarness(async () => ({
+      list: async (path) => {
+        if (path === "/") {
+          rootCalls += 1;
+          if (rootCalls === 1) {
+            return [
+              { name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" },
+              { name: "Broken", path: "/Broken", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" },
+            ];
+          }
+          return retryRootList.promise;
+        }
+        if (path === "/Movies") return [{ name: "Movie.2020.mkv", path: "/Movies/Movie.2020.mkv", type: "file", size: 1000 }];
+        if (path === "/Broken") throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+        return [];
+      },
+      openReadStream: async () => Readable.from("not used"),
+      close: async () => undefined,
+    }));
+    const profileId = await createProfileWithFtp(profileService);
+    const ftpServerId = profileService.defaultFtpServerId(profileId);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    const failed = await waitForStatus(queue, profileId, "failed");
+    const pendingScanAfter = profileService.getFtpServer(profileId, ftpServerId).pendingScanAfter;
+
+    expect(failed.scanMode).toBe("full");
+    expect(mediaRepository.countDirectorySnapshots(profileId, ftpServerId)).toBe(0);
+    expect(db.prepare("select count(*) as count from scan_directory_snapshots").get()).toEqual({ count: 0 });
+    expect(pendingScanAfter).toEqual(expect.any(String));
+
+    queue.enqueueDueScheduledScans(pendingScanAfter!);
+    const retry = await waitForNextStatus(queue, profileId, failed.id, "running");
+
+    expect(retry.scanMode).toBe("full");
+    expect(retry.message).toContain("Full scan");
+    retryRootList.resolve([]);
+    await waitForStatus(queue, profileId, "succeeded");
+  });
+
+  it("preserves force mode when retrying transient scan failures", async () => {
+    let rootCalls = 0;
+    const retryRootList = deferred<Array<{ name: string; path: string; type: "file"; size: number }>>();
+    const { profileService, queue } = createHarness(
+      async () => ({
+        list: async (path) => {
+          if (path !== "/") return [];
+          rootCalls += 1;
+          if (rootCalls === 1) return [{ name: "Movie.2020.mkv", path: "/Movie.2020.mkv", type: "file", size: 1000 }];
+          if (rootCalls <= 4) throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+          return retryRootList.promise;
+        },
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, scanCooldownMs: 0 },
+    );
+    const profileId = await createProfileWithFtp(profileService);
+    const ftpServerId = profileService.defaultFtpServerId(profileId);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    await waitForStatus(queue, profileId, "succeeded");
+    queue.enqueueProfileScan(profileId, "manual", ftpServerId, { force: true });
+    const failed = await waitForStatus(queue, profileId, "failed");
+    const pendingScanAfter = profileService.getFtpServer(profileId, ftpServerId).pendingScanAfter;
+
+    expect(failed.scanMode).toBe("force");
+    expect(pendingScanAfter).toEqual(expect.any(String));
+
+    queue.enqueueDueScheduledScans(pendingScanAfter!);
+    const retry = await waitForNextStatus(queue, profileId, failed.id, "running");
+
+    expect(retry.scanMode).toBe("force");
+    expect(retry.message).toContain("Force reindex");
+    retryRootList.resolve([]);
+    await waitForStatus(queue, profileId, "succeeded");
   });
 
   it("schedules a delayed retry for transient shared index disconnects", async () => {
@@ -398,8 +481,58 @@ describe("ScanQueue", () => {
     const failed = await waitForSharedStatus(queue, group.id, "failed");
     const server = profileService.getFtpServer(profileId, serverId);
 
-    expect(failed.message).toBe("Shared scan failed: Server sent FIN packet unexpectedly, closing connection. Requeued to rescan in 1m.");
+    expect(failed.message).toBe(
+      "Shared scan failed: Server sent FIN packet unexpectedly, closing connection. Requeued to retry the full scan in 1m using verified directory snapshots only.",
+    );
     expect(server.pendingScanAfter).toEqual(expect.any(String));
+  });
+
+  it("retries failed shared full scans as full scans without trusting partial snapshots", async () => {
+    let rootCalls = 0;
+    const retryRootList = deferred<Array<{ name: string; path: string; type: "directory"; modifiedAt: string }>>();
+    const { db, profileService, mediaRepository, queue } = createHarness(async () => ({
+      list: async (path) => {
+        if (path === "/") {
+          rootCalls += 1;
+          if (rootCalls === 1) {
+            return [
+              { name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" },
+              { name: "Broken", path: "/Broken", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" },
+            ];
+          }
+          return retryRootList.promise;
+        }
+        if (path === "/Movies") return [{ name: "Shared.Movie.2020.mkv", path: "/Movies/Shared.Movie.2020.mkv", type: "file", size: 1000 }];
+        if (path === "/Broken") throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+        return [];
+      },
+      openReadStream: async () => Readable.from("not used"),
+      close: async () => undefined,
+    }));
+    const profileId = await createProfileWithFtp(profileService);
+    const serverId = profileService.defaultFtpServerId(profileId);
+    const group = profileService.createSharedIndexGroupFromServer(profileId, serverId, {
+      name: "Shared Main",
+      keyHint: "shared-main",
+    }).group;
+
+    queue.enqueueSharedIndexScan(group.id, "manual");
+    const failed = await waitForSharedStatus(queue, group.id, "failed");
+    const pendingScanAfter = profileService.getFtpServer(profileId, serverId).pendingScanAfter;
+
+    expect(failed.scanMode).toBe("full");
+    expect(mediaRepository.countSharedDirectorySnapshots(group.id)).toBe(0);
+    expect(db.prepare("select count(*) as count from shared_directory_snapshots").get()).toEqual({ count: 0 });
+    expect(pendingScanAfter).toEqual(expect.any(String));
+
+    queue.enqueueDueScheduledScans(pendingScanAfter!);
+    const retry = await waitForSharedStatus(queue, group.id, "running");
+
+    expect(retry.id).not.toBe(failed.id);
+    expect(retry.scanMode).toBe("full");
+    expect(retry.message).toContain("Full scan");
+    retryRootList.resolve([]);
+    await waitForSharedStatus(queue, group.id, "succeeded");
   });
 
   it("uses the previous successful scan size as the repeated scan progress baseline", async () => {
