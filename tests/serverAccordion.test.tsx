@@ -254,9 +254,12 @@ describe("ServerAccordion", () => {
     expect(serverContent.closest(".library-select-column")).toBeTruthy();
     expect(catalogHeading.closest(".library-settings-header")).toBeTruthy();
     expect(catalogHeading.closest(".catalog-options-column")).toBeNull();
-    expect(within(serverContent).getByLabelText("Movies")).toBeTruthy();
-    expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
-    expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
+    const moviesToggle = within(serverContent).getByLabelText("Movies");
+    const seriesToggle = within(serverContent).getByLabelText("Series");
+    const animeToggle = within(serverContent).getByLabelText("Anime");
+    expect(moviesToggle.closest("label")).toHaveAttribute("title", expect.stringContaining("movie files"));
+    expect(seriesToggle.closest("label")).toHaveAttribute("title", expect.stringContaining("series episode files"));
+    expect(animeToggle.closest("label")).toHaveAttribute("title", expect.stringContaining("/Anime Movies"));
     expect(within(catalogsGroup).queryByLabelText("Movies")).toBeNull();
     expect(within(catalogsGroup).queryByLabelText("Series")).toBeNull();
     expect(within(catalogsGroup).queryByLabelText("Anime")).toBeNull();

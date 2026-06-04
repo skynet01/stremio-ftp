@@ -3,7 +3,7 @@ import type { AppConfig } from "../config.js";
 import { crawlProfileRoot, isScanCancelledError, ScanCancelledError, type CrawlProgress } from "../ftp/crawler.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { CatalogEnrichmentCandidate, MediaRepository } from "../media/mediaRepository.js";
-import { tmdbCatalogEnrichment } from "../metadata/tmdbClient.js";
+import { tmdbCatalogEnrichment, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
 import type { ProfileService } from "../profiles/profileService.js";
 import { nextAlignedScanAt } from "./schedule.js";
 
@@ -520,7 +520,7 @@ export class ScanQueue {
     this.saveEnrichmentProgress(jobId, processed, total, null);
     for (const candidate of pending) {
       throwIfScanCancelled(signal);
-      const result = await tmdbCatalogEnrichment(candidate, apiKey, candidate.catalogKind);
+      const result = await tmdbCatalogEnrichment(candidate, apiKey, tmdbLookupKind(candidate));
       const now = new Date().toISOString();
       if (result.status === "matched") {
         this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
@@ -572,7 +572,7 @@ export class ScanQueue {
     this.saveEnrichmentProgress(jobId, processed, total, null);
     for (const candidate of pending) {
       throwIfScanCancelled(signal);
-      const result = await tmdbCatalogEnrichment(candidate, apiKey, candidate.catalogKind);
+      const result = await tmdbCatalogEnrichment(candidate, apiKey, tmdbLookupKind(candidate));
       const now = new Date().toISOString();
       if (result.status === "matched") {
         this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
@@ -917,6 +917,10 @@ function enabledCatalogKinds(contentTypes: { movies: boolean; series: boolean; a
   if (enabled.series) kinds.push("series");
   if (enabled.anime) kinds.push("anime");
   return kinds;
+}
+
+function tmdbLookupKind(candidate: CatalogEnrichmentCandidate): TmdbCatalogKind {
+  return candidate.catalogKind === "anime" ? candidate.mediaKind : candidate.catalogKind;
 }
 
 function formatDuration(durationMs: number) {

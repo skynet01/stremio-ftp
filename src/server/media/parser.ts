@@ -4,6 +4,7 @@ import { basename, normalizeTitle } from "./normalizer.js";
 const SUPPORTED_EXTENSIONS = new Set(["mkv", "mp4", "avi", "mov", "m4v", "ts", "webm"]);
 const RELEASE_YEAR_PATTERN = /(?:^|[^\d])(19\d{2}|20\d{2})(?=$|[^\d])/g;
 const GENERIC_MOVIE_FOLDERS = /^(?:movie|movies|film|films|other|uncategorized|misc|miscellaneous|video|videos|anime movies|blockbuster movies|superhero movies|vr videos)$/i;
+const ANIME_COLLECTION_FOLDERS = /^(?:anime|anime movies|anime films|anime shows|anime series|anime tv)$/i;
 
 export type ParsedMedia = {
   mediaKind: "movie" | "series";
@@ -279,11 +280,11 @@ function animeEnabled(options: ParseMediaOptions) {
 
 function shouldAttemptAnimeAbsolute(ftpPath: string, options: ParseMediaOptions) {
   if (!animeEnabled(options)) return false;
-  return options.contentTypes?.movies === false || /\banime\b/i.test(ftpPath) || options.libraryLayout === "folders";
+  return options.contentTypes?.movies === false || hasAnimeFolderCue(ftpPath) || options.libraryLayout === "folders";
 }
 
 function shouldUseAnimeAbsolute(ftpPath: string, options: ParseMediaOptions, parsedTitle: string) {
-  if (options.contentTypes?.movies === false || /\banime\b/i.test(ftpPath)) return true;
+  if (options.contentTypes?.movies === false || hasAnimeFolderCue(ftpPath)) return true;
   if (options.libraryLayout !== "folders") return false;
   const folderTitle = folderTitleOf(ftpPath);
   if (!folderTitle) return false;
@@ -291,8 +292,17 @@ function shouldUseAnimeAbsolute(ftpPath: string, options: ParseMediaOptions, par
 }
 
 function seriesCatalogKind(ftpPath: string, options: ParseMediaOptions): "series" | "anime" {
-  if (animeEnabled(options) && (!options.contentTypes?.series || /\banime\b/i.test(ftpPath))) return "anime";
+  if (animeEnabled(options) && (!options.contentTypes?.series || hasAnimeFolderCue(ftpPath))) return "anime";
   return "series";
+}
+
+function movieCatalogKind(ftpPath: string, options: ParseMediaOptions): "movie" | "anime" {
+  return animeEnabled(options) && hasAnimeFolderCue(ftpPath) ? "anime" : "movie";
+}
+
+function hasAnimeFolderCue(ftpPath: string) {
+  const parts = ftpPath.split(/[\\/]/).filter(Boolean).slice(0, -1);
+  return parts.some((part) => ANIME_COLLECTION_FOLDERS.test(part.trim()));
 }
 
 function shouldUseBareEpisodePattern(ftpPath: string, options: ParseMediaOptions) {
@@ -353,7 +363,7 @@ function parseMoviePath(
 
   return {
     mediaKind: "movie",
-    catalogKind: "movie",
+    catalogKind: movieCatalogKind(ftpPath, options),
     ftpPath,
     filename,
     normalizedFilename,

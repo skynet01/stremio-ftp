@@ -128,6 +128,7 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
       ...catalogServerScope(profiles, profileId, catalogKind),
       search: extra.search,
       genre: extra.genre,
+      metaType: type,
     });
     res.json({ metas });
   });
@@ -172,6 +173,7 @@ function cinemetaId(type: StremioType, id: string): string {
 function isCatalogId(type: StremioType, catalogId: string) {
   return (
     (type === "movie" && catalogId === "ftp-movies") ||
+    (type === "movie" && catalogId === "ftp-anime") ||
     (type === "series" && catalogId === "ftp-series") ||
     (type === "series" && catalogId === "ftp-anime") ||
     (type === "movie" && (catalogId === "ftp-other" || otherCatalogServerId(catalogId) !== null))

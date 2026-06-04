@@ -292,9 +292,12 @@ describe("App", () => {
     ).toBe(true);
     const serverContent = screen.getByRole("group", { name: "Server content types" });
     expect(within(serverContent).getByText("Server content")).toBeTruthy();
-    expect(within(serverContent).getByLabelText("Movies")).toBeTruthy();
-    expect(within(serverContent).getByLabelText("Series")).toBeTruthy();
-    expect(within(serverContent).getByLabelText("Anime")).toBeTruthy();
+    const moviesToggle = within(serverContent).getByLabelText("Movies");
+    const seriesToggle = within(serverContent).getByLabelText("Series");
+    const animeToggle = within(serverContent).getByLabelText("Anime");
+    expect(moviesToggle.closest("label")).toHaveAttribute("title", expect.stringContaining("movie files"));
+    expect(seriesToggle.closest("label")).toHaveAttribute("title", expect.stringContaining("series episode files"));
+    expect(animeToggle.closest("label")).toHaveAttribute("title", expect.stringContaining("/Anime Movies"));
     expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.49`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
@@ -1565,10 +1568,10 @@ describe("App", () => {
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
     loadAdminProfilesMock.mockResolvedValue({
       summary: {
-        profiles: 3,
-        configuredProfiles: 2,
-        ftpServers: 4,
-        configuredFtpServers: 3,
+        profiles: 4,
+        configuredProfiles: 3,
+        ftpServers: 6,
+        configuredFtpServers: 5,
         indexedItems: 44,
         activeScans: 0,
         pendingScans: 1,
@@ -1658,6 +1661,41 @@ describe("App", () => {
             },
           ],
           indexedItems: 5,
+          lastScanAt: null,
+          lastManifestAccessedAt: null,
+          activeScans: 0,
+          pendingScans: 0,
+          manifestUrl: null,
+          stremioInstallUrl: null,
+          lastCountryCode: "US",
+          adminEnabled: false,
+          adminSource: null,
+        },
+        {
+          id: 5,
+          browserUid: "d54b36ac-626f-4e14-b084-ed1c5d33e688",
+          createdAt: "2026-06-03T21:26:44.985Z",
+          updatedAt: "2026-06-03T21:26:44.985Z",
+          lastUnlockedAt: null,
+          ftpServers: 2,
+          configuredFtpServers: 2,
+          ftpServerDetails: [
+            {
+              id: 16,
+              name: "Sputnik",
+              host: "sputnik.whatbox.ca",
+              lastIndexedAt: null,
+              sharedIndex: { id: 5, name: "Sputnik Main", keyHint: "sputnik-main", autoLinked: true, lastIndexedAt: "2026-05-16T00:00:00.000Z" },
+            },
+            {
+              id: 17,
+              name: "Tamarind",
+              host: "tamarind.whatbox.ca",
+              lastIndexedAt: null,
+              sharedIndex: { id: 7, name: "Tamarind", keyHint: "tamarind", autoLinked: false, lastIndexedAt: "2026-05-16T00:00:00.000Z" },
+            },
+          ],
+          indexedItems: 22,
           lastScanAt: null,
           lastManifestAccessedAt: null,
           activeScans: 0,
@@ -1766,6 +1804,9 @@ describe("App", () => {
     expect(within(linkedRow).getByText("Linked")).toBeTruthy();
     const autoLinkedRow = screen.getByRole("button", { name: "Copy recovery UID auto80d7-4971-4919-8f4e-ab80aa2de852" }).closest("tr")!;
     expect(within(autoLinkedRow).getByText("Auto-L")).toBeTruthy();
+    const allLinkedMixedRow = screen.getByRole("button", { name: "Copy recovery UID d54b36ac-626f-4e14-b084-ed1c5d33e688" }).closest("tr")!;
+    expect(within(allLinkedMixedRow).getByText("Linked")).toBeTruthy();
+    expect(within(allLinkedMixedRow).queryByText("Partial")).toBeNull();
     expect(screen.getByRole("columnheader", { name: /Last used/ })).toBeTruthy();
     expect(screen.getAllByText("May 16, 2026, 6:00 PM").length).toBeGreaterThan(0);
     expect(screen.queryByLabelText("Profile ID for Sputnik Main")).toBeNull();

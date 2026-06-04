@@ -561,6 +561,76 @@ describe("ScanQueue", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("enriches anime movie folders with TMDB movie search and serves the anime movie catalog", async () => {
+    const { db, profileService, queue } = createHarness(
+      async () => ({
+        list: async (path) =>
+          path === "/"
+            ? [{ name: "Anime Movies", path: "/Anime Movies", type: "directory" }]
+            : [
+                {
+                  name: "The.Boy.and.the.Heron.2023.mkv",
+                  path: "/Anime Movies/The Boy and the Heron (2023)/The.Boy.and.the.Heron.2023.mkv",
+                  type: "file",
+                  size: 1024 * 1024,
+                },
+              ],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, tmdbApiKey: "tmdb-key", scanCooldownMs: 0 },
+    );
+    const created = await profileService.createProfile(`browser-${Math.random()}`, "passphrase");
+    const profileId = created.profileId;
+    profileService.saveFtpConfig(profileId, {
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/"],
+    });
+    profileService.saveAddonCustomization(profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive.",
+      catalogEnabled: true,
+      catalogContentTypes: { movies: true, series: true, anime: true },
+      libraryLayout: "folders",
+    });
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("/search/movie")) {
+        return {
+          ok: true,
+          json: async () => ({
+            results: [{ id: 508883, title: "The Boy and the Heron", release_date: "2023-07-14" }],
+          }),
+        };
+      }
+      if (url.includes("/3/movie/508883/external_ids")) return { ok: true, json: async () => ({ imdb_id: "tt6587046" }) };
+      return { ok: true, json: async () => ({ results: [] }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    await waitForStatus(queue, profileId, "succeeded");
+
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/search/movie"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/search/tv"))).toBe(false);
+    fetchMock.mockClear();
+    const app = createApp({ ...baseConfig, tmdbApiKey: "tmdb-key" }, db);
+    const animeMovies = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-anime.json`).expect(200);
+    const movies = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-movies.json`).expect(200);
+
+    expect(animeMovies.body.metas).toEqual([
+      expect.objectContaining({ id: "tt6587046", type: "movie", name: "The Boy and the Heron", releaseInfo: "2023" }),
+    ]);
+    expect(movies.body.metas).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps transient TMDB enrichment failures resumable on a later scan", async () => {
     const { db, profileService, queue } = createHarness(
       async () => ({

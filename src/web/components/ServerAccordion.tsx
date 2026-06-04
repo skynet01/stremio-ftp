@@ -1,5 +1,6 @@
 import { ChevronRight, CircleStop, KeyRound, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type { AddonCustomization, ConnectionStatus, IndexStatus, ScanSchedule, ScanStatus } from "../api.js";
+import { CONTENT_TYPE_TOOLTIPS } from "./contentTypeTooltips.js";
 import {
   field,
   filledClass,
@@ -263,7 +264,7 @@ export function ServerAccordion({
                           <span className="field-label">Server content</span>
                           <div className="server-content-toggles">
                             {(["movies", "series", "anime"] as const).map((key) => (
-                              <label className="toggle-row" htmlFor={`${key}-${server.id}`} key={key}>
+                              <label className="toggle-row" htmlFor={`${key}-${server.id}`} key={key} title={CONTENT_TYPE_TOOLTIPS[key]}>
                                 <input
                                   id={`${key}-${server.id}`}
                                   type="checkbox"

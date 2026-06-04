@@ -294,6 +294,14 @@ describe("media parser", () => {
       parsedTitle: "lego movie",
       parsedYear: 2014,
     });
+  });
+
+  it("classifies clear anime movie folders as anime movies without treating other animated movies as anime", () => {
+    const options = {
+      contentTypes: { movies: true, series: true, anime: true },
+      libraryLayout: "folders" as const,
+    };
+
     expect(
       parseMediaPath(
         "/Anime Movies/The Boy and the Heron (2023)/The.Boy.and.the.Heron.2023.BluRay.2160p.UHD.REMUX.HEVC.10bit.DV.Atmos.DTS-HD.MA.7.1-AishaRFX_LRF_Full_SBS.mkv",
@@ -301,7 +309,33 @@ describe("media parser", () => {
       ),
     ).toMatchObject({
       mediaKind: "movie",
+      catalogKind: "anime",
+      parsedTitle: "boy and heron",
+      parsedYear: 2023,
+    });
+    expect(parseMediaPath("/Superhero Movies/Spider-Man Into the Spider-Verse (2018)/Spider-Verse.2018.FSBS.mkv", options)).toMatchObject({
+      mediaKind: "movie",
       catalogKind: "movie",
+      parsedTitle: "spider man into spider verse",
+      parsedYear: 2018,
+    });
+  });
+
+  it("keeps flat unorganized anime movies in movies unless the path has an anime folder cue", () => {
+    const options = {
+      contentTypes: { movies: true, series: true, anime: true },
+      libraryLayout: "flat" as const,
+    };
+
+    expect(parseMediaPath("/Uploads/The.Boy.and.the.Heron.2023.mkv", options)).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "boy and heron",
+      parsedYear: 2023,
+    });
+    expect(parseMediaPath("/Anime/The.Boy.and.the.Heron.2023.mkv", options)).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "anime",
       parsedTitle: "boy and heron",
       parsedYear: 2023,
     });

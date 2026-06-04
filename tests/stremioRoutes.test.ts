@@ -1000,7 +1000,8 @@ describe("stremio routes", () => {
     const catalog = await request(app).get(`/u/${created.installUrlToken}/catalog/series/ftp-anime.json`).expect(200);
 
     expect(manifest.body.catalogs).toEqual([
-      { type: "series", id: "ftp-anime", name: "Archive 3D Anime", extra: TYPED_CATALOG_EXTRAS },
+      { type: "movie", id: "ftp-anime", name: "Archive 3D Anime Movies", extra: TYPED_CATALOG_EXTRAS },
+      { type: "series", id: "ftp-anime", name: "Archive 3D Anime Series", extra: TYPED_CATALOG_EXTRAS },
       { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: SEARCHABLE_CATALOG_EXTRAS },
     ]);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1015,6 +1016,90 @@ describe("stremio routes", () => {
         releaseInfo: "2007",
       },
     ]);
+  });
+
+  it("serves anime movies from the anime movie catalog without duplicating them in Movies", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveAddonCustomization(created.profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive from my FTP server.",
+      catalogEnabled: true,
+      catalogContentTypes: { movies: true, series: false, anime: true },
+      libraryLayout: "folders",
+    });
+    const repository = new MediaRepository(db);
+    repository.upsertParsedFile(created.profileId, {
+      mediaKind: "movie",
+      catalogKind: "anime",
+      ftpPath: "/Anime Movies/The Boy and the Heron (2023)/The.Boy.and.the.Heron.2023.mkv",
+      filename: "The.Boy.and.the.Heron.2023.mkv",
+      normalizedFilename: "the boy and the heron 2023",
+      extension: "mkv",
+      parsedTitle: "boy and heron",
+      parsedYear: 2023,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: null,
+      confidence: 70,
+      sizeBytes: 1024 * 1024,
+    });
+    repository.upsertParsedFile(created.profileId, {
+      mediaKind: "movie",
+      catalogKind: "movie",
+      ftpPath: "/Superhero Movies/Spider-Man Into the Spider-Verse (2018)/Spider-Verse.2018.mkv",
+      filename: "Spider-Verse.2018.mkv",
+      normalizedFilename: "spider verse 2018",
+      extension: "mkv",
+      parsedTitle: "spider man into spider verse",
+      parsedYear: 2018,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: null,
+      confidence: 70,
+      sizeBytes: 1024 * 1024,
+    });
+    const serverId = attachRowsToDefaultServer(db, created.profileId, service);
+    const seenAt = new Date().toISOString();
+    repository.syncCatalogEnrichmentCandidates(created.profileId, serverId, repository.catalogEnrichmentCandidates(created.profileId, serverId, ["movie", "anime"]), seenAt);
+    const pending = repository.pendingCatalogEnrichment(created.profileId, serverId, seenAt, 100);
+    repository.saveCatalogEnrichmentMatch(pending.find((item) => item.catalogKind === "anime")!.id, {
+      id: "tt6587046",
+      type: "movie",
+      name: "The Boy and the Heron",
+      releaseInfo: "2023",
+    }, seenAt);
+    repository.saveCatalogEnrichmentMatch(pending.find((item) => item.catalogKind === "movie")!.id, {
+      id: "tt4633694",
+      type: "movie",
+      name: "Spider-Man: Into the Spider-Verse",
+      releaseInfo: "2018",
+    }, seenAt);
+    const app = createApp(config, db);
+
+    const manifest = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
+    const animeMovies = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-anime.json`).expect(200);
+    const movies = await request(app).get(`/u/${created.installUrlToken}/catalog/movie/ftp-movies.json`).expect(200);
+    const animeSeries = await request(app).get(`/u/${created.installUrlToken}/catalog/series/ftp-anime.json`).expect(200);
+
+    expect(manifest.body.catalogs).toEqual([
+      { type: "movie", id: "ftp-movies", name: "Archive 3D Movies", extra: TYPED_CATALOG_EXTRAS },
+      { type: "movie", id: "ftp-anime", name: "Archive 3D Anime Movies", extra: TYPED_CATALOG_EXTRAS },
+      { type: "series", id: "ftp-anime", name: "Archive 3D Anime Series", extra: TYPED_CATALOG_EXTRAS },
+      { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: SEARCHABLE_CATALOG_EXTRAS },
+    ]);
+    expect(animeMovies.body.metas).toEqual([
+      expect.objectContaining({ id: "tt6587046", type: "movie", name: "The Boy and the Heron" }),
+    ]);
+    expect(movies.body.metas).toEqual([
+      expect.objectContaining({ id: "tt4633694", type: "movie", name: "Spider-Man: Into the Spider-Verse" }),
+    ]);
+    expect(animeSeries.body.metas).toEqual([]);
   });
 
   it("keeps duplicate unresolved folder formats grouped in the Other catalog without TMDB checks", async () => {
@@ -1448,7 +1533,8 @@ describe("stremio routes", () => {
     expect(response.body.catalogs).toEqual([
       { type: "movie", id: "ftp-movies", name: "Archive 3D Movies", extra: TYPED_CATALOG_EXTRAS },
       { type: "series", id: "ftp-series", name: "Archive 3D Series", extra: TYPED_CATALOG_EXTRAS },
-      { type: "series", id: "ftp-anime", name: "Archive 3D Anime", extra: TYPED_CATALOG_EXTRAS },
+      { type: "movie", id: "ftp-anime", name: "Archive 3D Anime Movies", extra: TYPED_CATALOG_EXTRAS },
+      { type: "series", id: "ftp-anime", name: "Archive 3D Anime Series", extra: TYPED_CATALOG_EXTRAS },
       { type: "movie", id: "ftp-other", name: "Archive 3D Other", extra: SEARCHABLE_CATALOG_EXTRAS },
     ]);
   });

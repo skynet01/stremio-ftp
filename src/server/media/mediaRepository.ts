@@ -1360,14 +1360,11 @@ export class MediaRepository {
     catalogKind: "movie" | "series" | "anime",
     limit: number,
     skip: number,
-    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; search?: string; genre?: string } = {},
+    options: { ftpServerIds?: number[]; includeLegacyNullServer?: boolean; search?: string; genre?: string; metaType?: "movie" | "series" } = {},
   ): PersistedCatalogMeta[] {
     const localServerFilter = mediaServerFilter("ce", options.ftpServerIds, options.includeLegacyNullServer);
     const sharedServerFilter = profileServerFilter("linked", options.ftpServerIds);
-    const catalogFilter =
-      catalogKind === "movie"
-        ? { sql: "and entry.meta_type = 'movie'", params: [] as string[] }
-        : { sql: "and entry.catalog_kind = ? and entry.meta_type = 'series'", params: [catalogKind] };
+    const catalogFilter = catalogMetaFilter(catalogKind, options.metaType);
     const searchFilter = catalogSearchFilter("entry", options.search);
     const genreFilter = catalogGenreFilter("entry", options.genre);
     const rows = this.db
@@ -1736,6 +1733,16 @@ function profileServerFilter(alias: string, ftpServerIds: number[] | undefined) 
     sql: `and ${alias}.id in (${ftpServerIds.map(() => "?").join(", ")})`,
     params: ftpServerIds,
   };
+}
+
+function catalogMetaFilter(catalogKind: "movie" | "series" | "anime", metaType: "movie" | "series" | undefined) {
+  if (catalogKind === "anime") {
+    return { sql: "and entry.catalog_kind = 'anime' and entry.meta_type = ?", params: [metaType ?? "series"] };
+  }
+  if (catalogKind === "movie") {
+    return { sql: "and entry.meta_type = 'movie' and entry.catalog_kind != 'anime'", params: [] as string[] };
+  }
+  return { sql: "and entry.catalog_kind = ? and entry.meta_type = 'series'", params: [catalogKind] };
 }
 
 function unenrichedOtherFilter(alias: string, ftpServerIds: number[] | undefined) {

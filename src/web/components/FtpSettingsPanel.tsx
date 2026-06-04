@@ -1,4 +1,5 @@
 import type { AddonCustomization } from "../api.js";
+import { CONTENT_TYPE_TOOLTIPS } from "./contentTypeTooltips.js";
 import { field, filledClass } from "./ui.js";
 
 type TlsMode = "none" | "explicit" | "implicit";
@@ -265,7 +266,7 @@ function LibrarySettings({
           <div className="content-type-options" role="group" aria-label="Server content types">
             <span className="field-label">Server content</span>
             <div className="server-content-toggles">
-              <label className="toggle-row" htmlFor="catalogMovies">
+              <label className="toggle-row" htmlFor="catalogMovies" title={CONTENT_TYPE_TOOLTIPS.movies}>
                 <input
                   id="catalogMovies"
                   type="checkbox"
@@ -274,7 +275,7 @@ function LibrarySettings({
                 />
                 Movies
               </label>
-              <label className="toggle-row" htmlFor="catalogSeries">
+              <label className="toggle-row" htmlFor="catalogSeries" title={CONTENT_TYPE_TOOLTIPS.series}>
                 <input
                   id="catalogSeries"
                   type="checkbox"
@@ -283,7 +284,7 @@ function LibrarySettings({
                 />
                 Series
               </label>
-              <label className="toggle-row" htmlFor="catalogAnime">
+              <label className="toggle-row" htmlFor="catalogAnime" title={CONTENT_TYPE_TOOLTIPS.anime}>
                 <input
                   id="catalogAnime"
                   type="checkbox"

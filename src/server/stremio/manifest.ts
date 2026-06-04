@@ -53,7 +53,12 @@ export function publicManifest(customization: ManifestCustomization = {}) {
   const catalogs = [
     ...(contentTypes.movies ? [{ type: "movie", id: "ftp-movies", name: `${addonName} Movies`, extra: GENRE_CATALOG_EXTRAS }] : []),
     ...(contentTypes.series ? [{ type: "series", id: "ftp-series", name: `${addonName} Series`, extra: GENRE_CATALOG_EXTRAS }] : []),
-    ...(contentTypes.anime ? [{ type: "series", id: "ftp-anime", name: `${addonName} Anime`, extra: GENRE_CATALOG_EXTRAS }] : []),
+    ...(contentTypes.anime
+      ? [
+          { type: "movie", id: "ftp-anime", name: `${addonName} Anime Movies`, extra: GENRE_CATALOG_EXTRAS },
+          { type: "series", id: "ftp-anime", name: `${addonName} Anime Series`, extra: GENRE_CATALOG_EXTRAS },
+        ]
+      : []),
     ...(contentTypes.uncategorized !== false
       ? otherCatalogEntries(addonName, customization.otherCatalogs)
       : []),

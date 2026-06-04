@@ -1028,8 +1028,7 @@ function sharedProfileState(profile: AdminProfileSummary): "Auto-L" | "Linked" |
   if (linked.length !== configured.length) return "Partial";
   const autoLinked = linked.filter((server) => server.sharedIndex?.autoLinked);
   if (autoLinked.length === linked.length) return "Auto-L";
-  if (autoLinked.length === 0) return "Linked";
-  return "Partial";
+  return "Linked";
 }
 
 function defaultGroupIdForBucket(bucket: ServerBucket, groups: AdminSharedIndexGroup[]) {
