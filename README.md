@@ -11,7 +11,6 @@ By default this is a stream-source addon: open a movie or episode from another S
 - Web configuration portal at `/configure`, with setup-token entry for private deployments
 - Per-user profiles using browser UID plus passphrase, with no signup system
 - Multiple FTP servers per manifest, each with its own FTP, library, catalog, scan, and stream settings
-- Super-admin shared index groups so matching FTP servers can reuse one master scan while keeping per-profile playback credentials
 - Sequential per-manifest scans so one user profile does not open scan connections to several FTP servers at once
 - Encrypted FTP credential storage
 - FTP, explicit FTPS, and implicit FTPS support through `basic-ftp`
@@ -93,8 +92,6 @@ SCAN_PROGRESS_AVERAGE_ITEMS=2000
 SCAN_TRANSIENT_RETRY_DELAY_MS=300000
 MAX_FTP_SERVERS_PER_PROFILE=0
 DISABLE_PROXY_STREAMS=false
-ADMIN_BROWSER_UIDS=
-SUPER_ADMIN_BROWSER_UIDS=
 EMPTY_PROFILE_CLEANUP_DAYS=7
 EMPTY_PROFILE_CLEANUP_INTERVAL_MS=604800000
 ```
@@ -120,8 +117,6 @@ Notes:
 - `SCAN_TRANSIENT_RETRY_DELAY_MS` controls delayed retries after transient FTP disconnects such as FIN/reset/timeout errors. Default `300000` or 5 minutes. Set `0` to disable these retries.
 - `MAX_FTP_SERVERS_PER_PROFILE` caps how many FTP servers each profile may keep. Default `0` removes the cap. Imported settings beyond the cap are dropped automatically.
 - `DISABLE_PROXY_STREAMS=true` forces every profile to deliver streams as direct FTP URLs. Saved customizations and imported settings are coerced to `direct`. Set per profile cannot opt back in.
-- `ADMIN_BROWSER_UIDS` is a comma-separated allowlist of browser UIDs that bypass `MAX_FTP_SERVERS_PER_PROFILE` and `DISABLE_PROXY_STREAMS`. Profiles promoted from the admin dashboard also get this restriction bypass.
-- `SUPER_ADMIN_BROWSER_UIDS` is a comma-separated allowlist of browser UIDs that can open the admin dashboard, call `/api/admin/*`, and manage shared index groups. This is env-only and cannot be toggled from the dashboard.
 - `EMPTY_PROFILE_CLEANUP_DAYS` deletes profiles older than this many days that have no FTP server configured. Default `7`. Set `0` to disable. Cleanup runs at startup and again every `EMPTY_PROFILE_CLEANUP_INTERVAL_MS` milliseconds (default `604800000`, one week).
 
 ## Docker Compose
@@ -151,8 +146,6 @@ SCAN_JOB_TIMEOUT_MS=1800000
 SCAN_SCHEDULER_INTERVAL_MS=60000
 SCAN_PROGRESS_AVERAGE_ITEMS=2000
 SCAN_TRANSIENT_RETRY_DELAY_MS=300000
-ADMIN_BROWSER_UIDS=
-SUPER_ADMIN_BROWSER_UIDS=
 ```
 
 Generate strong secrets:
@@ -198,14 +191,6 @@ If `SETUP_TOKEN` is set, enter it in the portal unlock form. Older `?setup=...` 
 12. Add more FTP servers if needed. They are scanned sequentially, and duplicate movie/episode matches appear as multiple stream options in Stremio.
 13. Install the generated Stremio manifest URL.
 14. The manifest panel includes `Export settings` to download the current profile (customization + servers) as a JSON file. Leave `Strip username & password` checked when sharing the file with someone else; uncheck it to keep a private backup that can restore credentials on a future import.
-
-## Shared Index Groups
-
-Super admins can create shared index groups from the admin dashboard when many profiles use different FTP logins for the same visible library. A shared group stores one scanned media index. Linked profile servers still use their own FTP credentials for direct or proxied playback.
-
-Shared groups are intentionally strict: auto-linking requires the shared import key plus matching host, port, TLS mode, invalid-certificate setting, and canonical root paths. If the same FTP host exposes different content for different accounts, create a separate shared group.
-
-The raw `sharedIndexKey` is shown only at group creation or key rotation. The database stores only a hash, and normal user exports do not include shared keys. See [docs/shared-index-groups.md](docs/shared-index-groups.md) for the full operator workflow.
 
 For an existing browser profile:
 
