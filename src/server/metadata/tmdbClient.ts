@@ -55,6 +55,29 @@ type TmdbExternalIds = {
 const TMDB_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const TMDB_TIMEOUT_MS = 10000;
 const catalogMetaCache = new Map<string, { expiresAt: number; value: Promise<CatalogMeta | null> }>();
+const TITLE_RELATIONSHIP_STOP_WORDS = new Set(["a", "an", "and", "in", "of", "or", "the", "to"]);
+const TITLE_NUMBER_TOKENS = new Map([
+  ["one", "1"],
+  ["i", "1"],
+  ["two", "2"],
+  ["ii", "2"],
+  ["three", "3"],
+  ["iii", "3"],
+  ["four", "4"],
+  ["iv", "4"],
+  ["five", "5"],
+  ["v", "5"],
+  ["six", "6"],
+  ["vi", "6"],
+  ["seven", "7"],
+  ["vii", "7"],
+  ["eight", "8"],
+  ["viii", "8"],
+  ["nine", "9"],
+  ["ix", "9"],
+  ["ten", "10"],
+  ["x", "10"],
+]);
 const MOVIE_GENRES = new Map([
   [28, "Action"],
   [12, "Adventure"],
@@ -229,11 +252,32 @@ function resultScore(item: CatalogItem, catalogKind: TmdbCatalogKind, result: Tm
 }
 
 function titleRelationshipScore(expectedTitle: string, resultTitleValue: string) {
-  const normalizedExpectedTitle = normalizeTitle(expectedTitle);
-  const normalizedResultTitle = normalizeTitle(resultTitleValue);
+  const normalizedExpectedTitle = normalizeRelationshipTitle(expectedTitle);
+  const normalizedResultTitle = normalizeRelationshipTitle(resultTitleValue);
   if (!normalizedExpectedTitle || !normalizedResultTitle) return 0;
   if (normalizedResultTitle === normalizedExpectedTitle) return 100;
-  return normalizedResultTitle.includes(normalizedExpectedTitle) || normalizedExpectedTitle.includes(normalizedResultTitle) ? 25 : 0;
+  const expectedTokens = relationshipTokens(normalizedExpectedTitle);
+  const resultTokens = relationshipTokens(normalizedResultTitle);
+  if (!expectedTokens.length || !resultTokens.length) return 0;
+  const expectedSet = new Set(expectedTokens);
+  const resultSet = new Set(resultTokens);
+  if (expectedSet.size === 1 && resultSet.has(expectedTokens[0])) return 25;
+  if (resultSet.size === 1 && expectedSet.has(resultTokens[0])) return 25;
+  const commonTokens = Array.from(expectedSet).filter((token) => resultSet.has(token)).length;
+  if (commonTokens < 2) return 0;
+  return commonTokens / expectedSet.size >= 0.5 || commonTokens / resultSet.size >= 0.5 ? 25 : 0;
+}
+
+function normalizeRelationshipTitle(value: string) {
+  return normalizeTitle(value.normalize("NFKD").replace(/\p{M}/gu, ""));
+}
+
+function relationshipTokens(value: string) {
+  return value
+    .split(" ")
+    .filter((token) => !TITLE_RELATIONSHIP_STOP_WORDS.has(token))
+    .map((token) => TITLE_NUMBER_TOKENS.get(token) ?? token)
+    .filter((token) => token.length >= 2 || /^\d+$/.test(token));
 }
 
 function resultTitle(result: TmdbMovie | TmdbTv, catalogKind: TmdbCatalogKind) {

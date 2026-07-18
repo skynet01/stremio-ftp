@@ -263,6 +263,71 @@ describe("tmdbCatalogMeta", () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain("/3/search/movie");
   });
 
+  it.each([
+    ["brahmastra part one shiva", "Brahmāstra Part One: Shiva", 2022],
+    ["furiosa a mad saga", "Furiosa: A Mad Max Saga", 2024],
+    ["ice age 2", "Ice Age: The Meltdown", 2006],
+    ["joker folie a deux", "Joker: Folie à Deux", 2024],
+    ["jurassic park ii lost world", "The Lost World: Jurassic Park", 1997],
+    ["mad 2 road warrior", "Mad Max 2", 1980],
+    ["ready or not 2 here i come", "Ready or Not: Here I Come", 2026],
+    ["to live and die in la", "To Live and Die in L.A.", 1985],
+  ])("accepts a strong token relationship for %s", async (parsedTitle, resultTitle, year) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/3/search/movie") {
+          return {
+            ok: true,
+            json: async () => ({ results: [{ id: 42, title: resultTitle, release_date: `${year}-01-01` }] }),
+          };
+        }
+        if (url.pathname === "/3/movie/42/external_ids") {
+          return { ok: true, json: async () => ({ imdb_id: "tt1234567" }) };
+        }
+        throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+      }),
+    );
+
+    await expect(
+      tmdbCatalogEnrichment(
+        { mediaKind: "movie", catalogKind: "movie", parsedTitle, parsedYear: year, imdbId: null },
+        "tmdb-key",
+        "movie",
+      ),
+    ).resolves.toEqual({
+      status: "matched",
+      meta: expect.objectContaining({ id: "tt1234567", type: "movie", name: resultTitle }),
+    });
+  });
+
+  it("does not treat a substring inside an unrelated title as a relationship", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") {
+        return {
+          ok: true,
+          json: async () => ({ results: [{ id: 99, title: "The Italian Job", release_date: "2003-01-01" }] }),
+        };
+      }
+      if (url.pathname === "/3/movie/99/external_ids") {
+        return { ok: true, json: async () => ({ imdb_id: "tt0317740" }) };
+      }
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      tmdbCatalogEnrichment(
+        { mediaKind: "movie", catalogKind: "movie", parsedTitle: "it", parsedYear: 2003, imdbId: null },
+        "tmdb-key",
+        "movie",
+      ),
+    ).resolves.toEqual({ status: "unmatched" });
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/movie/99/external_ids");
+  });
+
   it("rejects an unrelated TV result before falling back to the matching movie", async () => {
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = new URL(String(input));
