@@ -299,7 +299,7 @@ describe("App", () => {
     expect(moviesToggle.closest("label")).toHaveAttribute("title", expect.stringContaining("movie files"));
     expect(seriesToggle.closest("label")).toHaveAttribute("title", expect.stringContaining("series episode files"));
     expect(animeToggle.closest("label")).toHaveAttribute("title", expect.stringContaining("/Anime Movies"));
-    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.49`)).toBeTruthy();
+    expect(screen.getByText(`Copyright ${new Date().getFullYear()} Stremio FTP Addon. v0.4.52`)).toBeTruthy();
     expect(screen.getByText("Not responsible for files, streams, or other content hosted on connected servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Changelog" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub repository" }).getAttribute("href")).toBe(

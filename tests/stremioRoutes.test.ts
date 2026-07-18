@@ -84,7 +84,7 @@ describe("stremio routes", () => {
     const otherResponse = await request(app).get(`/u/${otherProfile.installUrlToken}/manifest.json`).expect(200);
 
     expect(response.body).toMatchObject({
-      version: "0.4.49",
+      version: "0.4.52",
       resources: ["stream"],
       types: ["movie", "series"],
       idPrefixes: ["tt"],
