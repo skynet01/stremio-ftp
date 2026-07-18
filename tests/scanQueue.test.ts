@@ -756,7 +756,7 @@ describe("ScanQueue", () => {
       meta_id: null,
       meta_name: null,
       genres: null,
-      algorithm_version: 5,
+      algorithm_version: 6,
     });
   });
 

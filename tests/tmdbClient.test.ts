@@ -93,6 +93,47 @@ describe("tmdbCatalogMeta", () => {
     expect(new URL(String(fetchMock.mock.calls[1][0])).searchParams.get("query")).toBe("blade ii");
   });
 
+  it("rejects a sequel with the wrong year and retries with a word-number title", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") {
+        const query = url.searchParams.get("query");
+        if (query === "ring 2" || query === "ring ii") {
+          return {
+            ok: true,
+            json: async () => ({ results: [{ id: 170, title: "Ring 2", release_date: "1999-01-23" }] }),
+          };
+        }
+        if (query === "ring two") {
+          return {
+            ok: true,
+            json: async () => ({ results: [{ id: 10320, title: "The Ring Two", release_date: "2005-03-17" }] }),
+          };
+        }
+      }
+      if (url.pathname === "/3/movie/10320/external_ids") {
+        return { ok: true, json: async () => ({ imdb_id: "tt0377109" }) };
+      }
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}?${url.searchParams}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      tmdbCatalogMeta(
+        { mediaKind: "movie", catalogKind: "movie", parsedTitle: "ring 2", parsedYear: 2005, imdbId: null },
+        "tmdb-key",
+        "movie",
+      ),
+    ).resolves.toMatchObject({
+      id: "tt0377109",
+      type: "movie",
+      name: "The Ring Two",
+      releaseInfo: "2005",
+    });
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/movie/170/external_ids");
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get("query"))).toContain("ring two");
+  });
+
   it("skips weak first movie search results and uses the exact title/year match", async () => {
     const fetchMock = vi
       .fn()

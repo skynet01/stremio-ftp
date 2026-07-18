@@ -221,6 +221,7 @@ async function resultWithImdbId(
 ) {
   const ranked = results
     .filter((result): result is (TmdbMovie | TmdbTv) & { id: number } => Boolean(result.id))
+    .filter((result) => resultHasPlausibleYear(item, catalogKind, result))
     .map((result, index) => ({
       result,
       index,
@@ -249,6 +250,11 @@ function resultScore(item: CatalogItem, catalogKind: TmdbCatalogKind, result: Tm
           : -50
       : 0;
   return titleScore + yearScore;
+}
+
+function resultHasPlausibleYear(item: CatalogItem, catalogKind: TmdbCatalogKind, result: TmdbMovie | TmdbTv) {
+  const resultYear = resultReleaseYear(result, catalogKind);
+  return !item.parsedYear || !resultYear || Math.abs(item.parsedYear - resultYear) <= 1;
 }
 
 function titleRelationshipScore(expectedTitle: string, resultTitleValue: string) {
@@ -296,6 +302,8 @@ function searchQueries(parsedTitle: string) {
   if (editionless && editionless !== parsedTitle) queries.push(editionless);
   const roman = romanNumeralSequelTitle(parsedTitle);
   if (roman && roman !== parsedTitle) queries.push(roman);
+  const wordNumber = wordNumberSequelTitle(parsedTitle);
+  if (wordNumber && !queries.includes(wordNumber)) queries.push(wordNumber);
   return queries;
 }
 
@@ -324,6 +332,23 @@ function romanNumeralSequelTitle(parsedTitle: string) {
   const match = parsedTitle.match(/\b(2|3|4|5|6|7|8|9|10)$/);
   if (!match) return null;
   return parsedTitle.replace(/\b(2|3|4|5|6|7|8|9|10)$/, romanByNumber[match[1]]);
+}
+
+function wordNumberSequelTitle(parsedTitle: string) {
+  const wordByNumber: Record<string, string> = {
+    "2": "two",
+    "3": "three",
+    "4": "four",
+    "5": "five",
+    "6": "six",
+    "7": "seven",
+    "8": "eight",
+    "9": "nine",
+    "10": "ten",
+  };
+  const match = parsedTitle.match(/\b(2|3|4|5|6|7|8|9|10)$/);
+  if (!match) return null;
+  return parsedTitle.replace(/\b(2|3|4|5|6|7|8|9|10)$/, wordByNumber[match[1]]);
 }
 
 async function fetchExternalIds(type: "movie" | "tv", tmdbId: number, apiKey: string): Promise<TmdbExternalIds | null> {
