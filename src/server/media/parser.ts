@@ -5,7 +5,7 @@ const SUPPORTED_EXTENSIONS = new Set(["mkv", "mp4", "avi", "mov", "m4v", "ts", "
 const RELEASE_YEAR_PATTERN = /(?:^|[^\d])(19\d{2}|20\d{2})(?=$|[^\d])/g;
 const GENERIC_MOVIE_FOLDERS = /^(?:movie|movies|film|films|other|uncategorized|misc|miscellaneous|video|videos|anime movies|blockbuster movies|superhero movies|vr videos)$/i;
 const ANIME_COLLECTION_FOLDERS = /^(?:anime|anime movies|anime films|anime shows|anime series|anime tv)$/i;
-const THREE_D_RELEASE_MARKER = /^(?:fsbs|hsbs|sbs|hou|ou|3d|3dff)$/i;
+const THREE_D_RELEASE_MARKER = /^(?:fsbs|hsbs|sbs|hou|ou|3d(?:ff)?|full[\s._-]*sbs|half[\s._-]*sbs|side[\s._-]*by[\s._-]*side|over[\s._-]*under)(?:[\s._-]|$)/i;
 
 export type ParsedMedia = {
   mediaKind: "movie" | "series";
@@ -247,7 +247,7 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
 
   const animeEpisode = shouldAttemptAnimeAbsolute(ftpPath, options)
     ? withoutExtension.match(
-        /^(?<title>.+?)[\s._-]+(?:-|ep(?:isode)?[\s._-]*)?(?<episode>\d{1,3})(?:v\d+)?(?:[\s._-]+(?<nextToken>[a-z0-9]+)|$)/i,
+        /^(?<title>.+?)[\s._-]+(?:-|ep(?:isode)?[\s._-]*)?(?<episode>\d{1,3})(?:v\d+)?(?<suffix>[\s._-]+.*|$)/i,
       )
     : null;
   if (animeEpisode?.groups) {
@@ -282,8 +282,8 @@ export function parseMediaPathWithOptions(ftpPath: string, options: ParseMediaOp
 
 function isReleaseMarkerEpisode(match: RegExpMatchArray) {
   const episode = match.groups?.episode;
-  const nextToken = match.groups?.nextToken;
-  return episode?.length === 1 && Boolean(nextToken && THREE_D_RELEASE_MARKER.test(nextToken));
+  const suffix = match.groups?.suffix?.replace(/^[\s._()[\]{}-]+/, "") ?? "";
+  return episode?.length === 1 && THREE_D_RELEASE_MARKER.test(suffix);
 }
 
 function animeEnabled(options: ParseMediaOptions) {

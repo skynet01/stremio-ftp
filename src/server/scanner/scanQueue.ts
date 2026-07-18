@@ -527,6 +527,11 @@ export class ScanQueue {
     this.saveEnrichmentProgress(jobId, processed, total, null);
     for (const candidate of pending) {
       throwIfScanCancelled(signal);
+      if (catalogRecheckRequiresTmdbKey(candidate, apiKey)) {
+        processed += 1;
+        this.saveEnrichmentProgress(jobId, processed, total, candidate);
+        continue;
+      }
       const result = await tmdbCatalogEnrichment(candidate, apiKey, tmdbLookupKind(candidate));
       const now = new Date().toISOString();
       if (result.status === "matched") {
@@ -575,6 +580,11 @@ export class ScanQueue {
     this.saveEnrichmentProgress(jobId, processed, total, null);
     for (const candidate of pending) {
       throwIfScanCancelled(signal);
+      if (catalogRecheckRequiresTmdbKey(candidate, apiKey)) {
+        processed += 1;
+        this.saveEnrichmentProgress(jobId, processed, total, candidate);
+        continue;
+      }
       const result = await tmdbCatalogEnrichment(candidate, apiKey, tmdbLookupKind(candidate));
       const now = new Date().toISOString();
       if (result.status === "matched") {
@@ -967,6 +977,10 @@ function enabledCatalogKinds(contentTypes: { movies: boolean; series: boolean; a
 
 function tmdbLookupKind(candidate: CatalogEnrichmentCandidate): TmdbCatalogKind {
   return candidate.catalogKind === "anime" ? candidate.mediaKind : candidate.catalogKind;
+}
+
+function catalogRecheckRequiresTmdbKey(candidate: CatalogEnrichmentCandidate, apiKey: string | null | undefined) {
+  return candidate.status === "matched" && !candidate.imdbId && !apiKey;
 }
 
 function formatDuration(durationMs: number) {

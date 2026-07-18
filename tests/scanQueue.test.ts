@@ -760,6 +760,61 @@ describe("ScanQueue", () => {
     });
   });
 
+  it("preserves a stale matched enrichment when no TMDB key can verify it", async () => {
+    const { db, profileService, queue } = createHarness(
+      async () => ({
+        list: async () => [{ name: "The.Matrix.1999.mkv", path: "/The.Matrix.1999.mkv", type: "file", size: 1024 * 1024 }],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, tmdbApiKey: null, scanCooldownMs: 0 },
+    );
+    const created = await profileService.createProfile(`browser-${Math.random()}`, "passphrase");
+    const profileId = created.profileId;
+    profileService.saveFtpConfig(profileId, {
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/"],
+    });
+    profileService.saveAddonCustomization(profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive.",
+      catalogEnabled: true,
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = queue.enqueueProfileScan(profileId, "manual");
+    await waitForNextStatus(queue, profileId, first.id - 1, "succeeded");
+    db.prepare(
+      `update catalog_enrichment
+       set status = 'matched', meta_id = 'tt0133093', meta_type = 'movie', meta_name = 'The Matrix',
+           genres = '["Drama"]', algorithm_version = 1
+       where profile_id = ?`,
+    ).run(profileId);
+
+    const second = queue.enqueueProfileScan(profileId, "manual");
+    await waitForNextStatus(queue, profileId, second.id - 1, "succeeded");
+
+    expect(
+      db
+        .prepare("select status, meta_id, meta_name, genres, algorithm_version from catalog_enrichment where profile_id = ?")
+        .get(profileId),
+    ).toEqual({
+      status: "matched",
+      meta_id: "tt0133093",
+      meta_name: "The Matrix",
+      genres: '["Drama"]',
+      algorithm_version: 1,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("enriches anime movie folders with TMDB movie search and serves the anime movie catalog", async () => {
     const { db, profileService, queue } = createHarness(
       async () => ({

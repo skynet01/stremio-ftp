@@ -110,6 +110,20 @@ describe("media parser", () => {
     });
   });
 
+  it("keeps bracketed anime release tags after absolute episode numbers", () => {
+    expect(
+      parseMediaPath("/Anime/Afro Samurai/Afro.Samurai.03.[1080p].mkv", {
+        contentTypes: { movies: true, series: true, anime: true },
+      }),
+    ).toMatchObject({
+      mediaKind: "series",
+      catalogKind: "anime",
+      parsedTitle: "afro samurai",
+      season: 1,
+      episode: 3,
+    });
+  });
+
   it("does not treat a one-digit 3D release marker as an anime episode", () => {
     const options = {
       contentTypes: { movies: true, series: true, anime: true },
@@ -136,6 +150,19 @@ describe("media parser", () => {
       parsedTitle: "afro samurai",
       season: 1,
       episode: 1,
+    });
+  });
+
+  it("does not treat a one-digit Full-SBS release marker as an anime episode", () => {
+    expect(
+      parseMediaPath("/Anime/Avatar/Avatar.3.Full-SBS.4K.mkv", {
+        contentTypes: { movies: true, series: true, anime: true },
+        libraryLayout: "folders",
+      }),
+    ).toMatchObject({
+      mediaKind: "movie",
+      season: null,
+      episode: null,
     });
   });
 

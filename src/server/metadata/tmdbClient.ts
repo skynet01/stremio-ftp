@@ -293,7 +293,9 @@ async function fetchJson<T>(url: URL): Promise<T | null> {
   const timeout = setTimeout(() => controller.abort(), TMDB_TIMEOUT_MS);
   try {
     const response = await fetch(url, { signal: controller.signal });
-    if (response.status === 429 || response.status >= 500) throw new Error(`TMDB request failed with ${response.status}`);
+    if (response.status === 401 || response.status === 403 || response.status === 429 || response.status >= 500) {
+      throw new Error(`TMDB request failed with ${response.status}`);
+    }
     if (!response.ok) return null;
     return (await response.json()) as T;
   } catch (error) {

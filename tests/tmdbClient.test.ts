@@ -38,6 +38,21 @@ describe("tmdbCatalogMeta", () => {
     expect(aborted).toBe(true);
   });
 
+  it("treats rejected TMDB credentials as retryable instead of unmatched", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 401, json: async () => ({ status_message: "Invalid API key" }) })),
+    );
+
+    await expect(
+      tmdbCatalogEnrichment(
+        { mediaKind: "movie", catalogKind: "movie", parsedTitle: "the matrix", parsedYear: 1999, imdbId: null },
+        "invalid-key",
+        "movie",
+      ),
+    ).resolves.toEqual({ status: "retry", error: "TMDB request failed with 401" });
+  });
+
   it("retries movie searches with a roman numeral sequel title", async () => {
     const fetchMock = vi
       .fn()
