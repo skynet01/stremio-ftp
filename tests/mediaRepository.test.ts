@@ -16,15 +16,19 @@ function createProfile(db: Database.Database) {
   );
 }
 
-function createServer(db: Database.Database, profileId: number, options: { catalogEnabled?: boolean; movies?: boolean; series?: boolean; anime?: boolean } = {}) {
+function createServer(
+  db: Database.Database,
+  profileId: number,
+  options: { catalogEnabled?: boolean; movies?: boolean; series?: boolean; anime?: boolean; catalogSort?: "alphabetical" | "newest" } = {},
+) {
   return Number(
     db
       .prepare(
         `
         insert into profile_ftp_servers (
           profile_id, name, catalog_enabled, catalog_content_movies, catalog_content_series,
-          catalog_content_anime, library_layout, stream_delivery_mode, created_at, updated_at
-        ) values (?, 'Server 1', ?, ?, ?, ?, 'auto', 'proxy', 'n', 'n')
+          catalog_content_anime, catalog_sort, library_layout, stream_delivery_mode, created_at, updated_at
+        ) values (?, 'Server 1', ?, ?, ?, ?, ?, 'auto', 'proxy', 'n', 'n')
       `,
       )
       .run(
@@ -33,6 +37,7 @@ function createServer(db: Database.Database, profileId: number, options: { catal
         options.movies === false ? 0 : 1,
         options.series === false ? 0 : 1,
         options.anime === true ? 1 : 0,
+        options.catalogSort ?? "alphabetical",
       ).lastInsertRowid,
   );
 }
@@ -740,6 +745,166 @@ describe("MediaRepository", () => {
     ]);
   });
 
+  it("orders and paginates typed catalogs after mixed-server aggregation", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const alphabeticalServerId = createServer(db, profileId, { catalogSort: "alphabetical" });
+    const newestServerId = createServer(db, profileId, { catalogSort: "newest" });
+    const repo = new MediaRepository(db);
+
+    const files = [
+      { serverId: alphabeticalServerId, title: "alpha", id: "tt0000001", modifiedAt: "2026-06-01T00:00:00.000Z" },
+      { serverId: alphabeticalServerId, title: "zulu", id: "tt0000004", modifiedAt: "2026-07-01T00:00:00.000Z" },
+      { serverId: newestServerId, title: "bravo", id: "tt0000002", modifiedAt: "2026-05-01T00:00:00.000Z" },
+      { serverId: newestServerId, title: "charlie", id: "tt0000003", modifiedAt: null },
+      { serverId: newestServerId, title: "alpha copy", id: "tt0000001", modifiedAt: "2026-04-01T00:00:00.000Z" },
+    ];
+    for (const file of files) {
+      repo.upsertParsedFile(profileId, {
+        ftpServerId: file.serverId,
+        ftpPath: `/Movies/${file.title}.mkv`,
+        filename: `${file.title}.mkv`,
+        normalizedFilename: file.title,
+        extension: "mkv",
+        mediaKind: "movie",
+        catalogKind: "movie",
+        parsedTitle: file.title,
+        parsedYear: 2026,
+        season: null,
+        episode: null,
+        imdbId: null,
+        quality: null,
+        confidence: 70,
+        modifiedAt: file.modifiedAt,
+      });
+    }
+    const seenAt = "2026-07-17T00:00:00.000Z";
+    for (const serverId of [alphabeticalServerId, newestServerId]) {
+      repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), seenAt);
+      for (const candidate of repo.pendingCatalogEnrichment(profileId, serverId, seenAt, 20)) {
+        const file = files.find((entry) => entry.serverId === serverId && entry.title === candidate.parsedTitle)!;
+        repo.saveCatalogEnrichmentMatch(candidate.id, { id: file.id, type: "movie", name: file.id === "tt0000001" ? "Alpha" : titleCase(file.title) }, seenAt);
+      }
+    }
+
+    expect(repo.catalogMetas(profileId, "movie", 10, 0).map((meta) => meta.name)).toEqual(["Bravo", "Alpha", "Charlie", "Zulu"]);
+    expect(repo.catalogMetas(profileId, "movie", 2, 1).map((meta) => meta.name)).toEqual(["Alpha", "Charlie"]);
+    expect(repo.catalogMetas(profileId, "movie", 10, 0, { search: "alpha" }).map((meta) => meta.id)).toEqual(["tt0000001"]);
+  });
+
+  it("orders shared newest contributions ahead of alphabetical local contributions", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const masterProfileId = createProfile(db);
+    const masterServerId = createServer(db, masterProfileId);
+    const groupId = createSharedGroup(db, masterServerId, "sort");
+    const profileId = createProfile(db);
+    const linkedServerId = createServer(db, profileId, { catalogSort: "newest" });
+    db.prepare("update profile_ftp_servers set shared_index_group_id = ? where id = ?").run(groupId, linkedServerId);
+    const localServerId = createServer(db, profileId, { catalogSort: "alphabetical" });
+    const repo = new MediaRepository(db);
+
+    repo.upsertSharedParsedFile(groupId, {
+      ftpPath: "/Movies/Shared.Recent.mkv",
+      filename: "Shared.Recent.mkv",
+      normalizedFilename: "shared recent",
+      extension: "mkv",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "shared recent",
+      parsedYear: 2026,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: null,
+      confidence: 70,
+      modifiedAt: "2026-07-01T00:00:00.000Z",
+    });
+    repo.upsertParsedFile(profileId, {
+      ftpServerId: localServerId,
+      ftpPath: "/Movies/Alphabetical.mkv",
+      filename: "Alphabetical.mkv",
+      normalizedFilename: "alphabetical",
+      extension: "mkv",
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "alphabetical",
+      parsedYear: 2026,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: null,
+      confidence: 70,
+      modifiedAt: "2026-07-10T00:00:00.000Z",
+    });
+    const seenAt = "2026-07-17T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(
+      masterProfileId,
+      masterServerId,
+      repo.sharedCatalogEnrichmentCandidates(groupId, masterServerId, ["movie"]),
+      seenAt,
+    );
+    repo.saveCatalogEnrichmentMatch(repo.pendingCatalogEnrichment(masterProfileId, masterServerId, seenAt, 10)[0].id, {
+      id: "tt0000010",
+      type: "movie",
+      name: "Shared Recent",
+    }, seenAt);
+    repo.syncCatalogEnrichmentCandidates(profileId, localServerId, repo.catalogEnrichmentCandidates(profileId, localServerId, ["movie"]), seenAt);
+    repo.saveCatalogEnrichmentMatch(repo.pendingCatalogEnrichment(profileId, localServerId, seenAt, 10)[0].id, {
+      id: "tt0000011",
+      type: "movie",
+      name: "Alphabetical",
+    }, seenAt);
+
+    expect(repo.catalogMetas(profileId, "movie", 10, 0).map((meta) => meta.name)).toEqual(["Shared Recent", "Alphabetical"]);
+  });
+
+  it("orders Other folders by mixed per-server preferences with stable null handling", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const alphabeticalServerId = createServer(db, profileId, { catalogSort: "alphabetical" });
+    const newestServerId = createServer(db, profileId, { catalogSort: "newest" });
+    const repo = new MediaRepository(db);
+    const files = [
+      { serverId: alphabeticalServerId, folder: "Alpha", modifiedAt: "2026-07-10T00:00:00.000Z" },
+      { serverId: alphabeticalServerId, folder: "Zulu", modifiedAt: "2026-07-11T00:00:00.000Z" },
+      { serverId: newestServerId, folder: "Recent", modifiedAt: "2026-07-01T00:00:00.000Z" },
+      { serverId: newestServerId, folder: "Broken", modifiedAt: "not-a-date" },
+      { serverId: newestServerId, folder: "Missing", modifiedAt: null },
+    ];
+    for (const file of files) {
+      repo.upsertParsedFile(profileId, {
+        ftpServerId: file.serverId,
+        ftpPath: `/${file.folder}/${file.folder}.mkv`,
+        filename: `${file.folder}.mkv`,
+        normalizedFilename: file.folder.toLowerCase(),
+        extension: "mkv",
+        mediaKind: "movie",
+        catalogKind: "movie",
+        parsedTitle: file.folder.toLowerCase(),
+        parsedYear: null,
+        season: null,
+        episode: null,
+        imdbId: null,
+        quality: null,
+        confidence: 45,
+        modifiedAt: file.modifiedAt,
+      });
+    }
+
+    const options = { ftpServerIds: [alphabeticalServerId, newestServerId], includeUnenrichedServerIds: [alphabeticalServerId, newestServerId] };
+    expect(repo.otherCatalogItems(profileId, 10, 0, options).map((item) => item.folderName)).toEqual([
+      "Recent",
+      "Broken",
+      "Missing",
+      "Alpha",
+      "Zulu",
+    ]);
+    expect(repo.otherCatalogItems(profileId, 2, 1, options).map((item) => item.folderName)).toEqual(["Broken", "Missing"]);
+  });
+
   it("deletes stale files under a root and treats slash root as the whole profile", () => {
     const db = new Database(":memory:");
     migrate(db);
@@ -779,3 +944,7 @@ describe("MediaRepository", () => {
     expect(repo.findEpisode(profileId, "stale movie", 1, 1)).toHaveLength(0);
   });
 });
+
+function titleCase(value: string) {
+  return value.replace(/\b\w/g, (character) => character.toUpperCase());
+}

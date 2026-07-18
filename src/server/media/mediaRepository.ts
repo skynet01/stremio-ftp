@@ -1358,6 +1358,7 @@ export class MediaRepository {
     const sharedServerFilter = profileServerFilter("linked", options.ftpServerIds);
     const catalogFilter = catalogMetaFilter(catalogKind, options.metaType);
     const searchFilter = catalogSearchFilter("entry", options.search);
+    const searchOrder = catalogSearchOrder("catalog", options.search);
     const genreFilter = catalogGenreFilter("entry", options.genre);
     const rows = this.db
       .prepare(
@@ -1365,6 +1366,9 @@ export class MediaRepository {
         with catalog_entries as (
           select
             ce.id as source_id,
+            ce.ftp_server_id as server_id,
+            case when local_server.catalog_sort = 'newest' then 'newest' else 'alphabetical' end as catalog_sort,
+            max(julianday(mf.modified_at)) as modified_julian,
             ce.catalog_kind,
             ce.status,
             ce.meta_id,
@@ -1376,13 +1380,22 @@ export class MediaRepository {
             ce.release_info,
             ce.genres
           from catalog_enrichment ce
-          left join profile_ftp_servers local_server on local_server.id = ce.ftp_server_id
+          join profile_ftp_servers local_server on local_server.id = ce.ftp_server_id
+          join media_files mf
+            on mf.profile_id = ce.profile_id
+           and mf.ftp_server_id = ce.ftp_server_id
+           and ${catalogEnrichmentSqlKey("mf")} = ce.item_key
           where ce.profile_id = ?
-            and (ce.ftp_server_id is null or local_server.shared_index_group_id is null)
+            and local_server.shared_index_group_id is null
             ${localServerFilter.sql}
+          group by ce.id, ce.ftp_server_id, local_server.catalog_sort, ce.catalog_kind, ce.status, ce.meta_id, ce.meta_type,
+                   ce.meta_name, ce.poster, ce.background, ce.description, ce.release_info, ce.genres
           union all
           select
             ce.id as source_id,
+            linked.id as server_id,
+            case when linked.catalog_sort = 'newest' then 'newest' else 'alphabetical' end as catalog_sort,
+            max(julianday(sm.modified_at)) as modified_julian,
             ce.catalog_kind,
             ce.status,
             ce.meta_id,
@@ -1403,26 +1416,55 @@ export class MediaRepository {
            and ce.item_key = ${catalogEnrichmentSqlKey("sm")}
           where linked.profile_id = ?
             ${sharedServerFilter.sql}
+          group by linked.id, linked.catalog_sort, ce.id, ce.catalog_kind, ce.status, ce.meta_id, ce.meta_type,
+                   ce.meta_name, ce.poster, ce.background, ce.description, ce.release_info, ce.genres
+        ),
+        filtered_entries as (
+          select *
+          from catalog_entries entry
+          where entry.status = 'matched'
+            and entry.meta_id is not null
+            and entry.meta_name is not null
+            ${catalogFilter.sql}
+            ${searchFilter.sql}
+            ${genreFilter.sql}
+        ),
+        grouped_catalog as (
+          select
+            entry.meta_id,
+            entry.meta_type,
+            min(entry.meta_name) as meta_name,
+            max(entry.poster) as poster,
+            max(entry.background) as background,
+            max(entry.description) as description,
+            max(entry.release_info) as release_info,
+            max(entry.genres) as genres,
+            min(entry.source_id) as first_id,
+            max(case when entry.catalog_sort = 'newest' then 1 else 0 end) as has_newest,
+            max(case when entry.catalog_sort = 'newest' then entry.modified_julian end) as newest_modified_julian
+          from filtered_entries entry
+          group by entry.meta_id, entry.meta_type
         )
         select
-          entry.meta_id,
-          entry.meta_type,
-          entry.meta_name,
-          entry.poster,
-          entry.background,
-          entry.description,
-          entry.release_info,
-          max(entry.genres) as genres,
-          min(entry.source_id) as first_id
-        from catalog_entries entry
-        where entry.status = 'matched'
-          and entry.meta_id is not null
-          and entry.meta_name is not null
-          ${catalogFilter.sql}
-          ${searchFilter.sql}
-          ${genreFilter.sql}
-        group by entry.meta_id, entry.meta_type, entry.meta_name, entry.poster, entry.background, entry.description, entry.release_info
-        order by ${searchFilter.orderSql} first_id asc
+          catalog.meta_id,
+          catalog.meta_type,
+          catalog.meta_name,
+          catalog.poster,
+          catalog.background,
+          catalog.description,
+          catalog.release_info,
+          catalog.genres
+        from grouped_catalog catalog
+        order by ${searchOrder.sql}
+                 catalog.has_newest desc,
+                 case
+                   when catalog.has_newest = 1 and catalog.newest_modified_julian is not null then 0
+                   when catalog.has_newest = 1 then 1
+                   else 2
+                 end asc,
+                 catalog.newest_modified_julian desc,
+                 lower(catalog.meta_name) collate nocase asc,
+                 catalog.meta_id asc
         limit ? offset ?
       `,
       )
@@ -1434,7 +1476,7 @@ export class MediaRepository {
         ...catalogFilter.params,
         ...searchFilter.params,
         ...genreFilter.params,
-        ...searchFilter.orderParams,
+        ...searchOrder.params,
         limit,
         skip,
       ) as Array<{
@@ -1472,7 +1514,8 @@ export class MediaRepository {
     const rows = this.db
       .prepare(
         `
-        select mf.id, mf.ftp_server_id, 'profile' as source, mf.media_kind, mf.filename, mf.ftp_path, mf.parsed_title, mf.parsed_year
+        select mf.id, mf.ftp_server_id, 'profile' as source, mf.media_kind, mf.filename, mf.ftp_path, mf.parsed_title, mf.parsed_year,
+               mf.modified_at, case when local_server.catalog_sort = 'newest' then 'newest' else 'alphabetical' end as catalog_sort
         from media_files mf
         left join profile_ftp_servers local_server on local_server.id = mf.ftp_server_id
         left join catalog_enrichment ce
@@ -1485,7 +1528,8 @@ export class MediaRepository {
           ${localServerFilter.sql}
           and (ce.status = 'unmatched'${localUnenrichedFilter.sql})
         union all
-        select sm.id, linked.id as ftp_server_id, 'shared' as source, sm.media_kind, sm.filename, sm.ftp_path, sm.parsed_title, sm.parsed_year
+        select sm.id, linked.id as ftp_server_id, 'shared' as source, sm.media_kind, sm.filename, sm.ftp_path, sm.parsed_title, sm.parsed_year,
+               sm.modified_at, case when linked.catalog_sort = 'newest' then 'newest' else 'alphabetical' end as catalog_sort
         from profile_ftp_servers linked
         join shared_index_groups g on g.id = linked.shared_index_group_id and g.enabled = 1
         join profile_ftp_servers master on master.id = g.master_profile_ftp_server_id
@@ -1513,7 +1557,7 @@ export class MediaRepository {
     const search = normalizedSearch(options.search);
     return Array.from(groupOtherCatalogRows(rows).values())
       .filter((item) => !search || item.searchText.includes(search))
-      .sort((a, b) => a.folderName.localeCompare(b.folderName) || a.sortKey.localeCompare(b.sortKey))
+      .sort(compareOtherCatalogGroups)
       .slice(skip, skip + limit);
   }
 
@@ -1653,17 +1697,26 @@ type OtherCatalogRow = {
   ftp_path: string;
   parsed_title: string;
   parsed_year: number | null;
+  modified_at: string | null;
+  catalog_sort: "alphabetical" | "newest";
 };
 
 type OtherCatalogBaseRow = Pick<OtherCatalogRow, "id" | "ftp_server_id" | "source" | "ftp_path" | "filename" | "media_kind">;
 
-type OtherCatalogGroup = OtherCatalogItem & { searchText: string; serverIds: Set<string>; sortKey: string };
+type OtherCatalogGroup = OtherCatalogItem & {
+  searchText: string;
+  serverIds: Set<string>;
+  sortKey: string;
+  hasNewestContribution: boolean;
+  newestModifiedAtMs: number | null;
+};
 
 function groupOtherCatalogRows(rows: OtherCatalogRow[]) {
   const groups = new Map<string, OtherCatalogGroup>();
   for (const row of rows) {
     const folderName = otherFolderName(row.ftp_path, row.filename, row.parsed_title);
     const folderKey = `${row.media_kind}:${normalizeFolderKey(folderName)}`;
+    const newestModifiedAtMs = row.catalog_sort === "newest" ? validTimestampMs(row.modified_at) : null;
     const existing = groups.get(folderKey);
     if (!existing) {
       groups.set(folderKey, {
@@ -1678,6 +1731,8 @@ function groupOtherCatalogRows(rows: OtherCatalogRow[]) {
         searchText: otherSearchText(folderName, row),
         serverIds: new Set([String(row.ftp_server_id ?? "legacy")]),
         sortKey: otherCatalogSortKey(row),
+        hasNewestContribution: row.catalog_sort === "newest",
+        newestModifiedAtMs,
       });
       continue;
     }
@@ -1685,6 +1740,12 @@ function groupOtherCatalogRows(rows: OtherCatalogRow[]) {
     existing.serverIds.add(String(row.ftp_server_id ?? "legacy"));
     existing.serverCount = existing.serverIds.size;
     existing.searchText = `${existing.searchText} ${otherSearchText(folderName, row)}`;
+    if (row.catalog_sort === "newest") {
+      existing.hasNewestContribution = true;
+      if (newestModifiedAtMs !== null && (existing.newestModifiedAtMs === null || newestModifiedAtMs > existing.newestModifiedAtMs)) {
+        existing.newestModifiedAtMs = newestModifiedAtMs;
+      }
+    }
     const sortKey = otherCatalogSortKey(row);
     if (sortKey < existing.sortKey) {
       existing.id = otherCatalogRowId(row);
@@ -1695,6 +1756,23 @@ function groupOtherCatalogRows(rows: OtherCatalogRow[]) {
     delete (group as Partial<OtherCatalogGroup>).serverIds;
   }
   return groups;
+}
+
+function compareOtherCatalogGroups(a: OtherCatalogGroup, b: OtherCatalogGroup) {
+  if (a.hasNewestContribution !== b.hasNewestContribution) return a.hasNewestContribution ? -1 : 1;
+  if (a.hasNewestContribution && b.hasNewestContribution) {
+    const aDated = a.newestModifiedAtMs !== null;
+    const bDated = b.newestModifiedAtMs !== null;
+    if (aDated !== bDated) return aDated ? -1 : 1;
+    if (a.newestModifiedAtMs !== b.newestModifiedAtMs) return (b.newestModifiedAtMs ?? 0) - (a.newestModifiedAtMs ?? 0);
+  }
+  return a.folderName.localeCompare(b.folderName) || a.sortKey.localeCompare(b.sortKey);
+}
+
+function validTimestampMs(value: string | null) {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function otherCatalogRowId(row: Pick<OtherCatalogRow, "id" | "ftp_server_id" | "source">) {
@@ -1762,6 +1840,15 @@ function catalogSearchFilter(alias: string, search: string | undefined) {
     params: [like],
     orderSql: `case when lower(${alias}.meta_name) = ? then 0 else 1 end, instr(lower(${alias}.meta_name), ?),`,
     orderParams: [normalized, normalized],
+  };
+}
+
+function catalogSearchOrder(alias: string, search: string | undefined) {
+  const normalized = search?.trim().toLowerCase();
+  if (!normalized) return { sql: "", params: [] as string[] };
+  return {
+    sql: `case when lower(${alias}.meta_name) = ? then 0 else 1 end, instr(lower(${alias}.meta_name), ?),`,
+    params: [normalized, normalized],
   };
 }
 
