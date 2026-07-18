@@ -373,7 +373,7 @@ describe("MediaRepository", () => {
     expect(repo.catalogMetas(linkedProfileId, "series", 10, 0, { ftpServerIds: [linkedServerId], search: "stale" })).toEqual([]);
   });
 
-  it("uses shared master enrichment for linked shared index movie streams", () => {
+  it("uses shared master movie enrichment even when the shared parser row was misclassified", () => {
     const db = new Database(":memory:");
     migrate(db);
     const masterProfileId = createProfile(db);
@@ -393,8 +393,8 @@ describe("MediaRepository", () => {
         filename,
         normalizedFilename: filename.toLowerCase(),
         extension: "mkv",
-        mediaKind: "movie",
-        catalogKind: "movie",
+        mediaKind: "series",
+        catalogKind: "anime",
         parsedTitle: "ghost in shell s a c solid state society",
         parsedYear: 2006,
         season: null,
@@ -409,7 +409,7 @@ describe("MediaRepository", () => {
     repo.syncCatalogEnrichmentCandidates(
       masterProfileId,
       masterServerId,
-      repo.sharedCatalogEnrichmentCandidates(groupId, masterServerId, ["movie"]),
+      repo.sharedCatalogEnrichmentCandidates(groupId, masterServerId, ["anime"]),
       seenAt,
     );
     const [candidate] = repo.pendingCatalogEnrichment(masterProfileId, masterServerId, seenAt, 10);

@@ -423,12 +423,16 @@ export class MediaRepository {
          and ce.item_key = ${catalogEnrichmentSqlKey("sm")}
          and ce.status = 'matched'
         where s.profile_id = ?
-          and sm.media_kind = 'movie'
           and (
-            (sm.imdb_id is not null and sm.imdb_id = ?)
-            or (
-              sm.parsed_title = ?
-              and (? is null or sm.parsed_year is null or sm.parsed_year = ?)
+            (
+              sm.media_kind = 'movie'
+              and (
+                (sm.imdb_id is not null and sm.imdb_id = ?)
+                or (
+                  sm.parsed_title = ?
+                  and (? is null or sm.parsed_year is null or sm.parsed_year = ?)
+                )
+              )
             )
             or (
               ce.meta_type = 'movie'
