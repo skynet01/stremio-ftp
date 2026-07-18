@@ -182,7 +182,7 @@ async function metaFromSearchQuery(
 
   const body = await fetchJson<TmdbSearchResponse<TmdbMovie | TmdbTv>>(url);
   if (!body) return null;
-  const result = await resultWithImdbId(item, catalogKind, searchType, body.results ?? [], apiKey);
+  const result = await resultWithImdbId(item, catalogKind, searchType, body.results ?? [], apiKey, query);
   if (!result) return null;
 
   return metaFromTmdbResult(item, result.imdbId, result.result, catalogKind);
@@ -194,10 +194,17 @@ async function resultWithImdbId(
   searchType: "movie" | "tv",
   results: Array<TmdbMovie | TmdbTv>,
   apiKey: string,
+  query: string,
 ) {
   const ranked = results
     .filter((result): result is (TmdbMovie | TmdbTv) & { id: number } => Boolean(result.id))
-    .map((result, index) => ({ result, index, score: resultScore(item, catalogKind, result) }))
+    .map((result, index) => ({
+      result,
+      index,
+      score: resultScore(item, catalogKind, result),
+      titleScore: titleRelationshipScore(query, resultTitle(result, catalogKind)),
+    }))
+    .filter((candidate) => candidate.titleScore > 0)
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
   for (const candidate of ranked) {
@@ -208,13 +215,7 @@ async function resultWithImdbId(
 }
 
 function resultScore(item: CatalogItem, catalogKind: TmdbCatalogKind, result: TmdbMovie | TmdbTv) {
-  const normalizedResultTitle = normalizeTitle(resultTitle(result, catalogKind));
-  const titleScore =
-    normalizedResultTitle === item.parsedTitle
-      ? 100
-      : normalizedResultTitle.includes(item.parsedTitle) || item.parsedTitle.includes(normalizedResultTitle)
-        ? 25
-        : 0;
+  const titleScore = titleRelationshipScore(item.parsedTitle, resultTitle(result, catalogKind));
   const resultYear = resultReleaseYear(result, catalogKind);
   const yearScore =
     item.parsedYear && resultYear
@@ -225,6 +226,14 @@ function resultScore(item: CatalogItem, catalogKind: TmdbCatalogKind, result: Tm
           : -50
       : 0;
   return titleScore + yearScore;
+}
+
+function titleRelationshipScore(expectedTitle: string, resultTitleValue: string) {
+  const normalizedExpectedTitle = normalizeTitle(expectedTitle);
+  const normalizedResultTitle = normalizeTitle(resultTitleValue);
+  if (!normalizedExpectedTitle || !normalizedResultTitle) return 0;
+  if (normalizedResultTitle === normalizedExpectedTitle) return 100;
+  return normalizedResultTitle.includes(normalizedExpectedTitle) || normalizedExpectedTitle.includes(normalizedResultTitle) ? 25 : 0;
 }
 
 function resultTitle(result: TmdbMovie | TmdbTv, catalogKind: TmdbCatalogKind) {

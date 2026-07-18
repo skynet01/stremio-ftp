@@ -110,6 +110,35 @@ describe("media parser", () => {
     });
   });
 
+  it("does not treat a one-digit 3D release marker as an anime episode", () => {
+    const options = {
+      contentTypes: { movies: true, series: true, anime: true },
+      libraryLayout: "folders" as const,
+    };
+
+    expect(
+      parseMediaPath(
+        "/JFC/The Lord of the Rings - The Fellowship of the Ring (2001) -JFC/The.Lord.of.the.Rings.The.Fellowship.of.the.Ring.3.FSBS_4k_hevc.mkv",
+        options,
+      ),
+    ).toMatchObject({
+      mediaKind: "movie",
+      catalogKind: "movie",
+      parsedTitle: "lord of rings fellowship of ring",
+      parsedYear: 2001,
+      season: null,
+      episode: null,
+    });
+
+    expect(parseMediaPath("/Anime/Afro Samurai/Afro.Samurai.01.1080p.mkv", options)).toMatchObject({
+      mediaKind: "series",
+      catalogKind: "anime",
+      parsedTitle: "afro samurai",
+      season: 1,
+      episode: 1,
+    });
+  });
+
   it("parses common anime season and episode filename variants", () => {
     const options = {
       contentTypes: { movies: true, series: true, anime: true },

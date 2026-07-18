@@ -247,4 +247,61 @@ describe("tmdbCatalogMeta", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain("/3/search/tv");
     expect(String(fetchMock.mock.calls[1][0])).toContain("/3/search/movie");
   });
+
+  it("rejects an unrelated TV result before falling back to the matching movie", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/tv") {
+        return {
+          ok: true,
+          json: async () => ({ results: [{ id: 123034, name: "The Keepers", first_air_date: "2021-01-01" }] }),
+        };
+      }
+      if (url.pathname === "/3/tv/123034/external_ids") {
+        return { ok: true, json: async () => ({ imdb_id: "tt14358016" }) };
+      }
+      if (url.pathname === "/3/search/movie") {
+        return {
+          ok: true,
+          json: async () => ({
+            results: [
+              {
+                id: 120,
+                title: "The Lord of the Rings: The Fellowship of the Ring",
+                release_date: "2001-12-18",
+              },
+            ],
+          }),
+        };
+      }
+      if (url.pathname === "/3/movie/120/external_ids") {
+        return { ok: true, json: async () => ({ imdb_id: "tt0120737" }) };
+      }
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      tmdbCatalogEnrichment(
+        {
+          mediaKind: "series",
+          catalogKind: "anime",
+          parsedTitle: "lord of rings fellowship of ring",
+          parsedYear: null,
+          imdbId: null,
+        },
+        "tmdb-key",
+        "anime",
+      ),
+    ).resolves.toEqual({
+      status: "matched",
+      meta: expect.objectContaining({
+        id: "tt0120737",
+        type: "movie",
+        name: "The Lord of the Rings: The Fellowship of the Ring",
+        releaseInfo: "2001",
+      }),
+    });
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/tv/123034/external_ids");
+  });
 });
