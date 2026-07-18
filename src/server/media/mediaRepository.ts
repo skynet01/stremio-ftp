@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { ParsedMedia } from "./parser.js";
 
-const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 3;
+const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 4;
 
 export type ParsedMediaFileInput = Omit<ParsedMedia, "catalogKind"> & {
   catalogKind?: ParsedMedia["catalogKind"];
@@ -1157,7 +1157,6 @@ export class MediaRepository {
         algorithm_version = case
           when catalog_enrichment.status = 'matched'
             and catalog_enrichment.algorithm_version < excluded.algorithm_version
-            and catalog_enrichment.genres is null
           then catalog_enrichment.algorithm_version
           else excluded.algorithm_version
         end,
@@ -1209,7 +1208,7 @@ export class MediaRepository {
           and (
             status = 'pending'
             or (status = 'retry' and (next_attempt_at is null or next_attempt_at <= ?))
-            or (status = 'matched' and algorithm_version < ? and genres is null)
+            or (status = 'matched' and algorithm_version < ?)
           )
         order by updated_at asc, id asc
         limit ?
@@ -1276,12 +1275,21 @@ export class MediaRepository {
       );
   }
 
-  markCatalogEnrichmentRefreshed(enrichmentId: number, nowIso: string) {
+  saveCatalogEnrichmentUnmatched(enrichmentId: number, nowIso: string) {
     this.db
       .prepare(
         `
         update catalog_enrichment
-        set algorithm_version = ?,
+        set status = 'unmatched',
+            meta_id = null,
+            meta_type = null,
+            meta_name = null,
+            poster = null,
+            background = null,
+            description = null,
+            release_info = null,
+            genres = null,
+            algorithm_version = ?,
             attempts = attempts + 1,
             error = null,
             next_attempt_at = null,
@@ -1290,22 +1298,6 @@ export class MediaRepository {
       `,
       )
       .run(CATALOG_ENRICHMENT_ALGORITHM_VERSION, nowIso, enrichmentId);
-  }
-
-  saveCatalogEnrichmentUnmatched(enrichmentId: number, nowIso: string) {
-    this.db
-      .prepare(
-        `
-        update catalog_enrichment
-        set status = 'unmatched',
-            attempts = attempts + 1,
-            error = null,
-            next_attempt_at = null,
-            updated_at = ?
-        where id = ?
-      `,
-      )
-      .run(nowIso, enrichmentId);
   }
 
   saveCatalogEnrichmentRetry(enrichmentId: number, error: string, nextAttemptAt: string, nowIso: string) {

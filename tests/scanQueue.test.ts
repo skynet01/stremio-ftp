@@ -694,6 +694,72 @@ describe("ScanQueue", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("replaces a stale matched enrichment when the refreshed result is unmatched", async () => {
+    const { db, profileService, queue } = createHarness(
+      async () => ({
+        list: async () => [{ name: "The.Matrix.1999.mkv", path: "/The.Matrix.1999.mkv", type: "file", size: 1024 * 1024 }],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, tmdbApiKey: "tmdb-key", scanCooldownMs: 0 },
+    );
+    const created = await profileService.createProfile(`browser-${Math.random()}`, "passphrase");
+    const profileId = created.profileId;
+    profileService.saveFtpConfig(profileId, {
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/"],
+    });
+    profileService.saveAddonCustomization(profileId, {
+      addonName: "Archive 3D",
+      addonLogoUrl: "",
+      addonDescription: "Stream the archive.",
+      catalogEnabled: true,
+    });
+
+    let matched = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        if (url.includes("/search/movie")) {
+          return {
+            ok: true,
+            json: async () => ({
+              results: matched ? [{ id: 603, title: "The Matrix", release_date: "1999-03-31", genre_ids: [18] }] : [],
+            }),
+          };
+        }
+        if (url.includes("/3/movie/603/external_ids")) return { ok: true, json: async () => ({ imdb_id: "tt0133093" }) };
+        throw new Error(`Unexpected TMDB URL: ${url}`);
+      }),
+    );
+
+    const first = queue.enqueueProfileScan(profileId, "manual");
+    await waitForNextStatus(queue, profileId, first.id - 1, "succeeded");
+    db.prepare("update catalog_enrichment set algorithm_version = 1, genres = '[\"Drama\"]' where profile_id = ?").run(profileId);
+    matched = false;
+
+    const second = queue.enqueueProfileScan(profileId, "manual");
+    await waitForNextStatus(queue, profileId, second.id - 1, "succeeded");
+
+    expect(
+      db
+        .prepare("select status, meta_id, meta_name, genres, algorithm_version from catalog_enrichment where profile_id = ?")
+        .get(profileId),
+    ).toEqual({
+      status: "unmatched",
+      meta_id: null,
+      meta_name: null,
+      genres: null,
+      algorithm_version: 4,
+    });
+  });
+
   it("enriches anime movie folders with TMDB movie search and serves the anime movie catalog", async () => {
     const { db, profileService, queue } = createHarness(
       async () => ({

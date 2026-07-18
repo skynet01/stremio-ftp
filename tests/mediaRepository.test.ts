@@ -245,7 +245,8 @@ describe("MediaRepository", () => {
       uncategorized: 1,
     });
 
-    db.prepare("update catalog_enrichment set algorithm_version = 1").run();
+    db.prepare("update catalog_enrichment set algorithm_version = 1, genres = '[\"Drama\"]' where status = 'matched'").run();
+    db.prepare("update catalog_enrichment set algorithm_version = 1 where status <> 'matched'").run();
     repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), "2026-05-05T00:00:00.000Z");
 
     expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-05-05T00:00:00.000Z", 10).map((item) => item.parsedTitle).sort()).toEqual([

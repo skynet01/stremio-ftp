@@ -532,11 +532,7 @@ export class ScanQueue {
       if (result.status === "matched") {
         this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
       } else if (result.status === "unmatched") {
-        if (candidate.status === "matched") {
-          this.mediaRepository.markCatalogEnrichmentRefreshed(candidate.id, now);
-        } else {
-          this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
-        }
+        this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
       } else {
         retryCount += 1;
         const nextAttemptAt = new Date(Date.now() + ENRICHMENT_RETRY_DELAY_MS).toISOString();
