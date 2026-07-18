@@ -32,6 +32,7 @@ export type AddonCustomization = {
   addonLogoUrl: string;
   addonDescription: string;
   catalogEnabled: boolean;
+  catalogSort?: CatalogSort;
   catalogTmdbApiKey?: string;
   combineUncategorizedCatalogs?: boolean;
   catalogContentTypes?: CatalogContentTypes;
@@ -49,6 +50,7 @@ export type CatalogContentTypes = {
 };
 
 export type LibraryLayout = "auto" | "folders" | "flat";
+export type CatalogSort = "alphabetical" | "newest";
 export type StreamDeliveryMode = "proxy" | "direct";
 export type AdminSource = "environment" | "database" | null;
 
@@ -165,7 +167,7 @@ export type AdminProfileList = {
 export type FtpServerCatalogSettings = {
   id: number;
   name: string;
-  customization: Pick<AddonCustomization, "catalogEnabled" | "catalogContentTypes" | "libraryLayout" | "streamDeliveryMode">;
+  customization: Pick<AddonCustomization, "catalogEnabled" | "catalogSort" | "catalogContentTypes" | "libraryLayout" | "streamDeliveryMode">;
 };
 
 export type FtpServerInput = {
@@ -225,6 +227,7 @@ export const DEFAULT_ADDON_CUSTOMIZATION: AddonCustomization = {
   addonDescription:
     "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
   catalogEnabled: false,
+  catalogSort: "alphabetical",
   catalogTmdbApiKey: "",
   combineUncategorizedCatalogs: false,
   catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
@@ -248,6 +251,10 @@ function catalogContentTypesFromRow(row: {
       ? true
       : Boolean(row.catalog_content_uncategorized),
   };
+}
+
+function catalogSortFromValue(value: unknown): CatalogSort {
+  return value === "newest" ? "newest" : "alphabetical";
 }
 
 function adminSourceFor(browserUid: string, databaseAdminEnabled: boolean, environmentAdminBrowserUids: ReadonlySet<string>): AdminSource {
@@ -447,7 +454,7 @@ export class ProfileService {
       .prepare(
         `
         select catalog_enabled, catalog_tmdb_api_key, catalog_content_movies, catalog_content_series,
-               catalog_content_anime, catalog_content_uncategorized, library_layout, stream_delivery_mode
+               catalog_content_anime, catalog_content_uncategorized, catalog_sort, library_layout, stream_delivery_mode
         from profile_ftp_servers
         where profile_id = ? and id = ?
       `,
@@ -460,6 +467,7 @@ export class ProfileService {
           catalog_content_series: number | null;
           catalog_content_anime: number | null;
           catalog_content_uncategorized: number | null;
+          catalog_sort: string | null;
           library_layout: LibraryLayout | null;
           stream_delivery_mode: StreamDeliveryMode | null;
         }
@@ -468,6 +476,7 @@ export class ProfileService {
     return {
       ...profileCustomization,
       catalogEnabled: Boolean(row.catalog_enabled),
+      catalogSort: catalogSortFromValue(row.catalog_sort),
       catalogTmdbApiKey: profileCustomization.catalogTmdbApiKey || row.catalog_tmdb_api_key?.trim() || "",
       catalogContentTypes: catalogContentTypesFromRow(row),
       libraryLayout: row.library_layout || "auto",
@@ -481,6 +490,7 @@ export class ProfileService {
     const contentTypes = next.catalogContentTypes ?? DEFAULT_ADDON_CUSTOMIZATION.catalogContentTypes!;
     const libraryLayout = next.libraryLayout ?? DEFAULT_ADDON_CUSTOMIZATION.libraryLayout!;
     const streamDeliveryMode = next.streamDeliveryMode ?? DEFAULT_ADDON_CUSTOMIZATION.streamDeliveryMode!;
+    const catalogSort = catalogSortFromValue(next.catalogSort);
     const now = new Date().toISOString();
     const pendingScanAfter = debounceScan ? new Date(Date.now() + 5 * 60_000).toISOString() : this.getFtpServer(profileId, serverId).pendingScanAfter;
     const result = this.db
@@ -493,6 +503,7 @@ export class ProfileService {
             catalog_content_series = ?,
             catalog_content_anime = ?,
             catalog_content_uncategorized = ?,
+            catalog_sort = ?,
             library_layout = ?,
             stream_delivery_mode = ?,
             pending_scan_after = ?,
@@ -507,6 +518,7 @@ export class ProfileService {
         contentTypes.series ? 1 : 0,
         contentTypes.anime ? 1 : 0,
         contentTypes.uncategorized === false ? 0 : 1,
+        catalogSort,
         libraryLayout,
         streamDeliveryMode,
         pendingScanAfter,
@@ -1286,7 +1298,7 @@ export class ProfileService {
       .prepare(
         `
         select id, name, catalog_enabled, catalog_content_movies, catalog_content_series,
-               catalog_content_anime, catalog_content_uncategorized, library_layout, stream_delivery_mode
+               catalog_content_anime, catalog_content_uncategorized, catalog_sort, library_layout, stream_delivery_mode
         from profile_ftp_servers
         where profile_id = ?
         order by id asc
@@ -1300,6 +1312,7 @@ export class ProfileService {
       catalog_content_series: number | null;
       catalog_content_anime: number | null;
       catalog_content_uncategorized: number | null;
+      catalog_sort: string | null;
       library_layout: LibraryLayout | null;
       stream_delivery_mode: StreamDeliveryMode | null;
     }>;
@@ -1309,6 +1322,7 @@ export class ProfileService {
       name: row.name,
       customization: {
         catalogEnabled: Boolean(row.catalog_enabled),
+        catalogSort: catalogSortFromValue(row.catalog_sort),
         catalogContentTypes: catalogContentTypesFromRow(row),
         libraryLayout: row.library_layout || profileCustomization.libraryLayout || "auto",
         streamDeliveryMode: row.stream_delivery_mode || profileCustomization.streamDeliveryMode || "proxy",
@@ -1333,8 +1347,8 @@ export class ProfileService {
           profile_id, name, encrypted_ftp_config, catalog_enabled, catalog_tmdb_api_key,
           catalog_content_movies, catalog_content_series, catalog_content_anime,
           catalog_content_uncategorized,
-          library_layout, stream_delivery_mode, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          catalog_sort, library_layout, stream_delivery_mode, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -1347,6 +1361,7 @@ export class ProfileService {
         input.customization?.catalogContentTypes?.series === false ? 0 : 1,
         input.customization?.catalogContentTypes?.anime === true ? 1 : 0,
         input.customization?.catalogContentTypes?.uncategorized === false ? 0 : 1,
+        catalogSortFromValue(input.customization?.catalogSort),
         input.customization?.libraryLayout ?? "auto",
         input.customization?.streamDeliveryMode ?? "proxy",
         now,
@@ -1548,6 +1563,7 @@ export class ProfileService {
       customization: {
         ...profileCustomization,
         catalogEnabled: Boolean(row.catalog_enabled),
+        catalogSort: catalogSortFromValue(row.catalog_sort),
         catalogTmdbApiKey: profileCustomization.catalogTmdbApiKey,
         catalogContentTypes: {
           movies: Boolean(row.catalog_content_movies),
@@ -1693,6 +1709,7 @@ type FtpServerRow = {
   catalog_content_series: number;
   catalog_content_anime: number;
   catalog_content_uncategorized: number;
+  catalog_sort: string | null;
   library_layout: LibraryLayout;
   stream_delivery_mode: StreamDeliveryMode;
   indexed_media_count: number;

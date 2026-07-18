@@ -195,6 +195,7 @@ export function migrate(db: Database.Database) {
       catalog_content_series integer not null default 1 check (catalog_content_series in (0, 1)),
       catalog_content_anime integer not null default 0 check (catalog_content_anime in (0, 1)),
       catalog_content_uncategorized integer not null default 1 check (catalog_content_uncategorized in (0, 1)),
+      catalog_sort text not null default 'alphabetical',
       library_layout text not null default 'auto' check (library_layout in ('auto', 'folders', 'flat')),
       stream_delivery_mode text not null default 'proxy' check (stream_delivery_mode in ('proxy', 'direct')),
       indexed_media_count integer not null default 0 check (indexed_media_count >= 0),
@@ -282,6 +283,7 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureMediaColumn(db, "catalog_kind", "text not null default 'movie'");
   ensureMediaColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
   ensureFtpServerColumn(db, "catalog_content_uncategorized", "integer not null default 1");
+  ensureFtpServerColumn(db, "catalog_sort", "text not null default 'alphabetical'");
   ensureFtpServerColumn(db, "shared_index_group_id", "integer references shared_index_groups(id) on delete set null");
   ensureFtpServerColumn(db, "shared_index_key_hash", "text");
   ensureScanJobColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");

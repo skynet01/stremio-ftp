@@ -23,6 +23,7 @@ export type AddonCustomization = {
   addonLogoUrl: string;
   addonDescription: string;
   catalogEnabled: boolean;
+  catalogSort?: "alphabetical" | "newest";
   catalogTmdbApiKey?: string;
   combineUncategorizedCatalogs?: boolean;
   catalogContentTypes?: {

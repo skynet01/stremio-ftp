@@ -782,6 +782,7 @@ describe("profile routes", () => {
         },
         customization: {
           catalogEnabled: true,
+          catalogSort: "newest",
           catalogContentTypes: { movies: true, series: false, anime: false },
           libraryLayout: "folders",
           streamDeliveryMode: "direct",
@@ -799,6 +800,7 @@ describe("profile routes", () => {
       },
       customization: {
         catalogEnabled: true,
+        catalogSort: "newest",
         catalogTmdbApiKey: "",
         libraryLayout: "folders",
         streamDeliveryMode: "direct",
@@ -806,6 +808,33 @@ describe("profile routes", () => {
       pendingScanAfter: expect.any(String),
     });
     expect(saved.body.globalStats).toMatchObject({ servers: 2, pendingScans: 1 });
+
+    await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        serverId,
+        name: "Archive Mirror",
+        ftpConfig: {
+          host: "mirror.example.test",
+          port: 2121,
+          username: "mirror",
+          password: "secret",
+          tlsMode: "explicit",
+          allowInvalidCertificate: true,
+          roots: ["/Movies"],
+        },
+        customization: {
+          catalogEnabled: true,
+          catalogSort: "recent",
+          catalogContentTypes: { movies: true, series: false, anime: false },
+          libraryLayout: "folders",
+          streamDeliveryMode: "direct",
+        },
+      })
+      .expect(400);
 
     const loaded = await request(app)
       .post("/api/profile/servers/load")

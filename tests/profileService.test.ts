@@ -65,6 +65,25 @@ describe("ProfileService", () => {
     expect(service.getFtpServerCustomization(created.profileId, serverId).catalogTmdbApiKey).toBe("profile-key");
   });
 
+  it("stores catalog order per FTP server and normalizes invalid stored values", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, key);
+    const created = await service.createProfile("browser-sort", "passphrase");
+    const firstServerId = service.defaultFtpServerId(created.profileId);
+    const second = service.createFtpServer(created.profileId, { customization: { catalogSort: "newest" } });
+
+    expect(service.getFtpServerCustomization(created.profileId, firstServerId).catalogSort).toBe("alphabetical");
+    expect(service.getFtpServerCustomization(created.profileId, second.id).catalogSort).toBe("newest");
+
+    service.saveFtpServerCustomization(created.profileId, firstServerId, { catalogSort: "newest" });
+    expect(service.getFtpServer(created.profileId, firstServerId).customization.catalogSort).toBe("newest");
+    expect(service.getFtpServer(created.profileId, second.id).customization.catalogSort).toBe("newest");
+
+    db.prepare("update profile_ftp_servers set catalog_sort = 'recent' where id = ?").run(second.id);
+    expect(service.getFtpServerCustomization(created.profileId, second.id).catalogSort).toBe("alphabetical");
+  });
+
   it("uses enrichment results for per-server catalog counts when available", async () => {
     const db = new Database(":memory:");
     migrate(db);

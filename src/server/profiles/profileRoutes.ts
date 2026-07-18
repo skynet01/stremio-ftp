@@ -50,6 +50,7 @@ const customizationSchema = z.object({
     .refine((value) => !value || /^https?:\/\//i.test(value), "Logo URL must start with http:// or https://"),
   addonDescription: z.string().trim().min(1).max(260),
   catalogEnabled: z.boolean().default(false),
+  catalogSort: z.enum(["alphabetical", "newest"]).optional(),
   catalogTmdbApiKey: z.string().trim().max(128).default(""),
   combineUncategorizedCatalogs: z.boolean().default(false),
   catalogContentTypes: z

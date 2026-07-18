@@ -149,6 +149,27 @@ describe("shared index groups", () => {
     });
   });
 
+  it("keeps catalog order independent between a shared master and linked server", async () => {
+    const { service, profileId, serverId } = await serviceWithServer();
+    service.saveFtpServerCustomization(profileId, serverId, { catalogSort: "newest" });
+    const created = service.createSharedIndexGroupFromServer(profileId, serverId, {
+      name: "Sputnik Main",
+      keyHint: "sputnik-main",
+    });
+    const linked = await service.createProfile("linked-sort-browser", "passphrase");
+    const linkedServerId = service.defaultFtpServerId(linked.profileId);
+    service.saveFtpServerConfig(linked.profileId, linkedServerId, service.getFtpServerConfig(profileId, serverId)!, false);
+
+    service.linkServerToSharedGroup(linked.profileId, linkedServerId, created.group.id, created.sharedIndexKey);
+    expect(service.getFtpServer(linked.profileId, linkedServerId).customization.catalogSort).toBe("alphabetical");
+    expect(service.getFtpServer(profileId, serverId).customization.catalogSort).toBe("newest");
+
+    service.saveFtpServerCustomization(linked.profileId, linkedServerId, { catalogSort: "newest" });
+    service.saveFtpServerCustomization(profileId, serverId, { catalogSort: "alphabetical" });
+    expect(service.getFtpServer(linked.profileId, linkedServerId).customization.catalogSort).toBe("newest");
+    expect(service.getFtpServer(profileId, serverId).customization.catalogSort).toBe("alphabetical");
+  });
+
   it("force-links by replacing linked server roots with the shared group roots", async () => {
     const { service, profileId, serverId } = await serviceWithServer();
     const created = service.createSharedIndexGroupFromServer(profileId, serverId, {

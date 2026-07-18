@@ -129,7 +129,14 @@ describe("schema", () => {
         "estimated_seconds_remaining",
       ]),
     );
-    expect(serverColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["shared_index_group_id", "shared_index_key_hash"]));
+    expect(serverColumns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["shared_index_group_id", "shared_index_key_hash", "catalog_sort"]),
+    );
+    const profileId = insertProfile(db);
+    db.prepare("insert into profile_ftp_servers (profile_id, name, created_at, updated_at) values (?, 'Default Sort', 'now', 'now')").run(profileId);
+    expect(db.prepare("select catalog_sort from profile_ftp_servers where profile_id = ?").get(profileId)).toEqual({
+      catalog_sort: "alphabetical",
+    });
     expect(sharedGroupColumns.map((column) => column.name)).toEqual(
       expect.arrayContaining([
         "key_hint",
