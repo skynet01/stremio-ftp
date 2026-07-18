@@ -47,6 +47,7 @@ const baseExportContext: ExportContext = {
       allowInvalidCertificate: false,
       rootPaths: "/Movies\n/TV",
       catalogEnabled: true,
+      catalogSort: "newest",
       catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
       libraryLayout: "auto",
       streamDeliveryMode: "proxy",
@@ -74,6 +75,7 @@ describe("portableSettings", () => {
     expect(server.password).toBe("secret");
     expect(server.rootPaths).toEqual(["/Movies", "/TV"]);
     expect(server.streamDeliveryMode).toBe("proxy");
+    expect(server.catalogSort).toBe("newest");
     expect(server.scanIntervalMinutes).toBe(60);
   });
 
@@ -153,6 +155,15 @@ describe("portableSettings", () => {
       servers: [{ host: "ftp.example.test", port: "2121", rootPaths: ["/"] }],
     });
     expect(parsed.servers?.[0].port).toBe(2121);
+  });
+
+  it("discards unknown catalog order values for alphabetical fallback", () => {
+    const parsed = parsePortableSettings({
+      schemaVersion: 1,
+      exportedAt: "2026-07-17T00:00:00.000Z",
+      servers: [{ catalogSort: "recent" }, { catalogSort: "alphabetical" }, { catalogSort: "newest" }],
+    });
+    expect(parsed.servers?.map((server) => server.catalogSort)).toEqual([undefined, "alphabetical", "newest"]);
   });
 
   it("flags partial servers as missing credentials", () => {

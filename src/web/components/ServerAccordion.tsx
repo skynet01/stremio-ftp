@@ -1,5 +1,5 @@
 import { ChevronRight, CircleStop, KeyRound, Plus, RefreshCw, Trash2 } from "lucide-react";
-import type { AddonCustomization, ConnectionStatus, IndexStatus, ScanSchedule, ScanStatus } from "../api.js";
+import type { AddonCustomization, CatalogSort, ConnectionStatus, IndexStatus, ScanSchedule, ScanStatus } from "../api.js";
 import { CONTENT_TYPE_TOOLTIPS } from "./contentTypeTooltips.js";
 import {
   field,
@@ -31,6 +31,7 @@ export type ServerForm = {
   allowInvalidCertificate: boolean;
   rootPaths: string;
   catalogEnabled: boolean;
+  catalogSort: CatalogSort;
   catalogContentTypes: CatalogContentTypes;
   libraryLayout: LibraryLayout;
   streamDeliveryMode: StreamDeliveryMode;
@@ -319,6 +320,24 @@ export function ServerAccordion({
                           />
                           Show Uncategorized catalogs
                         </label>
+                        {server.catalogEnabled
+                          ? field(
+                              "Catalog order",
+                              `catalogSort-${server.id}`,
+                              <select
+                                id={`catalogSort-${server.id}`}
+                                className={filledClass(server.catalogSort)}
+                                value={server.catalogSort}
+                                onChange={(event) =>
+                                  onServerChange(server.id, { catalogSort: event.currentTarget.value as CatalogSort })
+                                }
+                              >
+                                <option value="alphabetical">A–Z</option>
+                                <option value="newest">Newest first</option>
+                              </select>,
+                              "field-stack catalog-order-field",
+                            )
+                          : null}
                       </div>
                     </div>
                   </div>

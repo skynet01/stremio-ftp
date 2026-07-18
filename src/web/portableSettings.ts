@@ -20,6 +20,7 @@ export type PortableServer = {
   allowInvalidCertificate?: boolean;
   rootPaths?: string[];
   catalogEnabled?: boolean;
+  catalogSort?: "alphabetical" | "newest";
   catalogContentTypes?: { movies?: boolean; series?: boolean; anime?: boolean; uncategorized?: boolean };
   libraryLayout?: "auto" | "folders" | "flat";
   streamDeliveryMode?: "proxy" | "direct";
@@ -90,6 +91,7 @@ function serverToPortable(server: ServerForm, stripCredentials: boolean): Portab
     allowInvalidCertificate: server.allowInvalidCertificate || undefined,
     rootPaths: rootPaths.length ? rootPaths : undefined,
     catalogEnabled: server.catalogEnabled || undefined,
+    catalogSort: server.catalogSort,
     catalogContentTypes: server.catalogContentTypes,
     libraryLayout: server.libraryLayout,
     streamDeliveryMode: server.streamDeliveryMode,
@@ -140,6 +142,7 @@ function parseServer(value: unknown): PortableServer {
       ? s.rootPaths.filter((path): path is string => typeof path === "string" && path.trim().length > 0)
       : undefined,
     catalogEnabled: typeof s.catalogEnabled === "boolean" ? s.catalogEnabled : undefined,
+    catalogSort: s.catalogSort === "alphabetical" || s.catalogSort === "newest" ? s.catalogSort : undefined,
     catalogContentTypes: parseContentTypes(s.catalogContentTypes),
     libraryLayout:
       s.libraryLayout === "auto" || s.libraryLayout === "folders" || s.libraryLayout === "flat" ? s.libraryLayout : undefined,

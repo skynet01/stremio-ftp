@@ -67,6 +67,7 @@ const DEFAULT_CUSTOMIZATION: AddonCustomization = {
   addonDescription:
     "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
   catalogEnabled: false,
+  catalogSort: "alphabetical",
   catalogTmdbApiKey: "",
   combineUncategorizedCatalogs: false,
   catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
@@ -95,6 +96,7 @@ const APP_VERSION = __APP_VERSION__;
 const GITHUB_COMMITS_API = "https://api.github.com/repos/skynet01/stremio-ftp/commits?per_page=15";
 const SERVER_LIBRARY_SETTING_KEYS = new Set<keyof ServerForm>([
   "catalogEnabled",
+  "catalogSort",
   "catalogContentTypes",
   "libraryLayout",
   "streamDeliveryMode",
@@ -127,6 +129,7 @@ function emptyServerForm(id = 0): ServerForm {
     allowInvalidCertificate: false,
     rootPaths: "/",
     catalogEnabled: false,
+    catalogSort: "alphabetical",
     catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
     libraryLayout: "auto",
     streamDeliveryMode: "proxy",
@@ -174,6 +177,7 @@ function serverFormFromPayload(server: FtpServerSettings): ServerForm {
     allowInvalidCertificate: Boolean(server.ftpConfig?.allowInvalidCertificate),
     rootPaths: server.ftpConfig?.roots.join("\n") ?? "/",
     catalogEnabled: server.customization.catalogEnabled,
+    catalogSort: server.customization.catalogSort ?? "alphabetical",
     catalogContentTypes: server.customization.catalogContentTypes ?? { movies: true, series: true, anime: false, uncategorized: true },
     libraryLayout: server.customization.libraryLayout ?? "auto",
     streamDeliveryMode: server.customization.streamDeliveryMode ?? "proxy",
@@ -204,6 +208,7 @@ function serverFormFromLegacyPayload(
     allowInvalidCertificate: Boolean(loaded.ftpConfig?.allowInvalidCertificate),
     rootPaths: loaded.ftpConfig?.roots.join("\n") ?? "/",
     catalogEnabled: customization.catalogEnabled,
+    catalogSort: customization.catalogSort ?? "alphabetical",
     catalogContentTypes: customization.catalogContentTypes ?? { movies: true, series: true, anime: false, uncategorized: true },
     libraryLayout: customization.libraryLayout ?? "auto",
     streamDeliveryMode: customization.streamDeliveryMode ?? "proxy",
@@ -230,6 +235,7 @@ function portableServerToForm(portable: PortableServer, index: number, id: numbe
     allowInvalidCertificate: portable.allowInvalidCertificate ?? false,
     rootPaths: (portable.rootPaths && portable.rootPaths.length ? portable.rootPaths : ["/"]).join("\n"),
     catalogEnabled: portable.catalogEnabled ?? false,
+    catalogSort: portable.catalogSort ?? "alphabetical",
     catalogContentTypes: portable.catalogContentTypes
       ? {
           movies: portable.catalogContentTypes.movies ?? true,
@@ -475,6 +481,7 @@ export function App() {
       addonLogoUrl: addonLogoUrl.trim(),
       addonDescription: addonDescription.trim() || DEFAULT_CUSTOMIZATION.addonDescription,
       catalogEnabled: server?.catalogEnabled ?? DEFAULT_CUSTOMIZATION.catalogEnabled,
+      catalogSort: server?.catalogSort ?? "alphabetical",
       catalogTmdbApiKey: catalogTmdbApiKey.trim(),
       combineUncategorizedCatalogs,
       catalogContentTypes: server?.catalogContentTypes ?? DEFAULT_CUSTOMIZATION.catalogContentTypes,
@@ -781,6 +788,7 @@ export function App() {
         ftpConfig: ftpConfigFromServer(server),
         customization: {
           catalogEnabled: server.catalogEnabled,
+          catalogSort: server.catalogSort,
           catalogContentTypes: server.catalogContentTypes,
           libraryLayout: server.libraryLayout,
           streamDeliveryMode: server.streamDeliveryMode,
@@ -1123,6 +1131,7 @@ export function App() {
 
     const customizationPatchFor = (portable: PortableServer) => ({
       catalogEnabled: portable.catalogEnabled ?? false,
+      catalogSort: portable.catalogSort ?? "alphabetical",
       catalogContentTypes: portable.catalogContentTypes
         ? {
             movies: portable.catalogContentTypes.movies ?? true,

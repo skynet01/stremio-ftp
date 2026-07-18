@@ -18,12 +18,14 @@ export type UnlockProfileResponse = {
   stremioInstallUrl: string;
 };
 
+export type CatalogSort = "alphabetical" | "newest";
+
 export type AddonCustomization = {
   addonName: string;
   addonLogoUrl: string;
   addonDescription: string;
   catalogEnabled: boolean;
-  catalogSort?: "alphabetical" | "newest";
+  catalogSort?: CatalogSort;
   catalogTmdbApiKey?: string;
   combineUncategorizedCatalogs?: boolean;
   catalogContentTypes?: {

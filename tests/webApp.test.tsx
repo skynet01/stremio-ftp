@@ -119,6 +119,7 @@ const testFtpSettingsMock = vi.mocked(testFtpSettings);
 const unlockProfileMock = vi.mocked(unlockProfile);
 const validateSetupTokenMock = vi.mocked(validateSetupToken);
 const defaultCatalogOptions = {
+  catalogSort: "alphabetical" as const,
   catalogTmdbApiKey: "",
   combineUncategorizedCatalogs: false,
   catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
@@ -388,6 +389,7 @@ describe("App", () => {
           addonDescription:
             "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: false,
+          catalogSort: "alphabetical",
           catalogTmdbApiKey: "",
           combineUncategorizedCatalogs: false,
           catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
@@ -1283,6 +1285,7 @@ describe("App", () => {
           addonDescription:
             "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: false,
+          catalogSort: "alphabetical",
           catalogTmdbApiKey: "profile-tmdb-key",
           combineUncategorizedCatalogs: false,
           catalogContentTypes: { movies: true, series: true, anime: true, uncategorized: true },
@@ -1451,6 +1454,7 @@ describe("App", () => {
           addonDescription:
             "Stream movies and series episodes from your own FTP server as private Stremio sources, with proxy playback and an indexed library that stays on your server.",
           catalogEnabled: true,
+          catalogSort: "alphabetical",
           catalogTmdbApiKey: "profile-tmdb-key",
           combineUncategorizedCatalogs: false,
           catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },

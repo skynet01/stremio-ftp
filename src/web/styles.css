@@ -2772,6 +2772,10 @@ input:-webkit-autofill:active {
   margin-top: 0;
 }
 
+.catalog-order-field {
+  margin-top: 4px;
+}
+
 .content-type-options {
   display: grid;
   gap: 10px;

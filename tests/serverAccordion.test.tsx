@@ -17,6 +17,7 @@ const failedServer: ServerForm = {
   allowInvalidCertificate: false,
   rootPaths: "/",
   catalogEnabled: true,
+  catalogSort: "alphabetical",
   catalogContentTypes: { movies: true, series: true, anime: false },
   libraryLayout: "auto",
   streamDeliveryMode: "proxy",
@@ -184,6 +185,45 @@ describe("ServerAccordion", () => {
     expect(screen.getByText("sputnik-main")).toBeTruthy();
     expect(screen.getByLabelText("Rescan frequency")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Rescan" })).toBeDisabled();
+  });
+
+  it("shows catalog order only for enabled catalogs and keeps it editable for linked servers", () => {
+    const onServerChange = vi.fn();
+    const linkedServer: ServerForm = {
+      ...failedServer,
+      sharedIndex: {
+        id: 5,
+        name: "Sputnik Main",
+        keyHint: "sputnik-main",
+        linked: true,
+        message: "Scanning handled by shared master index.",
+      },
+    };
+    const props = {
+      expandedServerId: failedServer.id,
+      profileReady: true,
+      onToggle: vi.fn(),
+      onAddServer: vi.fn(),
+      onDeleteServer: vi.fn(),
+      onServerChange,
+      onSaveServer: vi.fn(),
+      onTestServer: vi.fn(),
+      onRefreshServer: vi.fn(),
+      onCancelServer: vi.fn(),
+      onUpdateScanSchedule: vi.fn(),
+    };
+    const { rerender } = render(<ServerAccordion {...props} servers={[linkedServer]} />);
+
+    const order = screen.getByLabelText("Catalog order");
+    expect(order).toBeEnabled();
+    expect(order).toHaveValue("alphabetical");
+    expect(within(order).getByRole("option", { name: "A–Z" })).toBeTruthy();
+    expect(within(order).getByRole("option", { name: "Newest first" })).toBeTruthy();
+    fireEvent.change(order, { target: { value: "newest" } });
+    expect(onServerChange).toHaveBeenCalledWith(failedServer.id, { catalogSort: "newest" });
+
+    rerender(<ServerAccordion {...props} servers={[{ ...linkedServer, catalogEnabled: false }]} />);
+    expect(screen.queryByLabelText("Catalog order")).toBeNull();
   });
 
   it("allows shared index masters to schedule and rescan", () => {
