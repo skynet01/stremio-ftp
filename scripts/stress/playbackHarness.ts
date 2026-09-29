@@ -213,7 +213,6 @@ async function startEnvironment(options: HarnessOptions, logs: LogCollector): Pr
     FTP_TIMEOUT_MS: String(options.ftpTimeoutMs),
     EMPTY_PROFILE_CLEANUP_DAYS: "0",
     SCAN_SCHEDULER_INTERVAL_MS: "3600000",
-    SUPER_ADMIN_BROWSER_UIDS: ADMIN_BROWSER_UID,
   });
   const db = openDatabase(config.sqlitePath);
 
@@ -297,42 +296,19 @@ async function startEnvironment(options: HarnessOptions, logs: LogCollector): Pr
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", () => resolve()));
   const port = (httpServer.address() as AddressInfo).port;
 
-  // Active proxy streams come from the existing super-admin API (the viewer-0 profile is the super admin).
-  const activeStreams = async () => {
-    const body = await postJson(port, "/api/admin/streams", { browserUid: ADMIN_BROWSER_UID, passphrase: VIEWER_PASSPHRASE });
-    return (body as { summary: { active: number } }).summary.active;
-  };
+  // The public build has no proxy stream tracker; the FTP-side counters and open HTTP connections cover leaks.
+  const activeStreams = async () => 0;
 
   return { options, tmpDir, db, ftp, httpServer, port, slots, activeStreams, files, viewerTokens, loginErrors, logs };
 }
 
 const VIEWER_PASSPHRASE = "stress-passphrase";
-const ADMIN_BROWSER_UID = viewerBrowserUid(0);
 
 function viewerBrowserUid(index: number) {
   return `stress-viewer-${index}-browser`;
 }
 
 // One-shot request without keep-alive, so polling never holds an HTTP connection open.
-function postJson(port: number, path: string, payload: unknown) {
-  return new Promise<unknown>((resolve, reject) => {
-    const body = JSON.stringify(payload);
-    const request = http.request(
-      { host: "127.0.0.1", port, path, method: "POST", agent: false, headers: { "content-type": "application/json", connection: "close" } },
-      (response) => {
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk: Buffer) => chunks.push(chunk));
-        response.on("end", () => {
-          if (response.statusCode !== 200) reject(new Error(`${path} returned ${response.statusCode}`));
-          else resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        });
-      },
-    );
-    request.on("error", reject);
-    request.end(body);
-  });
-}
-
 class SlotCounter {
   private readonly perUser = new Map<string, number>();
   maxPerUser = 0;
