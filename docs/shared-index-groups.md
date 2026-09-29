@@ -2,21 +2,19 @@
 
 Shared index groups let multiple profile FTP servers reuse one scanned index when they expose the same library surface. Each profile still keeps its own FTP username and password, and playback opens FTP with the requesting profile's credentials.
 
-## Admin Lifecycle
+## Lifecycle
 
-Only super admins from `SUPER_ADMIN_BROWSER_UIDS` can manage shared index groups.
+The public build has no admin portal, so the web UI cannot create or manage groups. Groups are created from an existing profile server through the shared-index service layer; that server becomes the master scan server and is linked to the group.
 
-1. Unlock the portal with a super-admin profile.
-2. In the admin dashboard, create a group from an existing profile/server id. That server becomes the master scan server and is linked to the group.
-3. Distribute the one-time `sharedIndexKey` through an admin-controlled import file if auto-linking is desired.
-4. Link additional profile servers from the admin dashboard or let imports auto-link when the key and server identity match.
-5. Trigger or halt scans from the shared group card. Linked user servers show the shared group and cannot schedule their own local scan frequency.
+1. Distribute the one-time `sharedIndexKey` in a trusted portable settings file.
+2. When a user imports that file and saves the server, it auto-links if the key and server identity match.
+3. Linked servers show the shared group in the portal and cannot schedule their own local scan frequency. Rescans from the master server refresh the shared index for every linked server.
 
-The master server can be changed to another linked-compatible profile server. Unlinking the master clears the master reference and blocks future shared rescans until a new master is selected.
+Unlinking the master clears the master reference and blocks future shared rescans until a new master is selected.
 
 ## Matching Rules
 
-Auto-linking requires all of these to match the group:
+Auto-linking requires the group to be enabled with import auto-linking on, and all of these to match the group:
 
 - shared index key hash
 - host
@@ -29,9 +27,7 @@ The first version intentionally does not support path transforms. If the same ho
 
 ## Key Safety
 
-The raw `sharedIndexKey` is shown only when a group is created or its key is rotated. The database stores only a hash. Normal user exports omit shared keys so users do not accidentally redistribute reusable linking tokens.
-
-Admin list responses include safe group metadata, linked server ids, master labels, counts, and scan status. They do not include FTP passwords or decrypted FTP configs.
+The raw `sharedIndexKey` is returned only when a group is created or its key is rotated. The database stores only a hash. Normal user exports omit shared keys so users do not accidentally redistribute reusable linking tokens.
 
 ## Local Oracle DB Check
 
