@@ -339,6 +339,63 @@ describe("stream resolver", () => {
     expect(streams[0]?.url).toBe("https://addon.example.test/proxy/token/7");
   });
 
+  it("resolves FTP credentials only for direct-mode servers, once per server per request", async () => {
+    const ftpConfigForServer = vi.fn((serverId: number | null | undefined) =>
+      serverId === 3
+        ? null
+        : {
+            host: `server${serverId}.example.test`,
+            port: 21,
+            username: "user",
+            password: "secret",
+            tlsMode: "none" as const,
+            allowInvalidCertificate: false,
+            roots: ["/Movies"],
+          },
+    );
+    const movie = (id: number, ftpServerId: number, streamDeliveryMode: "proxy" | "direct" | null) => ({
+      id,
+      ftpServerId,
+      streamDeliveryMode,
+      filename: `Movie.${id}.mkv`,
+      ftpPath: `/Movies/Movie.${id}.mkv`,
+      quality: "1080p",
+      sizeBytes: null,
+    });
+
+    const streams = await resolveStreams({
+      baseUrl: "https://addon.example.test",
+      installToken: "token",
+      profileId: 1,
+      type: "movie",
+      id: "tt7654321",
+      metadata: { name: "Movie", releaseInfo: "2021" },
+      streamDeliveryMode: "proxy",
+      ftpConfigForServer,
+      mediaRepository: {
+        findEpisode: () => [],
+        findMovie: () => [
+          movie(1, 1, "proxy"),
+          movie(2, 1, null),
+          movie(3, 2, "direct"),
+          movie(4, 2, "direct"),
+          movie(5, 3, "direct"),
+          movie(6, 3, "direct"),
+        ],
+      },
+    });
+
+    expect(streams.map((stream) => stream.url)).toEqual([
+      "https://addon.example.test/proxy/token/1",
+      "https://addon.example.test/proxy/token/2",
+      "ftp://user:secret@server2.example.test:21/Movies/Movie.3.mkv",
+      "ftp://user:secret@server2.example.test:21/Movies/Movie.4.mkv",
+      "https://addon.example.test/proxy/token/5",
+      "https://addon.example.test/proxy/token/6",
+    ]);
+    expect(ftpConfigForServer.mock.calls).toEqual([[2], [3]]);
+  });
+
   it("can return direct FTP URLs instead of proxy streams", async () => {
     const streams = await resolveStreams({
       baseUrl: "https://addon.example.test",

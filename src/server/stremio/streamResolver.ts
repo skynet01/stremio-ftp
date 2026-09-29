@@ -28,6 +28,8 @@ export type MediaMatch = {
 // matches no title and findMovie falls back to IMDb id and enrichment meta_id.
 const IMDB_ID_ONLY_TITLE = "#imdb-id-only";
 
+type FtpConfigForServer = (serverId: number | null | undefined) => FtpConfig | null;
+
 type RepoLike = {
   findEpisode(profileId: number, normalizedTitle: string, season: number, episode: number): MediaMatch[];
   findMovie(
@@ -48,12 +50,13 @@ export async function resolveStreams(input: {
   mediaRepository: RepoLike;
   streamDeliveryMode?: StreamDeliveryMode;
   ftpConfig?: FtpConfig | null;
-  ftpConfigForServer?: (serverId: number | null | undefined) => FtpConfig | null;
+  ftpConfigForServer?: FtpConfigForServer;
   addonName?: string;
   streamNameTemplate?: string | null;
   streamDescriptionTemplate?: string | null;
 }) {
   const matches = input.type === "series" ? episodeMatches(input) : movieMatches(input);
+  const ftpConfigForServer = input.ftpConfigForServer && memoizeFtpConfigForServer(input.ftpConfigForServer);
 
   return matches.map((match) => streamForMatch({
     baseUrl: input.baseUrl,
@@ -61,7 +64,7 @@ export async function resolveStreams(input: {
     match,
     streamDeliveryMode: input.streamDeliveryMode,
     ftpConfig: input.ftpConfig,
-    ftpConfigForServer: input.ftpConfigForServer,
+    ftpConfigForServer,
     addonName: input.addonName,
     streamNameTemplate: input.streamNameTemplate,
     streamDescriptionTemplate: input.streamDescriptionTemplate,
@@ -74,14 +77,14 @@ export function streamForMatch(input: {
   match: MediaMatch;
   streamDeliveryMode?: StreamDeliveryMode;
   ftpConfig?: FtpConfig | null;
-  ftpConfigForServer?: (serverId: number | null | undefined) => FtpConfig | null;
+  ftpConfigForServer?: FtpConfigForServer;
   addonName?: string;
   streamNameTemplate?: string | null;
   streamDescriptionTemplate?: string | null;
 }) {
   const { match } = input;
-  const ftpConfig = input.ftpConfigForServer?.(match.ftpServerId) ?? input.ftpConfig;
   const deliveryMode = match.streamDeliveryMode ?? input.streamDeliveryMode;
+  const ftpConfig = deliveryMode === "direct" ? (input.ftpConfigForServer?.(match.ftpServerId) ?? input.ftpConfig) : null;
   const formatterContext = streamFormatterContext({
     addonName: input.addonName,
     match,
@@ -103,6 +106,15 @@ export function streamForMatch(input: {
       filename: match.filename,
       ...(match.sizeBytes ? { videoSize: match.sizeBytes } : {}),
     },
+  };
+}
+
+export function memoizeFtpConfigForServer(resolve: FtpConfigForServer): FtpConfigForServer {
+  const configs = new Map<number | null, FtpConfig | null>();
+  return (serverId) => {
+    const key = serverId ?? null;
+    if (!configs.has(key)) configs.set(key, resolve(serverId));
+    return configs.get(key) ?? null;
   };
 }
 
