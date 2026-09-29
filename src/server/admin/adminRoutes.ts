@@ -5,7 +5,14 @@ import { countryCodeFromRequest } from "../http/requestMetadata.js";
 import type { ProfileScanStatus } from "../scanner/scanQueue.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
 import { nextAlignedScanAt } from "../scanner/schedule.js";
-import { ProfileNotFoundError, ProfileService, type FtpServer, type SharedIndexGroup } from "../profiles/profileService.js";
+import {
+  InvalidPassphraseError,
+  ProfileNotFoundError,
+  ProfileRequestError,
+  ProfileService,
+  type FtpServer,
+  type SharedIndexGroup,
+} from "../profiles/profileService.js";
 import type { ProxyStreamTracker } from "../proxy/streamTracker.js";
 
 const adminAuthSchema = z.object({
@@ -65,7 +72,8 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     let unlocked: { profileId: number };
     try {
       unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase, countryCodeFromRequest(req));
-    } catch {
+    } catch (error) {
+      if (!(error instanceof InvalidPassphraseError)) throw error;
       return { ok: false as const, status: 401, error: "Invalid passphrase" };
     }
     if (!config.superAdminBrowserUids.has(parsed.data.browserUid)) {
@@ -471,6 +479,6 @@ function sharedIndexGroupView(service: ProfileService, scanQueue: ScanQueue, gro
 
 function handleSharedIndexError(error: unknown, res: { status(code: number): { json(body: object): unknown } }) {
   if (error instanceof ProfileNotFoundError) return res.status(404).json({ error: "Profile or FTP server not found" });
-  if (error instanceof Error) return res.status(400).json({ error: error.message });
+  if (error instanceof ProfileRequestError) return res.status(400).json({ error: error.message });
   throw error;
 }

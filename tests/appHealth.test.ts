@@ -3,12 +3,17 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
+import { ProfileService } from "../src/server/profiles/profileService";
 
 describe("app health", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("serves health response", async () => {
     const db = new Database(":memory:");
     migrate(db);
@@ -174,6 +179,46 @@ describe("app health", () => {
     const response = await request(app).get("/api/setup/validate").set("x-setup-token", "setup-secret-123").expect(200);
 
     expect(response.body).toEqual({ ok: true });
+  });
+
+  it("returns JSON errors for malformed request bodies", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(loadMinimalConfig(), db);
+
+    const response = await request(app)
+      .post("/api/profile/unlock")
+      .set("x-setup-token", "setup-secret-123")
+      .set("Content-Type", "application/json")
+      .send('{"browserUid":"browser-uid","passphrase":"super-secret-pass"')
+      .expect(400);
+
+    expect(response.header["content-type"]).toMatch(/application\/json/);
+    expect(response.body).toEqual({ error: "Invalid request body" });
+    expect(response.text).not.toContain("super-secret-pass");
+  });
+
+  it("returns redacted JSON 500s for unexpected route errors", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, loadMinimalConfig().encryptionKey);
+    const created = await service.createProfile("browser-uid", "passphrase");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failure = vi.spyOn(ProfileService.prototype, "getAddonCustomization").mockImplementation(() => {
+      throw new Error("database disk image is malformed token=abcdefghijklmnopqrstuvwxyz123456");
+    });
+    const app = createApp(loadMinimalConfig(), db);
+
+    const response = await request(app).get(`/u/${created.installUrlToken}/manifest.json`).expect(500);
+
+    expect(response.header["content-type"]).toMatch(/application\/json/);
+    expect(response.body).toEqual({ error: "Internal server error" });
+    const logged = errorSpy.mock.calls.flat().map(String).join("\n");
+    expect(logged).toContain("database disk image is malformed");
+    expect(logged).not.toContain("abcdefghijklmnopqrstuvwxyz123456");
+    expect(logged).not.toContain(created.installUrlToken);
+    failure.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("separates admin restrictions from super admin dashboard access", async () => {

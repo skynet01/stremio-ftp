@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { Readable } from "node:stream";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
@@ -47,6 +47,10 @@ function deferred<T>() {
 }
 
 describe("profile routes", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("creates a profile and returns install URLs", async () => {
     const db = new Database(":memory:");
     migrate(db);
@@ -189,6 +193,73 @@ describe("profile routes", () => {
       .expect(401);
 
     expect(response.body).toEqual({ error: "Invalid passphrase" });
+  });
+
+  it("returns a JSON 500 instead of an invalid passphrase when a profile handler fails", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failure = vi.spyOn(ProfileService.prototype, "getAddonCustomization").mockImplementation(() => {
+      throw new Error("database is locked");
+    });
+
+    const response = await request(app)
+      .post("/api/profile/customization/load")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(500);
+
+    expect(response.body).toEqual({ error: "Internal server error" });
+    const logged = errorSpy.mock.calls.flat().map(String).join("\n");
+    expect(logged).toContain("database is locked");
+    expect(logged).not.toContain("passphrase\"");
+    failure.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it("separates auth failures from missing servers and scan errors", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    const missingServer = await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "browser-uid",
+        passphrase: "passphrase",
+        serverId: 9999,
+        name: "Missing",
+        ftpConfig: { host: "ftp.example.test", port: 21, username: "user", password: "secret", tlsMode: "none", allowInvalidCertificate: false, roots: ["/"] },
+        customization: { catalogEnabled: false, catalogContentTypes: { movies: true, series: true, anime: false }, libraryLayout: "auto", streamDeliveryMode: "proxy" },
+      })
+      .expect(404);
+    expect(missingServer.body).toEqual({ error: "Profile or FTP server not found" });
+
+    const wrongPassphrase = await request(app)
+      .post("/api/profile/index/rescan")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "wrong-passphrase" })
+      .expect(401);
+    expect(wrongPassphrase.body).toEqual({ error: "Invalid passphrase" });
+
+    const unknownProfile = await request(app)
+      .post("/api/profile/servers/load")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "unknown-browser-uid", passphrase: "passphrase" })
+      .expect(401);
+    expect(unknownProfile.body).toEqual({ error: "Invalid passphrase" });
   });
 
   it("rate limits repeated profile creation attempts from the same client", async () => {

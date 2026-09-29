@@ -1,4 +1,4 @@
-import { Router, type RequestHandler } from "express";
+import { Router, type Request, type RequestHandler, type Response } from "express";
 import { isIP } from "node:net";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
@@ -8,6 +8,9 @@ import { MediaRepository } from "../media/mediaRepository.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
 import {
   DuplicateProfileError,
+  InvalidPassphraseError,
+  ProfileNotFoundError,
+  ProfileRequestError,
   ProfileService,
   SharedIndexMasterDeleteError,
   SharedIndexMasterIdentityChangeError,
@@ -35,6 +38,8 @@ function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: stri
 }
 
 const authenticatedSchema = createSchema;
+type AuthenticatedBody = z.infer<typeof authenticatedSchema>;
+type ProfileContext<T> = { req: Request; res: Response; data: T; profileId: number };
 const saveFtpSchema = createSchema.extend({ ftpConfig: ftpConfigSchema });
 const serverIdSchema = createSchema.extend({ serverId: z.number().int().positive() });
 const MAX_STREAM_FORMATTER_TEMPLATE_LENGTH = 50000;
@@ -102,6 +107,35 @@ export function profileRoutes(
   const isAdminBrowserUid = (browserUid: string) => service.isAdminBrowserUid(browserUid, config.adminBrowserUids);
   const enforceDeliveryModeFor = <T extends { streamDeliveryMode?: "proxy" | "direct" }>(browserUid: string, value: T): T =>
     config.proxyStreamsDisabled && !isAdminBrowserUid(browserUid) ? { ...value, streamDeliveryMode: "direct" } : value;
+  const withProfile = <T extends AuthenticatedBody>(
+    schema: z.ZodType<T>,
+    invalidMessage: string,
+    handler: (context: ProfileContext<T>) => unknown,
+    options: { recordCountry?: boolean } = {},
+  ): RequestHandler =>
+    async (req, res) => {
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: invalidMessage });
+      let profileId: number;
+      try {
+        ({ profileId } = await service.unlockProfile(
+          parsed.data.browserUid,
+          parsed.data.passphrase,
+          options.recordCountry ? countryCodeFromRequest(req) : null,
+        ));
+      } catch (error) {
+        if (error instanceof InvalidPassphraseError) return res.status(401).json({ error: "Invalid passphrase" });
+        throw error;
+      }
+      try {
+        await handler({ req, res, data: parsed.data, profileId });
+      } catch (error) {
+        if (res.headersSent) throw error;
+        if (error instanceof ProfileNotFoundError) return res.status(404).json({ error: "Profile or FTP server not found" });
+        if (error instanceof ProfileRequestError) return res.status(400).json({ error: error.message });
+        throw error;
+      }
+    };
 
   router.post("/profile", rateLimitProfiles, async (req, res) => {
     const parsed = createSchema.safeParse(req.body);
@@ -119,76 +153,65 @@ export function profileRoutes(
     }
   });
 
-  router.post("/profile/unlock", rateLimitProfiles, async (req, res) => {
-    const parsed = createSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid unlock request" });
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase, countryCodeFromRequest(req));
-      const issued = service.issueInstallToken(unlocked.profileId);
-      res.json({
-        ...unlocked,
-        ...urls(config.baseUrl, issued.installUrlToken),
-      });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
+  router.post(
+    "/profile/unlock",
+    rateLimitProfiles,
+    withProfile(
+      createSchema,
+      "Invalid unlock request",
+      ({ res, profileId }) => {
+        const issued = service.issueInstallToken(profileId);
+        res.json({
+          profileId,
+          ...urls(config.baseUrl, issued.installUrlToken),
+        });
+      },
+      { recordCountry: true },
+    ),
+  );
 
-  router.post("/profile/ftp/test", rateLimitProfiles, async (req, res) => {
-    const parsed = saveFtpSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid FTP settings request" });
+  router.post(
+    "/profile/ftp/test",
+    rateLimitProfiles,
+    withProfile(saveFtpSchema, "Invalid FTP settings request", async ({ res, data, profileId }) => {
+      const existingConfig = service.getFtpConfig(profileId);
+      const ftpConfig = ftpConfigWithStoredPassword(data.ftpConfig, existingConfig);
+      if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "FTP username and password are required to test" });
 
-    let unlocked: { profileId: number };
-    try {
-      unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-    } catch {
-      return res.status(401).json({ error: "Invalid passphrase" });
-    }
-
-    const existingConfig = service.getFtpConfig(unlocked.profileId);
-    const ftpConfig = ftpConfigWithStoredPassword(parsed.data.ftpConfig, existingConfig);
-    if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "FTP username and password are required to test" });
-
-    try {
-      const client = await ftpClientFactory(ftpConfig);
       try {
-        for (const root of ftpConfig.roots) {
-          await client.list(root);
+        const client = await ftpClientFactory(ftpConfig);
+        try {
+          for (const root of ftpConfig.roots) {
+            await client.list(root);
+          }
+        } finally {
+          await client.close();
         }
-      } finally {
-        await client.close();
+        const connectionStatus = { lastTestedAt: new Date().toISOString(), ok: true };
+        service.saveConnectionStatus(profileId, connectionStatus);
+        res.json({ ok: true, connectionStatus });
+      } catch (error) {
+        service.saveConnectionStatus(profileId, { lastTestedAt: new Date().toISOString(), ok: false });
+        res.status(400).json({ error: ftpErrorMessage(error, "Unable to connect to FTP server") });
       }
-      const connectionStatus = { lastTestedAt: new Date().toISOString(), ok: true };
-      service.saveConnectionStatus(unlocked.profileId, connectionStatus);
-      res.json({ ok: true, connectionStatus });
-    } catch (error) {
-      service.saveConnectionStatus(unlocked.profileId, { lastTestedAt: new Date().toISOString(), ok: false });
-      res.status(400).json({ error: ftpErrorMessage(error, "Unable to connect to FTP server") });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/ftp", rateLimitProfiles, async (req, res) => {
-    const parsed = saveFtpSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid FTP settings request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      const existingConfig = service.getFtpConfig(unlocked.profileId);
-      const ftpConfig = ftpConfigWithStoredPassword(parsed.data.ftpConfig, existingConfig);
-      service.saveFtpConfig(unlocked.profileId, ftpConfig);
+  router.post(
+    "/profile/ftp",
+    rateLimitProfiles,
+    withProfile(saveFtpSchema, "Invalid FTP settings request", ({ res, data, profileId }) => {
+      const existingConfig = service.getFtpConfig(profileId);
+      const ftpConfig = ftpConfigWithStoredPassword(data.ftpConfig, existingConfig);
+      service.saveFtpConfig(profileId, ftpConfig);
       res.json({ ok: true, draft: isDraftFtpConfig(ftpConfig) });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/ftp/load", async (req, res) => {
-    const parsed = authenticatedSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid FTP settings request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      const ftpConfig = service.getFtpConfig(unlocked.profileId);
+  router.post(
+    "/profile/ftp/load",
+    withProfile(authenticatedSchema, "Invalid FTP settings request", ({ res, profileId }) => {
+      const ftpConfig = service.getFtpConfig(profileId);
       if (!ftpConfig) return res.status(404).json({ error: "FTP settings are not configured" });
       res.json({
         ftpConfig: {
@@ -201,163 +224,141 @@ export function profileRoutes(
           allowInvalidCertificate: ftpConfig.allowInvalidCertificate,
           roots: ftpConfig.roots,
         },
-        indexStatus: service.getIndexStatus(unlocked.profileId),
-        scanStatus: scanQueue.getProfileScanStatus(unlocked.profileId),
-        scanSchedule: service.getScanSchedule(unlocked.profileId),
-        connectionStatus: service.getConnectionStatus(unlocked.profileId),
+        indexStatus: service.getIndexStatus(profileId),
+        scanStatus: scanQueue.getProfileScanStatus(profileId),
+        scanSchedule: service.getScanSchedule(profileId),
+        connectionStatus: service.getConnectionStatus(profileId),
       });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/servers/load", async (req, res) => {
-    const parsed = authenticatedSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid server load request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
+  router.post(
+    "/profile/servers/load",
+    withProfile(authenticatedSchema, "Invalid server load request", ({ res, profileId }) => {
       res.json({
-        customization: service.getAddonCustomization(unlocked.profileId),
-        servers: serverPayloads(service, scanQueue, unlocked.profileId),
-        globalStats: globalStats(service, scanQueue, unlocked.profileId),
+        customization: service.getAddonCustomization(profileId),
+        servers: serverPayloads(service, scanQueue, profileId),
+        globalStats: globalStats(service, scanQueue, profileId),
       });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/servers", rateLimitProfiles, async (req, res) => {
-    const parsed = authenticatedSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid server create request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      if (config.maxFtpServersPerProfile > 0 && !isAdminBrowserUid(parsed.data.browserUid)) {
-        const existing = service.listFtpServers(unlocked.profileId).length;
+  router.post(
+    "/profile/servers",
+    rateLimitProfiles,
+    withProfile(authenticatedSchema, "Invalid server create request", ({ res, data, profileId }) => {
+      if (config.maxFtpServersPerProfile > 0 && !isAdminBrowserUid(data.browserUid)) {
+        const existing = service.listFtpServers(profileId).length;
         if (existing >= config.maxFtpServersPerProfile) {
           return res.status(400).json({
             error: `This server allows at most ${config.maxFtpServersPerProfile} FTP ${config.maxFtpServersPerProfile === 1 ? "server" : "servers"} per profile.`,
           });
         }
       }
-      const server = service.createFtpServer(unlocked.profileId);
+      const server = service.createFtpServer(profileId);
       res.status(201).json({
         server: serverPayload(service, scanQueue, server),
-        globalStats: globalStats(service, scanQueue, unlocked.profileId),
+        globalStats: globalStats(service, scanQueue, profileId),
       });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/servers/save", rateLimitProfiles, async (req, res) => {
-    const parsed = saveServerSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid server save request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      const existingConfig = service.getFtpServerConfig(unlocked.profileId, parsed.data.serverId);
-      const ftpConfig = ftpConfigWithStoredPassword(parsed.data.ftpConfig, existingConfig);
-      const server = service.saveFtpServer(unlocked.profileId, parsed.data.serverId, {
-        name: parsed.data.name,
-        ftpConfig,
-        customization: enforceDeliveryModeFor(parsed.data.browserUid, parsed.data.customization),
-        sharedIndexKey: parsed.data.sharedIndexKey,
-        unlinkSharedIndex: parsed.data.unlinkSharedIndex,
-      });
-      if (server.sharedIndex) scanQueue.cancelServerScan(unlocked.profileId, server.id);
+  router.post(
+    "/profile/servers/save",
+    rateLimitProfiles,
+    withProfile(saveServerSchema, "Invalid server save request", ({ res, data, profileId }) => {
+      const existingConfig = service.getFtpServerConfig(profileId, data.serverId);
+      const ftpConfig = ftpConfigWithStoredPassword(data.ftpConfig, existingConfig);
+      let server: FtpServer;
+      try {
+        server = service.saveFtpServer(profileId, data.serverId, {
+          name: data.name,
+          ftpConfig,
+          customization: enforceDeliveryModeFor(data.browserUid, data.customization),
+          sharedIndexKey: data.sharedIndexKey,
+          unlinkSharedIndex: data.unlinkSharedIndex,
+        });
+      } catch (error) {
+        if (error instanceof SharedIndexUnlinkRequiredError) {
+          return res.status(409).json({
+            error: error.message,
+            requiresSharedIndexUnlink: true,
+            sharedIndexName: error.sharedIndexName,
+          });
+        }
+        if (error instanceof SharedIndexMasterIdentityChangeError) {
+          return res.status(409).json({
+            error: error.message,
+            invalidatesSharedIndex: true,
+            sharedIndexName: error.sharedIndexName,
+          });
+        }
+        throw error;
+      }
+      if (server.sharedIndex) scanQueue.cancelServerScan(profileId, server.id);
       res.json({
         server: serverPayload(service, scanQueue, server),
-        globalStats: globalStats(service, scanQueue, unlocked.profileId),
+        globalStats: globalStats(service, scanQueue, profileId),
       });
-    } catch (error) {
-      if (error instanceof SharedIndexUnlinkRequiredError) {
-        return res.status(409).json({
-          error: error.message,
-          requiresSharedIndexUnlink: true,
-          sharedIndexName: error.sharedIndexName,
-        });
-      }
-      if (error instanceof SharedIndexMasterIdentityChangeError) {
-        return res.status(409).json({
-          error: error.message,
-          invalidatesSharedIndex: true,
-          sharedIndexName: error.sharedIndexName,
-        });
-      }
-      res.status(error instanceof Error && error.message.includes("FTP password") ? 400 : 401).json({
-        error: error instanceof Error ? error.message : "Invalid passphrase",
-      });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/servers/delete", rateLimitProfiles, async (req, res) => {
-    const parsed = serverIdSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid server delete request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      service.deleteFtpServer(unlocked.profileId, parsed.data.serverId);
-      res.json({
-        servers: serverPayloads(service, scanQueue, unlocked.profileId),
-        globalStats: globalStats(service, scanQueue, unlocked.profileId),
-      });
-    } catch (error) {
-      if (error instanceof SharedIndexMasterDeleteError) {
-        return res.status(409).json({
-          error: error.message,
-          invalidatesSharedIndex: true,
-          sharedIndexName: error.sharedIndexName,
-        });
-      }
-      res.status(error instanceof Error && error.message.includes("At least one") ? 400 : 401).json({
-        error: error instanceof Error ? error.message : "Invalid passphrase",
-      });
-    }
-  });
-
-  router.post("/profile/servers/test", rateLimitProfiles, async (req, res) => {
-    const parsed = serverIdSchema.extend({ ftpConfig: ftpConfigSchema }).safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid server test request" });
-
-    let unlocked: { profileId: number };
-    try {
-      unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-    } catch {
-      return res.status(401).json({ error: "Invalid passphrase" });
-    }
-
-    const existingConfig = service.getFtpServerConfig(unlocked.profileId, parsed.data.serverId);
-    const ftpConfig = ftpConfigWithStoredPassword(parsed.data.ftpConfig, existingConfig);
-    if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "FTP username and password are required to test" });
-
-    try {
-      const client = await ftpClientFactory(ftpConfig);
+  router.post(
+    "/profile/servers/delete",
+    rateLimitProfiles,
+    withProfile(serverIdSchema, "Invalid server delete request", ({ res, data, profileId }) => {
       try {
-        for (const root of ftpConfig.roots) await client.list(root);
-      } finally {
-        await client.close();
+        service.deleteFtpServer(profileId, data.serverId);
+      } catch (error) {
+        if (error instanceof SharedIndexMasterDeleteError) {
+          return res.status(409).json({
+            error: error.message,
+            invalidatesSharedIndex: true,
+            sharedIndexName: error.sharedIndexName,
+          });
+        }
+        throw error;
       }
-      const connectionStatus = { lastTestedAt: new Date().toISOString(), ok: true };
-      service.saveFtpServerConnectionStatus(unlocked.profileId, parsed.data.serverId, connectionStatus);
-      res.json({ ok: true, connectionStatus });
-    } catch (error) {
-      service.saveFtpServerConnectionStatus(unlocked.profileId, parsed.data.serverId, {
-        lastTestedAt: new Date().toISOString(),
-        ok: false,
+      res.json({
+        servers: serverPayloads(service, scanQueue, profileId),
+        globalStats: globalStats(service, scanQueue, profileId),
       });
-      res.status(400).json({ error: ftpErrorMessage(error, "Unable to connect to FTP server") });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/settings/export", async (req, res) => {
-    const parsed = authenticatedSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid export request" });
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      const customization = service.getAddonCustomization(unlocked.profileId);
-      const servers = service.listFtpServers(unlocked.profileId).map((server) => ({
+  router.post(
+    "/profile/servers/test",
+    rateLimitProfiles,
+    withProfile(serverIdSchema.extend({ ftpConfig: ftpConfigSchema }), "Invalid server test request", async ({ res, data, profileId }) => {
+      const existingConfig = service.getFtpServerConfig(profileId, data.serverId);
+      const ftpConfig = ftpConfigWithStoredPassword(data.ftpConfig, existingConfig);
+      if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "FTP username and password are required to test" });
+
+      try {
+        const client = await ftpClientFactory(ftpConfig);
+        try {
+          for (const root of ftpConfig.roots) await client.list(root);
+        } finally {
+          await client.close();
+        }
+        const connectionStatus = { lastTestedAt: new Date().toISOString(), ok: true };
+        service.saveFtpServerConnectionStatus(profileId, data.serverId, connectionStatus);
+        res.json({ ok: true, connectionStatus });
+      } catch (error) {
+        service.saveFtpServerConnectionStatus(profileId, data.serverId, {
+          lastTestedAt: new Date().toISOString(),
+          ok: false,
+        });
+        res.status(400).json({ error: ftpErrorMessage(error, "Unable to connect to FTP server") });
+      }
+    }),
+  );
+
+  router.post(
+    "/profile/settings/export",
+    withProfile(authenticatedSchema, "Invalid export request", ({ res, profileId }) => {
+      const customization = service.getAddonCustomization(profileId);
+      const servers = service.listFtpServers(profileId).map((server) => ({
         id: server.id,
         name: server.name,
         ftpConfig: server.ftpConfig,
@@ -365,151 +366,121 @@ export function profileRoutes(
         scanSchedule: server.scanSchedule,
       }));
       res.json({ customization, servers });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/delete", rateLimitProfiles, async (req, res) => {
-    const parsed = authenticatedSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid delete request" });
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      service.deleteProfile(unlocked.profileId);
+  router.post(
+    "/profile/delete",
+    rateLimitProfiles,
+    withProfile(authenticatedSchema, "Invalid delete request", ({ res, profileId }) => {
+      service.deleteProfile(profileId);
       res.json({ ok: true });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/customization/load", async (req, res) => {
-    const parsed = authenticatedSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid customization request" });
+  router.post(
+    "/profile/customization/load",
+    withProfile(authenticatedSchema, "Invalid customization request", ({ res, profileId }) => {
+      res.json({ customization: service.getAddonCustomization(profileId) });
+    }),
+  );
 
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      res.json({ customization: service.getAddonCustomization(unlocked.profileId) });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
-
-  router.post("/profile/customization", rateLimitProfiles, async (req, res) => {
-    const parsed = saveCustomizationSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid customization request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      service.saveAddonCustomization(unlocked.profileId, enforceDeliveryModeFor(parsed.data.browserUid, parsed.data.customization));
+  router.post(
+    "/profile/customization",
+    rateLimitProfiles,
+    withProfile(saveCustomizationSchema, "Invalid customization request", ({ res, data, profileId }) => {
+      service.saveAddonCustomization(profileId, enforceDeliveryModeFor(data.browserUid, data.customization));
       res.json({ ok: true });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/index/rescan", rateLimitProfiles, async (req, res) => {
-    const parsed = authenticatedSchema
-      .extend({ serverId: z.number().int().positive().optional(), all: z.boolean().optional(), force: z.boolean().optional() })
-      .safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid rescan request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      const scanOptions = parsed.data.force ? { force: true } : undefined;
-      if (parsed.data.all) {
-        const servers = service
-          .listFtpServers(unlocked.profileId)
-          .filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig) && (!server.sharedIndex || isSharedIndexMaster(server)));
-        if (!servers.length) return res.status(400).json({ error: "No FTP servers can be rescanned from this profile." });
-        const scanStatuses = servers.map((server) =>
-          server.sharedIndex
+  router.post(
+    "/profile/index/rescan",
+    rateLimitProfiles,
+    withProfile(
+      authenticatedSchema.extend({ serverId: z.number().int().positive().optional(), all: z.boolean().optional(), force: z.boolean().optional() }),
+      "Invalid rescan request",
+      ({ res, data, profileId }) => {
+        const scanOptions = data.force ? { force: true } : undefined;
+        if (data.all) {
+          const servers = service
+            .listFtpServers(profileId)
+            .filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig) && (!server.sharedIndex || isSharedIndexMaster(server)));
+          if (!servers.length) return res.status(400).json({ error: "No FTP servers can be rescanned from this profile." });
+          const scanStatuses = servers.map((server) =>
+            server.sharedIndex
+              ? scanQueue.enqueueSharedIndexScan(server.sharedIndex.id, "manual", scanOptions)
+              : scanQueue.enqueueProfileScan(profileId, "manual", server.id, scanOptions),
+          );
+          return res.json({
+            scanStatus: scanStatuses[0],
+            scanStatuses,
+            servers: serverPayloads(service, scanQueue, profileId),
+            globalStats: globalStats(service, scanQueue, profileId),
+          });
+        }
+        const serverId = data.serverId ?? service.defaultFtpServerId(profileId);
+        const ftpConfig = service.getFtpServerConfig(profileId, serverId);
+        if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
+        if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "Fill in username and password before scanning this server." });
+        const server = service.getFtpServer(profileId, serverId);
+        if (server.sharedIndex && !isSharedIndexMaster(server)) {
+          return res.status(400).json({ error: "Linked servers are scanned through their shared index group." });
+        }
+        res.json({
+          scanStatus: server.sharedIndex
             ? scanQueue.enqueueSharedIndexScan(server.sharedIndex.id, "manual", scanOptions)
-            : scanQueue.enqueueProfileScan(unlocked.profileId, "manual", server.id, scanOptions),
-        );
-        return res.json({
-          scanStatus: scanStatuses[0],
-          scanStatuses,
-          servers: serverPayloads(service, scanQueue, unlocked.profileId),
-          globalStats: globalStats(service, scanQueue, unlocked.profileId),
+            : scanQueue.enqueueProfileScan(profileId, "manual", serverId, scanOptions),
         });
-      }
-      const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
-      const ftpConfig = service.getFtpServerConfig(unlocked.profileId, serverId);
-      if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
-      if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "Fill in username and password before scanning this server." });
-      const server = service.getFtpServer(unlocked.profileId, serverId);
-      if (server.sharedIndex && !isSharedIndexMaster(server)) {
-        return res.status(400).json({ error: "Linked servers are scanned through their shared index group." });
-      }
+      },
+    ),
+  );
+
+  router.post(
+    "/profile/index/cancel",
+    rateLimitProfiles,
+    withProfile(authenticatedSchema.extend({ serverId: z.number().int().positive().optional() }), "Invalid scan cancel request", ({ res, data, profileId }) => {
+      const serverId = data.serverId ?? service.defaultFtpServerId(profileId);
+      const server = service.getFtpServer(profileId, serverId);
+      res.json({ scanStatus: server.sharedIndex ? scanQueue.cancelSharedIndexScan(server.sharedIndex.id) : scanQueue.cancelServerScan(profileId, serverId) });
+    }),
+  );
+
+  router.post(
+    "/profile/index/status",
+    withProfile(authenticatedSchema, "Invalid scan status request", ({ res, profileId }) => {
       res.json({
-        scanStatus: server.sharedIndex
-          ? scanQueue.enqueueSharedIndexScan(server.sharedIndex.id, "manual", scanOptions)
-          : scanQueue.enqueueProfileScan(unlocked.profileId, "manual", serverId, scanOptions),
+        indexStatus: service.getIndexStatus(profileId),
+        scanStatus: scanQueue.getProfileScanStatus(profileId),
+        scanSchedule: service.getScanSchedule(profileId),
+        servers: serverPayloads(service, scanQueue, profileId),
+        globalStats: globalStats(service, scanQueue, profileId),
       });
-    } catch (error) {
-      res.status(400).json({ error: ftpErrorMessage(error, "Unable to refresh FTP index") });
-    }
-  });
+    }),
+  );
 
-  router.post("/profile/index/cancel", rateLimitProfiles, async (req, res) => {
-    const parsed = authenticatedSchema.extend({ serverId: z.number().int().positive().optional() }).safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid scan cancel request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
-      const server = service.getFtpServer(unlocked.profileId, serverId);
-      res.json({ scanStatus: server.sharedIndex ? scanQueue.cancelSharedIndexScan(server.sharedIndex.id) : scanQueue.cancelServerScan(unlocked.profileId, serverId) });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
-
-  router.post("/profile/index/status", async (req, res) => {
-    const parsed = authenticatedSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid scan status request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      res.json({
-        indexStatus: service.getIndexStatus(unlocked.profileId),
-        scanStatus: scanQueue.getProfileScanStatus(unlocked.profileId),
-        scanSchedule: service.getScanSchedule(unlocked.profileId),
-        servers: serverPayloads(service, scanQueue, unlocked.profileId),
-        globalStats: globalStats(service, scanQueue, unlocked.profileId),
-      });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
-
-  router.post("/profile/index/schedule", rateLimitProfiles, async (req, res) => {
-    const parsed = saveScanScheduleSchema.extend({ serverId: z.number().int().positive().optional() }).safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: "Invalid scan schedule request" });
-
-    try {
-      const unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase);
-      if (parsed.data.intervalMinutes > 0 && parsed.data.intervalMinutes < config.scanMinRescanIntervalMinutes) {
+  router.post(
+    "/profile/index/schedule",
+    rateLimitProfiles,
+    withProfile(saveScanScheduleSchema.extend({ serverId: z.number().int().positive().optional() }), "Invalid scan schedule request", ({ res, data, profileId }) => {
+      if (data.intervalMinutes > 0 && data.intervalMinutes < config.scanMinRescanIntervalMinutes) {
         return res.status(400).json({
           error: `Rescan frequency must be at least ${config.scanMinRescanIntervalMinutes} minutes.`,
         });
       }
-      const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
-      const server = service.getFtpServer(unlocked.profileId, serverId);
+      const serverId = data.serverId ?? service.defaultFtpServerId(profileId);
+      const server = service.getFtpServer(profileId, serverId);
       if (server.sharedIndex && !isSharedIndexMaster(server)) {
         return res.status(400).json({ error: "Shared index scans are scheduled from the master index." });
       }
-      const nextScheduledScanAt =
-        parsed.data.intervalMinutes > 0 ? new Date(Date.now() + parsed.data.intervalMinutes * 60_000).toISOString() : null;
-      service.saveFtpServerScanSchedule(unlocked.profileId, serverId, {
-        intervalMinutes: parsed.data.intervalMinutes,
+      const nextScheduledScanAt = data.intervalMinutes > 0 ? new Date(Date.now() + data.intervalMinutes * 60_000).toISOString() : null;
+      service.saveFtpServerScanSchedule(profileId, serverId, {
+        intervalMinutes: data.intervalMinutes,
         nextScheduledScanAt,
       });
-      res.json({ scanSchedule: service.getFtpServerScanSchedule(unlocked.profileId, serverId) });
-    } catch {
-      res.status(401).json({ error: "Invalid passphrase" });
-    }
-  });
+      res.json({ scanSchedule: service.getFtpServerScanSchedule(profileId, serverId) });
+    }),
+  );
 
   return router;
 }

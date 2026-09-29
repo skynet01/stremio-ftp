@@ -11,6 +11,7 @@ import { openDatabase } from "./db/database.js";
 import { createBasicFtpClientFactory } from "./ftp/basicFtpClient.js";
 import { limitFtpClientFactoryByKey } from "./ftp/ftpConnectionLimiter.js";
 import type { FtpClientFactory } from "./ftp/ftpTypes.js";
+import { redactSecrets } from "./logging/redact.js";
 import { MediaRepository } from "./media/mediaRepository.js";
 import { ProfileService } from "./profiles/profileService.js";
 import { profileRoutes } from "./profiles/profileRoutes.js";
@@ -111,7 +112,38 @@ export function createApp(
     });
   }
 
+  app.use(jsonErrorHandler());
+
   return app;
+}
+
+function jsonErrorHandler(): express.ErrorRequestHandler {
+  return (error, req, res, next) => {
+    if (res.headersSent) return next(error);
+    const status = httpErrorStatus(error);
+    if (status >= 500) {
+      const route = `${req.baseUrl}${typeof req.route?.path === "string" ? req.route.path : ""}` || "unmatched route";
+      console.error(`[http] ${req.method} ${route} failed:`, loggableError(error));
+    }
+    res.status(status).json({ error: publicErrorMessage(status) });
+  };
+}
+
+function publicErrorMessage(status: number) {
+  if (status >= 500) return "Internal server error";
+  if (status === 400) return "Invalid request body";
+  if (status === 413) return "Request body too large";
+  return "Request failed";
+}
+
+function httpErrorStatus(error: unknown) {
+  const candidate = error as { status?: unknown; statusCode?: unknown } | null | undefined;
+  const status = candidate?.status ?? candidate?.statusCode;
+  return typeof status === "number" && status >= 400 && status < 600 ? status : 500;
+}
+
+function loggableError(error: unknown) {
+  return redactSecrets(error instanceof Error ? error.stack || error.message : String(error));
 }
 
 function stremioCors(): express.RequestHandler {

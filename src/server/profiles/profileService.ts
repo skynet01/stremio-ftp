@@ -277,6 +277,20 @@ export class ProfileNotFoundError extends Error {
   }
 }
 
+export class InvalidPassphraseError extends Error {
+  constructor() {
+    super("Invalid passphrase");
+    this.name = "InvalidPassphraseError";
+  }
+}
+
+export class ProfileRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProfileRequestError";
+  }
+}
+
 export class ProfileService {
   constructor(
     private readonly db: Database.Database,
@@ -314,7 +328,7 @@ export class ProfileService {
     const row = this.db.prepare("select id, passphrase_verifier from profiles where browser_uid = ?").get(browserUid) as
       | { id: number; passphrase_verifier: string }
       | undefined;
-    if (!row || !(await verifyPassphrase(passphrase, row.passphrase_verifier))) throw new Error("Invalid passphrase");
+    if (!row || !(await verifyPassphrase(passphrase, row.passphrase_verifier))) throw new InvalidPassphraseError();
     const now = new Date().toISOString();
     if (countryCode) {
       this.db.prepare("update profiles set last_unlocked_at = ?, last_country_code = ?, updated_at = ? where id = ?").run(
@@ -725,7 +739,7 @@ export class ProfileService {
     input: { name: string; keyHint?: string; autoLinkImports?: boolean; enabled?: boolean },
   ): { group: SharedIndexGroup; sharedIndexKey: string } {
     const server = this.getFtpServer(profileId, serverId);
-    if (!server.ftpConfig) throw new Error("FTP settings are not configured");
+    if (!server.ftpConfig) throw new ProfileRequestError("FTP settings are not configured");
     const customization = server.customization;
     const now = new Date().toISOString();
     const sharedIndexKey = generateSharedIndexKey();
@@ -856,7 +870,7 @@ export class ProfileService {
       `,
       )
       .get(groupId) as { profile_id: number; id: number } | undefined;
-    if (!row) throw new Error("Set a master server before scheduling shared scans");
+    if (!row) throw new ProfileRequestError("Set a master server before scheduling shared scans");
     this.saveFtpServerScanSchedule(row.profile_id, row.id, schedule);
     return this.sharedIndexGroupScanSchedule(groupId);
   }
@@ -983,7 +997,7 @@ export class ProfileService {
   deleteDisabledSharedIndexGroup(groupId: number) {
     const group = this.getSharedIndexGroupIdentity(groupId);
     if (!group) throw new ProfileNotFoundError();
-    if (group.enabled) throw new Error("Disable the shared index group before deleting it");
+    if (group.enabled) throw new ProfileRequestError("Disable the shared index group before deleting it");
     const deleted = this.db.prepare("delete from shared_index_groups where id = ? and enabled = 0").run(groupId).changes;
     if (deleted === 0) throw new ProfileNotFoundError();
     return true;
@@ -993,7 +1007,7 @@ export class ProfileService {
     const group = this.getSharedIndexGroupIdentity(groupId);
     const server = this.getFtpServer(profileId, serverId);
     if (!group || !server.ftpConfig || !serverMatchesSharedIndexGroup(server.ftpConfig, group)) {
-      throw new Error("FTP server does not match shared index group");
+      throw new ProfileRequestError("FTP server does not match shared index group");
     }
     const existingSchedule = this.sharedIndexGroupScanSchedule(groupId);
     const result = this.db
@@ -1029,7 +1043,7 @@ export class ProfileService {
     const server = this.getFtpServer(profileId, serverId);
     const group = this.getSharedIndexGroupIdentity(groupId);
     if (!server.ftpConfig || !group || !serverMatchesSharedIndexGroup(server.ftpConfig, group)) {
-      throw new Error("FTP server does not match shared index group");
+      throw new ProfileRequestError("FTP server does not match shared index group");
     }
     const content = group.catalogContentTypes;
     const link = this.db.transaction(() => {
@@ -1083,7 +1097,7 @@ export class ProfileService {
     const server = this.getFtpServer(profileId, serverId);
     const group = this.getSharedIndexGroupIdentity(groupId);
     if (!server.ftpConfig || !group || !sharedIndexTransportMatches(server.ftpConfig, group)) {
-      throw new Error("FTP server does not match shared index group");
+      throw new ProfileRequestError("FTP server does not match shared index group");
     }
 
     this.saveFtpServerConfig(profileId, serverId, { ...server.ftpConfig, roots: canonicalRootPaths(group.rootPaths) }, false);
@@ -1154,13 +1168,13 @@ export class ProfileService {
   } {
     const group = this.getSharedIndexGroupIdentity(groupId);
     if (!group) throw new ProfileNotFoundError();
-    if (!group.masterProfileFtpServerId) throw new Error("Shared index group has no master server");
+    if (!group.masterProfileFtpServerId) throw new ProfileRequestError("Shared index group has no master server");
     const row = this.db
       .prepare("select profile_id, id from profile_ftp_servers where id = ?")
       .get(group.masterProfileFtpServerId) as { profile_id: number; id: number } | undefined;
-    if (!row) throw new Error("Shared index group has no valid master server");
+    if (!row) throw new ProfileRequestError("Shared index group has no valid master server");
     const ftpConfig = this.getFtpServerConfig(row.profile_id, row.id);
-    if (!ftpConfig) throw new Error("Shared index master FTP settings are not configured");
+    if (!ftpConfig) throw new ProfileRequestError("Shared index master FTP settings are not configured");
     return {
       group,
       profileId: row.profile_id,
@@ -1450,7 +1464,7 @@ export class ProfileService {
 
   deleteFtpServer(profileId: number, serverId: number) {
     const servers = this.listFtpServers(profileId);
-    if (servers.length <= 1) throw new Error("At least one FTP server is required");
+    if (servers.length <= 1) throw new ProfileRequestError("At least one FTP server is required");
     const server = servers.find((candidate) => candidate.id === serverId);
     if (server?.sharedIndex?.isMaster) throw new SharedIndexMasterDeleteError(server.sharedIndex.name);
     const result = this.db.prepare("delete from profile_ftp_servers where profile_id = ? and id = ?").run(profileId, serverId);

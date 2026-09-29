@@ -1,9 +1,10 @@
 import Database from "better-sqlite3";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
+import { ProfileService } from "../src/server/profiles/profileService";
 import { decryptJson, encryptJson } from "../src/server/security/crypto";
 
 function config(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -105,6 +106,10 @@ async function createAndSaveFtpServer(app: ReturnType<typeof createApp>, browser
 }
 
 describe("admin routes", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("requires setup token and admin profile credentials", async () => {
     const db = new Database(":memory:");
     migrate(db);
@@ -123,6 +128,35 @@ describe("admin routes", () => {
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "admin-uid", passphrase: "wrong-passphrase" })
       .expect(401);
+  });
+
+  it("returns JSON 500s for unexpected admin failures instead of auth or validation errors", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    await createProfile(app, "admin-uid");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const updateFailure = vi.spyOn(ProfileService.prototype, "updateSharedIndexGroup").mockImplementation(() => {
+      throw new Error("SQLITE_BUSY: database is locked");
+    });
+    const updated = await request(app)
+      .post("/api/admin/shared-index-groups/1/update")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", name: "Renamed" })
+      .expect(500);
+    expect(updated.body).toEqual({ error: "Internal server error" });
+    updateFailure.mockRestore();
+
+    const unlockFailure = vi.spyOn(ProfileService.prototype, "unlockProfile").mockRejectedValue(new Error("SQLITE_BUSY: database is locked"));
+    const listed = await request(app)
+      .post("/api/admin/profiles")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(500);
+    expect(listed.body).toEqual({ error: "Internal server error" });
+    unlockFailure.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("requires super admin env access instead of admin-enabled access for admin APIs", async () => {
