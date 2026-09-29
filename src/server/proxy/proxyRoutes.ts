@@ -222,7 +222,6 @@ async function streamProxyFile(deps: ProxyDeps, file: ProxyFile, req: Request, r
   };
   const markFinished = () => {
     streamFinished = true;
-    res.off("close", cleanup);
   };
 
   const finishTrackedStream = () => deps.streamTracker?.finish(streamId);
@@ -234,6 +233,10 @@ async function streamProxyFile(deps: ProxyDeps, file: ProxyFile, req: Request, r
     cleanup();
     finishTrackedStream();
     logProxyTiming(timing, streamFinished ? "close" : "client_closed");
+  });
+  stream.on("data", (chunk: Buffer | string) => {
+    timing.firstByteMs ??= elapsedMs(timing.startedAt);
+    timing.bytesFromFtp += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
   });
   stream.once("end", markFinished);
   stream.on("error", (error) => {

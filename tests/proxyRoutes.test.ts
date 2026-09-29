@@ -24,6 +24,32 @@ describe("proxy routes", () => {
     expect(responseBodyText(response)).toBe("2345");
   });
 
+  it("logs first-byte time and bytes streamed from FTP", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const router = createProxyRouter({
+        resolve: async () => ({
+          filename: "video.mkv",
+          sizeBytes: 10,
+          openReadStream: async ({ start, end }) => Readable.from([Buffer.from("0123456789").subarray(start, end + 1)]),
+        }),
+      });
+
+      const express = (await import("express")).default;
+      const app = express().use(router);
+
+      await request(app).get("/proxy/token/1").set("Range", "bytes=2-5").expect(206);
+      await waitFor(() => info.mock.calls.some(([label]) => label === "[proxy-timing]"));
+
+      const [, payload] = info.mock.calls.find(([label]) => label === "[proxy-timing]")!;
+      const timing = JSON.parse(payload as string);
+      expect(timing.bytesFromFtp).toBe(4);
+      expect(timing.firstByteMs).toEqual(expect.any(Number));
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   it("ignores range requests when the file size is unknown", async () => {
     const router = createProxyRouter({
       resolve: async () => ({
