@@ -5,7 +5,11 @@ import {
   MAX_STREAM_FORMATTER_TEMPLATE_LENGTH,
   renderStreamTemplate,
   stream3DType,
+  streamAudioChannels,
+  streamAudioTagList,
   streamAudioTags,
+  streamEncode,
+  streamVideoTagList,
   streamVideoTags,
 } from "../src/shared/streamFormatter";
 
@@ -95,6 +99,25 @@ describe("stream formatter", () => {
     expect(stream3DType("VR.Movie.180.Full-SBS.mp4")).toBe("180 Full SBS");
     expect(stream3DType("VR.Movie.VR360.Half-OU.mp4")).toBe("360 Half OU");
     expect(stream3DType("The.Matrix.1999.2160p.HEVC.mkv")).toBe("");
+  });
+
+  it("extracts video, encode, audio, channel, and 3D tags from filenames", () => {
+    const tags = (filename: string) => [
+      streamVideoTagList(filename),
+      streamEncode(filename),
+      streamAudioTagList(filename),
+      streamAudioChannels(filename),
+      stream3DType(filename),
+    ];
+
+    expect(tags("The.Matrix.1999.2160p.UHD.BluRay.DV.HDR10.HEVC.TrueHD.Atmos.7.1-GRP.mkv")).toEqual([["DV", "HDR10"], "HEVC", ["Atmos", "TrueHD"], ["7.1"], ""]);
+    expect(tags("Movie.2020.IMAX.2160p.WEB-DL.DoVi.HDR10+.DDP5.1.Atmos.H.265.mkv")).toEqual([["IMAX", "DV", "HDR10"], "HEVC", ["Atmos"], [], ""]);
+    expect(tags("Show.S01E02.1080p.WEB.x264.AAC.2.0.mkv")).toEqual([[], "AVC", ["AAC"], ["2.0"], ""]);
+    expect(tags("Film.2019.1080p.BluRay.Remux.AVC.DTS-HD.MA.5.1.mkv")).toEqual([["Remux"], "AVC", ["DTS-HD MA", "DTS"], ["5.1"], ""]);
+    expect(tags("Film.2019.2160p.AV1.DTS-X.FLAC.AC3.mkv")).toEqual([[], "AV1", ["DTS-X", "DTS", "DD", "FLAC"], [], ""]);
+    expect(tags("VR.Movie.180.VR-SBS.mp4")).toEqual([[], "", [], [], "180 VR SBS"]);
+    expect(tags("VR.Movie.VR.360.OU.mp4")).toEqual([[], "", [], [], "360 OU"]);
+    expect(tags("3D.Movie.2012.1080p.Half.Over.Under.mkv")).toEqual([[], "", [], [], "Half OU"]);
   });
 
   it("renders 3D type formatter aliases", () => {

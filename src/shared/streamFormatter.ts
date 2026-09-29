@@ -42,6 +42,9 @@ type ConditionalNode = { condition: string[]; whenTrue: TemplateNode[]; whenFals
 const REMOVE_LINE = "\u0000REMOVE_LINE\u0000";
 const CONDITIONALS = new Set(["istrue", "isfalse", "exists"]);
 const OPERATORS = new Set(["and", "or", "xor"]);
+const BYTE_MODIFIERS = new Set(["bytes", "bytes10", "bytes2", "rbytes", "rbytes10", "rbytes2"]);
+const SHORT_BYTE_MODIFIERS = new Set(["sbytes", "sbytes10", "sbytes2"]);
+const BITRATE_MODIFIERS = new Set(["bitrate", "rbitrate", "sbitrate"]);
 const WHITESPACE = /\s/;
 const COMPILED_TEMPLATE_CACHE_LIMIT = 128;
 const compiledTemplates = new Map<string, TemplateNode[]>();
@@ -90,15 +93,17 @@ export function streamExtension(filename: string) {
   return match ? match[1] : "";
 }
 
+const VIDEO_TAG_PATTERNS: Array<[RegExp, string]> = [
+  [/\bimax\b/i, "IMAX"],
+  [/\b(?:dv|dovi|dolby[ ._-]?vision)\b/i, "DV"],
+  [/\bhdr10\+\b/i, "HDR10+"],
+  [/\bhdr10\b/i, "HDR10"],
+  [/\bhdr\b/i, "HDR"],
+  [/\bremux\b/i, "Remux"],
+];
+
 export function streamVideoTagList(filename: string) {
-  return tagList([
-    [/\bimax\b/i, "IMAX"],
-    [/\b(?:dv|dovi|dolby[ ._-]?vision)\b/i, "DV"],
-    [/\bhdr10\+\b/i, "HDR10+"],
-    [/\bhdr10\b/i, "HDR10"],
-    [/\bhdr\b/i, "HDR"],
-    [/\bremux\b/i, "Remux"],
-  ], filename);
+  return tagList(VIDEO_TAG_PATTERNS, filename);
 }
 
 export function streamVideoTags(filename: string) {
@@ -107,85 +112,96 @@ export function streamVideoTags(filename: string) {
   return [...visualTags.filter((tag) => tag !== "Remux"), streamEncode(filename), ...remux].filter(Boolean).join(" ");
 }
 
+const THREE_D_PROJECTION_PATTERNS: Array<[RegExp, string]> = [
+  [tokenPattern(["vr"], ["180"]), "180"],
+  [tokenPattern(["180"], ["vr"]), "180"],
+  [tokenPattern(["180"]), "180"],
+  [tokenPattern(["vr"], ["360"]), "360"],
+  [tokenPattern(["360"], ["vr"]), "360"],
+  [tokenPattern(["360"]), "360"],
+];
+
+const THREE_D_LAYOUT_PATTERNS: Array<[RegExp, string]> = [
+  [tokenPattern(["vr"], ["sbs"]), "VR SBS"],
+  [tokenPattern(["full", "f"], ["sbs"]), "Full SBS"],
+  [tokenPattern(["fsbs", "fullsbs"]), "Full SBS"],
+  [/(^|[^a-z0-9])(?:full|f)[\s._-]*(?:side[\s._-]*(?:by[\s._-]*)?side)(?=$|[^a-z0-9])/i, "Full SBS"],
+  [tokenPattern(["half", "h"], ["sbs"]), "Half SBS"],
+  [tokenPattern(["hsbs", "halfsbs"]), "Half SBS"],
+  [/(^|[^a-z0-9])(?:half|h)[\s._-]*(?:side[\s._-]*(?:by[\s._-]*)?side)(?=$|[^a-z0-9])/i, "Half SBS"],
+  [/(^|[^a-z0-9])(?:side[\s._-]*(?:by[\s._-]*)?side)(?=$|[^a-z0-9])/i, "SBS"],
+  [tokenPattern(["sbs"]), "SBS"],
+  [tokenPattern(["full", "f"], ["ou"]), "Full OU"],
+  [tokenPattern(["fou", "fullou"]), "Full OU"],
+  [/(^|[^a-z0-9])(?:full|f)[\s._-]*(?:top[\s._-]*(?:and[\s._-]*)?bottom|over[\s._-]*under|tab)(?=$|[^a-z0-9])/i, "Full OU"],
+  [tokenPattern(["half", "h"], ["ou"]), "Half OU"],
+  [tokenPattern(["hou", "halfou"]), "Half OU"],
+  [/(^|[^a-z0-9])(?:half|h)[\s._-]*(?:top[\s._-]*(?:and[\s._-]*)?bottom|over[\s._-]*under|tab)(?=$|[^a-z0-9])/i, "Half OU"],
+  [/(^|[^a-z0-9])(?:top[\s._-]*(?:and[\s._-]*)?bottom|over[\s._-]*under|tab)(?=$|[^a-z0-9])/i, "OU"],
+  [tokenPattern(["ou"]), "OU"],
+  [tokenPattern(["mvc"]), "MVC"],
+  [tokenPattern(["3d"]), "3D"],
+];
+
 export function stream3DType(filename: string) {
-  const projection = tagList([
-    [tokenPattern(["vr"], ["180"]), "180"],
-    [tokenPattern(["180"], ["vr"]), "180"],
-    [tokenPattern(["180"]), "180"],
-    [tokenPattern(["vr"], ["360"]), "360"],
-    [tokenPattern(["360"], ["vr"]), "360"],
-    [tokenPattern(["360"]), "360"],
-  ], filename)[0] ?? "";
-  const layout = tagList([
-    [tokenPattern(["vr"], ["sbs"]), "VR SBS"],
-    [tokenPattern(["full", "f"], ["sbs"]), "Full SBS"],
-    [tokenPattern(["fsbs", "fullsbs"]), "Full SBS"],
-    [/(^|[^a-z0-9])(?:full|f)[\s._-]*(?:side[\s._-]*(?:by[\s._-]*)?side)(?=$|[^a-z0-9])/i, "Full SBS"],
-    [tokenPattern(["half", "h"], ["sbs"]), "Half SBS"],
-    [tokenPattern(["hsbs", "halfsbs"]), "Half SBS"],
-    [/(^|[^a-z0-9])(?:half|h)[\s._-]*(?:side[\s._-]*(?:by[\s._-]*)?side)(?=$|[^a-z0-9])/i, "Half SBS"],
-    [/(^|[^a-z0-9])(?:side[\s._-]*(?:by[\s._-]*)?side)(?=$|[^a-z0-9])/i, "SBS"],
-    [tokenPattern(["sbs"]), "SBS"],
-    [tokenPattern(["full", "f"], ["ou"]), "Full OU"],
-    [tokenPattern(["fou", "fullou"]), "Full OU"],
-    [/(^|[^a-z0-9])(?:full|f)[\s._-]*(?:top[\s._-]*(?:and[\s._-]*)?bottom|over[\s._-]*under|tab)(?=$|[^a-z0-9])/i, "Full OU"],
-    [tokenPattern(["half", "h"], ["ou"]), "Half OU"],
-    [tokenPattern(["hou", "halfou"]), "Half OU"],
-    [/(^|[^a-z0-9])(?:half|h)[\s._-]*(?:top[\s._-]*(?:and[\s._-]*)?bottom|over[\s._-]*under|tab)(?=$|[^a-z0-9])/i, "Half OU"],
-    [/(^|[^a-z0-9])(?:top[\s._-]*(?:and[\s._-]*)?bottom|over[\s._-]*under|tab)(?=$|[^a-z0-9])/i, "OU"],
-    [tokenPattern(["ou"]), "OU"],
-    [tokenPattern(["mvc"]), "MVC"],
-    [tokenPattern(["3d"]), "3D"],
-  ], filename)[0] ?? "";
+  const projection = tagList(THREE_D_PROJECTION_PATTERNS, filename)[0] ?? "";
+  const layout = tagList(THREE_D_LAYOUT_PATTERNS, filename)[0] ?? "";
   return [projection, layout].filter(Boolean).join(" ");
 }
 
+const ENCODE_PATTERNS: Array<[RegExp, string]> = [
+  [/\b(?:h[ ._-]?265|x265|hevc)\b/i, "HEVC"],
+  [/\b(?:h[ ._-]?264|x264|avc)\b/i, "AVC"],
+  [/\bav1\b/i, "AV1"],
+];
+
 export function streamEncode(filename: string) {
-  return tagList([
-    [/\b(?:h[ ._-]?265|x265|hevc)\b/i, "HEVC"],
-    [/\b(?:h[ ._-]?264|x264|avc)\b/i, "AVC"],
-    [/\bav1\b/i, "AV1"],
-  ], filename)[0] ?? "";
+  return tagList(ENCODE_PATTERNS, filename)[0] ?? "";
 }
 
+const AUDIO_TAG_PATTERNS: Array<[RegExp, string]> = [
+  [/\batmos\b/i, "Atmos"],
+  [/\btruehd\b/i, "TrueHD"],
+  [/\bdts[ ._-]?x\b/i, "DTS-X"],
+  [/\bdts[ ._-]?hd(?:[ ._-]?ma)?\b/i, "DTS-HD MA"],
+  [/\bdts\b/i, "DTS"],
+  [/\b(?:e[ ._-]?ac[ ._-]?3|ddp|dd\+)\b/i, "DD+"],
+  [/\bac[ ._-]?3\b/i, "DD"],
+  [/\baac\b/i, "AAC"],
+  [/\bflac\b/i, "FLAC"],
+];
+
 export function streamAudioTagList(filename: string) {
-  return tagList([
-    [/\batmos\b/i, "Atmos"],
-    [/\btruehd\b/i, "TrueHD"],
-    [/\bdts[ ._-]?x\b/i, "DTS-X"],
-    [/\bdts[ ._-]?hd(?:[ ._-]?ma)?\b/i, "DTS-HD MA"],
-    [/\bdts\b/i, "DTS"],
-    [/\b(?:e[ ._-]?ac[ ._-]?3|ddp|dd\+)\b/i, "DD+"],
-    [/\bac[ ._-]?3\b/i, "DD"],
-    [/\baac\b/i, "AAC"],
-    [/\bflac\b/i, "FLAC"],
-  ], filename);
+  return tagList(AUDIO_TAG_PATTERNS, filename);
 }
 
 export function streamAudioTags(filename: string) {
   return [...streamAudioTagList(filename), ...streamAudioChannels(filename)].join(" ");
 }
 
+const AUDIO_CHANNEL_PATTERNS: Array<[RegExp, string]> = [
+  [/\b7\.1\b/i, "7.1"],
+  [/\b5\.1\b/i, "5.1"],
+  [/\b2\.0\b/i, "2.0"],
+];
+
 export function streamAudioChannels(filename: string) {
-  return tagList([
-    [/\b7\.1\b/i, "7.1"],
-    [/\b5\.1\b/i, "5.1"],
-    [/\b2\.0\b/i, "2.0"],
-  ], filename);
+  return tagList(AUDIO_CHANNEL_PATTERNS, filename);
 }
+
+const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];
 
 export function formatStreamBytes(bytes: number | null | undefined, concise = false): string {
   if (!bytes || bytes < 0) return "";
-  const units = ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;
   let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
+  while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
     value /= 1024;
     unit += 1;
   }
   const precision = unit >= 3 && value < 10 ? 1 : 0;
   const formatted = concise ? value.toFixed(precision).replace(/\.0$/, "") : value.toFixed(precision);
-  return concise ? `${formatted}${units[unit]}` : `${formatted} ${units[unit]}`;
+  return concise ? `${formatted}${BYTE_UNITS[unit]}` : `${formatted} ${BYTE_UNITS[unit]}`;
 }
 
 function compiledTemplate(template: string): TemplateNode[] {
@@ -366,9 +382,9 @@ function applyModifier(value: unknown, modifier: string): unknown {
   if (trimmed === "first") return Array.isArray(value) ? value[0] ?? "" : stringifyValue(value)[0] ?? "";
   if (trimmed === "last") return Array.isArray(value) ? value.at(-1) ?? "" : stringifyValue(value).at(-1) ?? "";
   if (trimmed === "string") return stringifyValue(value);
-  if (["bytes", "bytes10", "bytes2", "rbytes", "rbytes10", "rbytes2"].includes(trimmed)) return formatStreamBytes(Number(value));
-  if (["sbytes", "sbytes10", "sbytes2"].includes(trimmed)) return formatStreamBytes(Number(value), true);
-  if (["bitrate", "rbitrate", "sbitrate"].includes(trimmed)) return formatBitrate(Number(value));
+  if (BYTE_MODIFIERS.has(trimmed)) return formatStreamBytes(Number(value));
+  if (SHORT_BYTE_MODIFIERS.has(trimmed)) return formatStreamBytes(Number(value), true);
+  if (BITRATE_MODIFIERS.has(trimmed)) return formatBitrate(Number(value));
   if (trimmed === "time") return formatSeconds(Number(value));
   if (trimmed === "hex") return Number(value).toString(16);
   if (trimmed === "octal") return Number(value).toString(8);
