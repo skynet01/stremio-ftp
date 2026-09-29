@@ -381,6 +381,77 @@ describe("ScanQueue", () => {
     expect(server.pendingScanAfter).toEqual(expect.any(String));
   });
 
+  it("still records the failure when scheduling a transient retry throws", async () => {
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => unhandledRejections.push(reason);
+    process.on("unhandledRejection", onUnhandledRejection);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const { profileService, queue } = createHarness(async () => ({
+        list: async () => {
+          throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+        },
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }));
+      const profileId = await createProfileWithFtp(profileService);
+      vi.spyOn(profileService, "schedulePendingScan").mockImplementation(() => {
+        throw new Error("FOREIGN KEY constraint failed");
+      });
+
+      queue.enqueueProfileScan(profileId, "manual");
+      const failed = await waitForStatus(queue, profileId, "failed");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(failed.message).toBe("Scan failed: Server sent FIN packet unexpectedly, closing connection.");
+      expect(unhandledRejections).toEqual([]);
+      expect(consoleError).toHaveBeenCalled();
+      expect(JSON.stringify(consoleError.mock.calls)).not.toContain("secret");
+
+      vi.mocked(profileService.schedulePendingScan).mockRestore();
+      const next = queue.enqueueProfileScan(profileId, "manual");
+      expect(next.id).not.toBe(failed.id);
+      await waitForNextStatus(queue, profileId, failed.id, "failed");
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+  });
+
+  it("does not leak an unhandled rejection when a shared scan target disappears mid-scan", async () => {
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => unhandledRejections.push(reason);
+    process.on("unhandledRejection", onUnhandledRejection);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const releaseList = deferred<void>();
+      const { db, profileService, queue } = createHarness(async () => ({
+        list: async () => {
+          await releaseList.promise;
+          throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+        },
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }));
+      const profileId = await createProfileWithFtp(profileService);
+      const serverId = profileService.defaultFtpServerId(profileId);
+      const group = profileService.createSharedIndexGroupFromServer(profileId, serverId, {
+        name: "Shared Main",
+        keyHint: "shared-main",
+      }).group;
+
+      queue.enqueueSharedIndexScan(group.id, "manual");
+      await waitForSharedStatus(queue, group.id, "running");
+      db.prepare("delete from profile_ftp_servers where id = ?").run(serverId);
+      releaseList.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(unhandledRejections).toEqual([]);
+      expect(queue.getSharedIndexScanStatus(group.id).status).toBe("idle");
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+  });
+
   it("reuses one FTP connection across configured roots and reconnects after a disconnect", async () => {
     let clientsCreated = 0;
     let clientsClosed = 0;

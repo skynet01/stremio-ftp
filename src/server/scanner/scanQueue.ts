@@ -354,10 +354,10 @@ export class ScanQueue {
     const abortController = new AbortController();
     this.activeControllers.set(row.id, abortController);
 
-    const run =
+    const run = (async () =>
       row.target_kind === "shared_group" && row.shared_index_group_id
-        ? this.runSharedJob(row.id, row.shared_index_group_id, row.scan_mode ?? "full", abortController.signal)
-        : this.runJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), row.scan_mode ?? "full", abortController.signal);
+        ? await this.runSharedJob(row.id, row.shared_index_group_id, row.scan_mode ?? "full", abortController.signal)
+        : await this.runJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), row.scan_mode ?? "full", abortController.signal))();
 
     void run
       .catch((error: unknown) => {
@@ -366,17 +366,19 @@ export class ScanQueue {
           return;
         }
         const message = error instanceof Error ? error.message : "Unable to refresh FTP index";
-        if (row.target_kind === "shared_group" && row.shared_index_group_id) {
-          this.failSharedJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), row.scan_mode ?? "full", message);
-        } else {
-          this.failJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), row.scan_mode ?? "full", message);
-        }
+        const label = row.target_kind === "shared_group" && row.shared_index_group_id ? "Shared scan" : "Scan";
+        this.failJob(row.id, row.profile_id, row.ftp_server_id ?? this.profileService.defaultFtpServerId(row.profile_id), row.scan_mode ?? "full", message, label);
       })
+      .catch((error: unknown) => logScanError(row.id, "Unable to record scan result", error))
       .finally(() => {
         this.activeControllers.delete(row.id);
         this.running.delete(targetKey(row));
         this.activeCount -= 1;
-        this.pump();
+        try {
+          this.pump();
+        } catch (error) {
+          logScanError(row.id, "Unable to start the next queued scan", error);
+        }
       });
   }
 
@@ -672,12 +674,10 @@ export class ScanQueue {
       );
   }
 
-  private failJob(jobId: number, profileId: number, ftpServerId: number, scanMode: ScanMode, error: string) {
+  private failJob(jobId: number, profileId: number, ftpServerId: number, scanMode: ScanMode, error: string, label: "Scan" | "Shared scan") {
     const retryDelayMs = isTransientFtpDisconnect(error) ? this.config.scanTransientRetryDelayMs : 0;
-    const retryMessage = retryDelayMs > 0 ? ` Requeued to retry ${retryScanLabel(scanMode)} in ${formatDuration(retryDelayMs)} using verified directory snapshots only.` : "";
-    if (retryDelayMs > 0) {
-      this.profileService.schedulePendingScan(profileId, ftpServerId, new Date(Date.now() + retryDelayMs).toISOString());
-    }
+    const retryScheduled = retryDelayMs > 0 && this.scheduleRetry(jobId, profileId, ftpServerId, retryDelayMs);
+    const retryMessage = retryScheduled ? ` Requeued to retry ${retryScanLabel(scanMode)} in ${formatDuration(retryDelayMs)} using verified directory snapshots only.` : "";
     this.db
       .prepare(
         `
@@ -689,27 +689,17 @@ export class ScanQueue {
         where id = ?
       `,
       )
-      .run(error, `Scan failed: ${error}${retryMessage}`, new Date().toISOString(), jobId);
+      .run(error, `${label} failed: ${error}${retryMessage}`, new Date().toISOString(), jobId);
   }
 
-  private failSharedJob(jobId: number, profileId: number, ftpServerId: number, scanMode: ScanMode, error: string) {
-    const retryDelayMs = isTransientFtpDisconnect(error) ? this.config.scanTransientRetryDelayMs : 0;
-    const retryMessage = retryDelayMs > 0 ? ` Requeued to retry ${retryScanLabel(scanMode)} in ${formatDuration(retryDelayMs)} using verified directory snapshots only.` : "";
-    if (retryDelayMs > 0) {
+  private scheduleRetry(jobId: number, profileId: number, ftpServerId: number, retryDelayMs: number) {
+    try {
       this.profileService.schedulePendingScan(profileId, ftpServerId, new Date(Date.now() + retryDelayMs).toISOString());
+      return true;
+    } catch (error) {
+      logScanError(jobId, "Unable to schedule scan retry", error);
+      return false;
     }
-    this.db
-      .prepare(
-        `
-        update scan_jobs
-        set status = 'failed',
-            error = ?,
-            message = ?,
-            finished_at = ?
-        where id = ?
-      `,
-      )
-      .run(error, `Shared scan failed: ${error}${retryMessage}`, new Date().toISOString(), jobId);
   }
 
   private lastSuccessfulProgressItems(profileId: number, ftpServerId: number) {
@@ -993,6 +983,10 @@ function tmdbLookupKind(candidate: CatalogEnrichmentCandidate): TmdbCatalogKind 
 
 function catalogRecheckRequiresTmdbKey(candidate: CatalogEnrichmentCandidate, apiKey: string | null | undefined) {
   return candidate.status === "matched" && !candidate.imdbId && !apiKey;
+}
+
+function logScanError(jobId: number, context: string, error: unknown) {
+  console.error(`[scan] Job ${jobId}: ${context}: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 function formatDuration(durationMs: number) {
