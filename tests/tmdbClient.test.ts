@@ -38,6 +38,64 @@ describe("tmdbCatalogMeta", () => {
     expect(aborted).toBe(true);
   });
 
+  it("caches TMDB rate limits, server errors and timeouts only briefly", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({}) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ movie_results: [{ id: 603, title: "The Matrix", release_date: "1999-03-31" }] }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const item = { mediaKind: "movie" as const, catalogKind: "movie" as const, parsedTitle: "tt0133093", parsedYear: null, imdbId: "tt0133093" };
+
+    await expect(tmdbCatalogMeta(item, "tmdb-key", "movie")).resolves.toBeNull();
+    await vi.advanceTimersByTimeAsync(60 * 1000);
+    await expect(tmdbCatalogMeta(item, "tmdb-key", "movie")).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    await expect(tmdbCatalogMeta(item, "tmdb-key", "movie")).resolves.toMatchObject({ id: "tt0133093", name: "The Matrix" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps genuine not-found results for the normal cache lifetime", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ results: [] }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    const item = { mediaKind: "movie" as const, catalogKind: "movie" as const, parsedTitle: "missing title", parsedYear: null, imdbId: null };
+
+    await expect(tmdbCatalogMeta(item, "tmdb-key", "movie")).resolves.toBeNull();
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    await expect(tmdbCatalogMeta(item, "tmdb-key", "movie")).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
+    await tmdbCatalogMeta(item, "tmdb-key", "movie");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds the catalog metadata cache", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ movie_results: [] }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    const lookup = (index: number) =>
+      tmdbCatalogMeta(
+        { mediaKind: "movie", catalogKind: "movie", parsedTitle: "title", parsedYear: null, imdbId: `tt${1000000 + index}` },
+        "tmdb-key",
+        "movie",
+      );
+
+    for (let index = 0; index <= 1000; index += 1) await lookup(index);
+    expect(fetchMock).toHaveBeenCalledTimes(1001);
+
+    await lookup(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(1001);
+    await lookup(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1002);
+  });
+
   it("treats rejected TMDB credentials as retryable instead of unmatched", async () => {
     vi.stubGlobal(
       "fetch",

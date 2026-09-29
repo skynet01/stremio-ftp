@@ -1,5 +1,6 @@
 import type { CatalogItem } from "../media/mediaRepository.js";
 import { normalizeTitle } from "../media/normalizer.js";
+import { TtlCache } from "./ttlCache.js";
 
 export type TmdbCatalogKind = "movie" | "series" | "anime";
 
@@ -53,8 +54,10 @@ type TmdbExternalIds = {
 };
 
 const TMDB_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const TMDB_FAILURE_CACHE_TTL_MS = 5 * 60 * 1000;
+const TMDB_CACHE_MAX_ENTRIES = 1000;
 const TMDB_TIMEOUT_MS = 10000;
-const catalogMetaCache = new Map<string, { expiresAt: number; value: Promise<CatalogMeta | null> }>();
+const catalogMetaCache = new TtlCache<Promise<CatalogMeta | null>>(TMDB_CACHE_MAX_ENTRIES);
 const TITLE_RELATIONSHIP_STOP_WORDS = new Set(["a", "an", "and", "in", "of", "or", "the", "to"]);
 const TITLE_NUMBER_TOKENS = new Map([
   ["one", "1"],
@@ -129,12 +132,14 @@ export async function tmdbCatalogMeta(item: CatalogItem, apiKey: string | null, 
     item.parsedYear ?? "",
   ].join("|");
   const cached = catalogMetaCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached) return cached;
 
-  const value = (item.imdbId ? metaFromImdbId(item, item.imdbId, apiKey, catalogKind) : metaFromSearch(item, apiKey, catalogKind)).catch(
-    () => null,
-  );
-  catalogMetaCache.set(cacheKey, { expiresAt: Date.now() + TMDB_CACHE_TTL_MS, value });
+  const lookup = item.imdbId ? metaFromImdbId(item, item.imdbId, apiKey, catalogKind) : metaFromSearch(item, apiKey, catalogKind);
+  const value: Promise<CatalogMeta | null> = lookup.catch(() => {
+    if (catalogMetaCache.get(cacheKey) === value) catalogMetaCache.set(cacheKey, value, TMDB_FAILURE_CACHE_TTL_MS);
+    return null;
+  });
+  catalogMetaCache.set(cacheKey, value, TMDB_CACHE_TTL_MS);
   return value;
 }
 
