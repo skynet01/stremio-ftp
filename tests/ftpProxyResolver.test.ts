@@ -135,6 +135,68 @@ describe("createFtpProxyResolver", () => {
     expect(factoryCalls).toBe(2);
   });
 
+  it("releases an idle warm-up connection when playback of another file needs the slot", async () => {
+    const connections = limitedConnections(1);
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv" }), connections.factory);
+
+    const fileA = await resolver({ installToken: "token", fileId: 44 });
+    fileA!.warmReadStream();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const fileB = await resolver({ installToken: "token", fileId: 45 });
+
+    expect((await settleWithin(fileB!.openReadStream({ start: 0, end: 9 }))).status).toBe("fulfilled");
+    expect(connections.closed).toEqual([1]);
+    expect(connections.opened).toEqual(["/b.mkv"]);
+  });
+
+  it("does not queue warm-ups ahead of playback requests", async () => {
+    const connections = limitedConnections(1);
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv", 46: "/c.mkv" }), connections.factory);
+
+    const playingA = await (await resolver({ installToken: "token", fileId: 44 }))!.openReadStream({ start: 0, end: 9 });
+    (await resolver({ installToken: "token", fileId: 45 }))!.warmReadStream();
+    const playingC = (await resolver({ installToken: "token", fileId: 46 }))!.openReadStream({ start: 0, end: 9 });
+
+    (playingA as Readable).destroy();
+
+    expect((await settleWithin(playingC)).status).toBe("fulfilled");
+    expect(connections.created).toBe(2);
+  });
+
+  it("keeps using a warmed client once playback has claimed it", async () => {
+    const connections = limitedConnections(1);
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv" }), connections.factory);
+
+    const fileA = await resolver({ installToken: "token", fileId: 44 });
+    fileA!.warmReadStream();
+    const playingA = await fileA!.openReadStream({ start: 0, end: 9 });
+    const playingB = (await resolver({ installToken: "token", fileId: 45 }))!.openReadStream({ start: 0, end: 9 });
+
+    expect((await settleWithin(playingB)).status).toBe("pending");
+    expect(connections.created).toBe(1);
+    expect(connections.closed).toEqual([]);
+
+    (playingA as Readable).destroy();
+    expect((await settleWithin(playingB)).status).toBe("fulfilled");
+  });
+
+  it("opens a fresh connection when its warm client was released to another request", async () => {
+    const connections = limitedConnections(1);
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv" }), connections.factory);
+
+    const fileA = await resolver({ installToken: "token", fileId: 44 });
+    fileA!.warmReadStream();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const playingB = await (await resolver({ installToken: "token", fileId: 45 }))!.openReadStream({ start: 0, end: 9 });
+    const playingA = fileA!.openReadStream({ start: 0, end: 9 });
+
+    expect((await settleWithin(playingA)).status).toBe("pending");
+    (playingB as Readable).destroy();
+    expect((await settleWithin(playingA)).status).toBe("fulfilled");
+    expect(connections.opened).toEqual(["/b.mkv", "/a.mkv"]);
+    expect(connections.created).toBe(3);
+  });
+
   it("opens shared media with the requesting profile server credentials", async () => {
     let openedPath = "";
     const resolver = createFtpProxyResolver(
@@ -237,4 +299,27 @@ async function settleWithin<T>(promise: Promise<T>, ms = 100) {
     ),
     timeout,
   ]);
+}
+
+function limitedConnections(maxConnections: number) {
+  const state = { created: 0, closed: [] as number[], opened: [] as string[] };
+  const factory = limitFtpClientFactoryByKey(async () => {
+    state.created += 1;
+    const id = state.created;
+    let closed = false;
+    return {
+      list: async () => [],
+      openReadStream: async (path: string) => {
+        if (closed) throw new Error("Client is closed");
+        state.opened.push(path);
+        return new Readable({ read() {} });
+      },
+      close: async () => {
+        if (closed) return;
+        closed = true;
+        state.closed.push(id);
+      },
+    };
+  }, maxConnections);
+  return Object.assign(state, { factory });
 }

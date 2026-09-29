@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import type { AbortableFtpClientFactory } from "../ftp/ftpConnectionLimiter.js";
+import { isFtpSlotUnavailableError, type AbortableFtpClientFactory, type ClaimableFtpClient } from "../ftp/ftpConnectionLimiter.js";
 import type { FtpClient } from "../ftp/ftpTypes.js";
 import type { MediaRepository } from "../media/mediaRepository.js";
 import type { FtpConfig } from "../profiles/profileService.js";
@@ -9,7 +9,7 @@ import { serverMatchesSharedIndexGroup } from "../shared/sharedIndex.js";
 const WARM_CLIENT_TTL_MS = 10_000;
 
 type WarmClient = {
-  promise: Promise<FtpClient>;
+  promise: Promise<ClaimableFtpClient>;
   timeout: NodeJS.Timeout;
 };
 
@@ -128,16 +128,17 @@ async function openFtpClient(
 ): Promise<OpenFtpClientResult> {
   const startedAt = performance.now();
   const warmClient = takeWarmFtpClient(warmClients, warmKey);
-  if (!warmClient) {
-    return { client: await ftpClientFactory(ftpConfig, { signal }), warmed: false, clientReadyMs: elapsedMs(startedAt) };
+  if (warmClient) {
+    try {
+      const client = await warmClient;
+      if (client.claim?.() !== false) return { client, warmed: true, clientReadyMs: elapsedMs(startedAt) };
+    } catch {
+      // The warm-up failed or gave its slot away; open a fresh connection instead.
+    }
   }
 
-  try {
-    return { client: await warmClient, warmed: true, clientReadyMs: elapsedMs(startedAt) };
-  } catch {
-    const fallbackStartedAt = performance.now();
-    return { client: await ftpClientFactory(ftpConfig, { signal }), warmed: false, clientReadyMs: elapsedMs(fallbackStartedAt) };
-  }
+  const connectStartedAt = performance.now();
+  return { client: await ftpClientFactory(ftpConfig, { signal }), warmed: false, clientReadyMs: elapsedMs(connectStartedAt) };
 }
 
 function warmFtpClient(
@@ -149,7 +150,7 @@ function warmFtpClient(
   if (warmClients.has(warmKey)) return;
 
   const startedAt = performance.now();
-  const promise = ftpClientFactory(ftpConfig);
+  const promise = ftpClientFactory(ftpConfig, { background: true });
   void promise
     .then(() => {
       logFtpProxyTiming("warm_ready", {
@@ -159,8 +160,8 @@ function warmFtpClient(
         tlsMode: ftpConfig.tlsMode,
       });
     })
-    .catch(() => {
-      logFtpProxyTiming("warm_failed", {
+    .catch((error: unknown) => {
+      logFtpProxyTiming(isFtpSlotUnavailableError(error) ? "warm_skipped" : "warm_failed", {
         warmMs: elapsedMs(startedAt),
         host: ftpConfig.host,
         port: ftpConfig.port,

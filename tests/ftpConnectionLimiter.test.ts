@@ -256,6 +256,67 @@ describe("limitFtpClientFactoryByKey cancellation", () => {
   });
 });
 
+describe("limitFtpClientFactoryByKey background requests", () => {
+  it("does not queue a background request when every slot is busy", async () => {
+    let opened = 0;
+    const limitedFactory = limitFtpClientFactoryByKey(async () => {
+      opened += 1;
+      return fakeClient();
+    }, 1);
+
+    const first = await limitedFactory(ftpConfig());
+    const background = await settleWithin(limitedFactory(ftpConfig(), { background: true }));
+
+    expect(background.status).toBe("rejected");
+    await first.close();
+    expect(opened).toBe(1);
+    expect((await settleWithin(limitedFactory(ftpConfig()))).status).toBe("fulfilled");
+  });
+
+  it("gives an idle background client's slot to a waiting request", async () => {
+    let closed = 0;
+    const limitedFactory = limitFtpClientFactoryByKey(async () => fakeClient({ onClose: () => (closed += 1) }), 1);
+
+    const background = await limitedFactory(ftpConfig(), { background: true });
+    const foreground = await settleWithin(limitedFactory(ftpConfig()));
+
+    expect(foreground.status).toBe("fulfilled");
+    expect(closed).toBe(1);
+    expect(background.claim?.()).toBe(false);
+  });
+
+  it("keeps a claimed background client until it is closed", async () => {
+    const limitedFactory = limitFtpClientFactoryByKey(async () => fakeClient(), 1);
+
+    const background = await limitedFactory(ftpConfig(), { background: true });
+    expect(background.claim?.()).toBe(true);
+    const foreground = limitedFactory(ftpConfig());
+
+    expect((await settleWithin(foreground)).status).toBe("pending");
+    await background.close();
+    expect((await settleWithin(foreground)).status).toBe("fulfilled");
+  });
+
+  it("cancels a background login when a request needs its slot", async () => {
+    let opened = 0;
+    const limitedFactory = limitFtpClientFactoryByKey((_config, options) => {
+      opened += 1;
+      if (opened > 1) return Promise.resolve(fakeClient());
+      return new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => reject(new Error("login aborted")), { once: true });
+      });
+    }, 1);
+
+    const background = limitedFactory(ftpConfig(), { background: true });
+    await Promise.resolve();
+    const foreground = limitedFactory(ftpConfig());
+
+    expect((await settleWithin(background)).status).toBe("rejected");
+    expect((await settleWithin(foreground)).status).toBe("fulfilled");
+    expect(opened).toBe(2);
+  });
+});
+
 function fakeClient(options: { onClose?: () => void } = {}) {
   return {
     list: async () => [],
