@@ -312,6 +312,34 @@ export function globalScanProgressForServers(servers: Array<Pick<ServerForm, "sc
   };
 }
 
+export function mergeServerStatus(current: ServerForm[], loaded: ServerForm[]): ServerForm[] {
+  const loadedById = new Map(loaded.map((server) => [server.id, server]));
+  const currentIds = new Set(current.map((server) => server.id));
+  const merged = current.flatMap((server) => {
+    if (server.pendingCreate) return [server];
+    const next = loadedById.get(server.id);
+    if (!next) return [];
+    const statusChanged = scanStatusChanged(server.scanStatus, next.scanStatus) || server.pendingScanAfter !== next.pendingScanAfter;
+    return [
+      {
+        ...server,
+        indexStatus: next.indexStatus,
+        scanStatus: next.scanStatus,
+        scanSchedule: next.scanSchedule,
+        pendingScanAfter: next.pendingScanAfter,
+        sharedIndex: next.sharedIndex,
+        connectionStatus: next.connectionStatus,
+        message: statusChanged ? next.message : server.message,
+      },
+    ];
+  });
+  return [...merged, ...loaded.filter((server) => !currentIds.has(server.id))];
+}
+
+function scanStatusChanged(previous: ScanStatus, next: ScanStatus) {
+  return previous.id !== next.id || previous.status !== next.status || previous.message !== next.message;
+}
+
 function scanBatchTime(scanStatus: ScanStatus) {
   const value = scanStatus.queuedAt ?? scanStatus.startedAt;
   if (!value) return Number.NaN;
@@ -498,8 +526,8 @@ export function App() {
       const loaded = await loadServers({ browserUid: recoveryUid, passphrase: nextPassphrase });
       applyCustomization(loaded.customization);
       const loadedForms = loaded.servers.map(serverFormFromPayload);
-      const forms = mergePendingServersInto(loadedForms);
-      setServers(forms);
+      const forms = [...loadedForms, ...servers.filter((server) => server.pendingCreate)];
+      setServers((current) => [...loadedForms, ...current.filter((server) => server.pendingCreate)]);
       setGlobalStats(loaded.globalStats);
       setExpandedServerId((current) => {
         if (current && forms.some((server) => server.id === current)) return current;
@@ -771,7 +799,9 @@ export function App() {
         const created = await createFtpServer({ browserUid: recoveryUid, passphrase });
         targetServerId = created.server.id;
         setServers((current) =>
-          current.map((candidate) => (candidate.id === serverId ? { ...candidate, id: targetServerId, pendingCreate: false } : candidate)),
+          current
+            .filter((candidate) => candidate.id !== targetServerId)
+            .map((candidate) => (candidate.id === serverId ? { ...candidate, id: targetServerId, pendingCreate: false } : candidate)),
         );
       }
       if (targetServerId === 0) {
@@ -889,18 +919,13 @@ export function App() {
     }
     try {
       const result = await rescanIndex({ browserUid: recoveryUid, passphrase, all: true, ...(force ? { force: true } : {}) });
-      if (result.servers) setServers(mergePendingServersInto(result.servers.map(serverFormFromPayload)));
+      const rescannedServers = result.servers?.map(serverFormFromPayload);
+      if (rescannedServers) setServers((current) => mergeServerStatus(current, rescannedServers));
       if (result.globalStats) setGlobalStats(result.globalStats);
-      if (!result.servers) await refreshScanStatus();
+      if (!rescannedServers) await refreshScanStatus();
     } catch (error) {
       setCustomizationMessage(error instanceof Error ? error.message : "Unable to refresh all indexes.");
     }
-  }
-
-  function mergePendingServersInto(loadedForms: ServerForm[]): ServerForm[] {
-    const pending = servers.filter((server) => server.pendingCreate);
-    if (!pending.length) return loadedForms;
-    return [...loadedForms, ...pending];
   }
 
   async function haltServer(serverId: number) {
@@ -940,8 +965,10 @@ export function App() {
 
   async function refreshScanStatus() {
     const result = await loadScanStatus({ browserUid: recoveryUid, passphrase });
-    if (result.servers) setServers(mergePendingServersInto(result.servers.map(serverFormFromPayload)));
-    if (!result.servers) {
+    const polledServers = result.servers?.map(serverFormFromPayload);
+    if (polledServers) {
+      setServers((current) => mergeServerStatus(current, polledServers));
+    } else {
       setServers((current) =>
         current.map((server) =>
           server.id === 0

@@ -1,8 +1,8 @@
 /* @vitest-environment jsdom */
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { App, globalScanProgressForServers } from "../src/web/App";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App, globalScanProgressForServers, mergeServerStatus } from "../src/web/App";
 import {
   bulkAdminProfiles,
   cancelAdminSharedIndexScan,
@@ -151,6 +151,82 @@ const manualScanSchedule = {
   intervalMinutes: 0,
   nextScheduledScanAt: null,
 };
+const runningScanStatus = {
+  ...idleScanStatus,
+  id: 12,
+  status: "running" as const,
+  trigger: "manual" as const,
+  progressPercent: 25,
+  currentPath: "/Movies",
+  message: "Scanning FTP library.",
+  queuedAt: "2026-05-02T22:44:00.000Z",
+  startedAt: "2026-05-02T22:44:01.000Z",
+};
+const idleGlobalStats = {
+  totalItems: 0,
+  movies: 0,
+  series: 0,
+  anime: 0,
+  uncategorized: 0,
+  servers: 2,
+  activeScans: 0,
+  pendingScans: 0,
+  lastCompletedScanAt: null,
+  lastCompletedScanNewItems: null,
+  status: "idle" as const,
+};
+
+function serverPayload(id: number, name: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    name,
+    ftpConfig: {
+      host: `ftp${id}.example.test`,
+      port: 21,
+      username: "user",
+      password: "",
+      passwordConfigured: true,
+      tlsMode: "explicit" as const,
+      allowInvalidCertificate: false,
+      roots: ["/"],
+    },
+    customization: {
+      addonName: "Stremio FTP Addon",
+      addonLogoUrl: "",
+      addonDescription: "Stream movies and series episodes from your own FTP server.",
+      catalogEnabled: false,
+      ...defaultCatalogOptions,
+    },
+    indexStatus: { lastScanAt: null, mediaItems: 0 },
+    scanStatus: { ...idleScanStatus },
+    scanSchedule: manualScanSchedule,
+    connectionStatus: { lastTestedAt: null, ok: null },
+    pendingScanAfter: null,
+    ...overrides,
+  };
+}
+
+function rememberProfile() {
+  window.localStorage.setItem("stremio-ftp-recovery-uid", "browser-uid");
+  window.localStorage.setItem("stremio-ftp-passphrase", "passphrase");
+  window.localStorage.setItem("stremio-ftp-manifest-url", "https://addon.example.test/u/token/manifest.json");
+  window.localStorage.setItem("stremio-ftp-stremio-install-url", "stremio://addon.example.test/u/token/manifest.json");
+}
+
+function mockScanningServers() {
+  loadServersMock.mockResolvedValue({
+    customization: serverPayload(1, "Alpha").customization,
+    servers: [serverPayload(1, "Alpha", { scanStatus: runningScanStatus }), serverPayload(2, "Beta")],
+    globalStats: { ...idleGlobalStats, activeScans: 1, status: "working" as const },
+  });
+  loadScanStatusMock.mockResolvedValue({
+    indexStatus: { lastScanAt: null, mediaItems: 0 },
+    scanStatus: { ...runningScanStatus, progressPercent: 60 },
+    scanSchedule: manualScanSchedule,
+    servers: [serverPayload(1, "Alpha", { scanStatus: { ...runningScanStatus, progressPercent: 60 } }), serverPayload(2, "Beta")],
+    globalStats: { ...idleGlobalStats, activeScans: 1, status: "working" as const },
+  });
+}
 
 describe("App", () => {
   beforeEach(() => {
@@ -2231,4 +2307,91 @@ describe("App", () => {
     );
     expect(within(await screen.findByRole("dialog", { name: "Bulk action status" })).getByText("2 cancelled")).toBeTruthy();
   });
+
+  describe("scan status polling", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("keeps unsaved edits on other servers while a scan is polled", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      rememberProfile();
+      mockScanningServers();
+
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: /^Beta/ }));
+      fireEvent.change(screen.getByLabelText("Host"), { target: { value: "edited.example.test" } });
+      fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/Edited" } });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3500);
+      });
+
+      expect(loadScanStatusMock).toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: /^Alpha/ })).toHaveTextContent("60%");
+      expect(screen.getByLabelText("Host")).toHaveValue("edited.example.test");
+      expect(screen.getByLabelText("Root paths")).toHaveValue("/Edited");
+    });
+  });
+
+  it("merges polled server status without dropping edits or duplicating pending servers", () => {
+    const edited = { ...serverFormFixture(1, "Alpha"), host: "edited.example.test", message: "FTP connection succeeded." };
+    const pending = { ...serverFormFixture(-2, "Imported"), pendingCreate: true };
+    const removed = serverFormFixture(3, "Removed");
+    const polledAlpha = {
+      ...serverFormFixture(1, "Alpha"),
+      scanStatus: { ...runningScanStatus, progressPercent: 60 },
+      indexStatus: { lastScanAt: "2026-05-02T22:45:00.000Z", mediaItems: 5 },
+      connectionStatus: { lastTestedAt: "2026-05-02T22:40:00.000Z", ok: true },
+      pendingScanAfter: "2026-05-02T23:00:00.000Z",
+      message: "Scanning FTP library.",
+    };
+    const added = serverFormFixture(4, "Added");
+
+    const merged = mergeServerStatus([edited, pending, removed], [polledAlpha, added]);
+
+    expect(merged.map((server) => server.id)).toEqual([1, -2, 4]);
+    expect(merged[0]).toMatchObject({
+      host: "edited.example.test",
+      scanStatus: { progressPercent: 60 },
+      indexStatus: { mediaItems: 5 },
+      connectionStatus: { ok: true },
+      pendingScanAfter: "2026-05-02T23:00:00.000Z",
+      message: "Scanning FTP library.",
+    });
+    expect(merged[1]).toBe(pending);
+  });
+
+  it("keeps a server message when its polled scan status has not changed", () => {
+    const current = { ...serverFormFixture(2, "Beta"), message: "FTP connection succeeded." };
+    const merged = mergeServerStatus([current], [{ ...serverFormFixture(2, "Beta"), message: "Server ready." }]);
+    expect(merged[0].message).toBe("FTP connection succeeded.");
+  });
 });
+
+function serverFormFixture(id: number, name: string) {
+  return {
+    id,
+    name,
+    host: `ftp${id}.example.test`,
+    port: "21",
+    username: "user",
+    password: "",
+    passwordConfigured: true,
+    tlsMode: "explicit" as const,
+    allowInvalidCertificate: false,
+    rootPaths: "/",
+    catalogEnabled: false,
+    catalogSort: "alphabetical" as const,
+    catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
+    libraryLayout: "auto" as const,
+    streamDeliveryMode: "proxy" as const,
+    indexStatus: { lastScanAt: null, mediaItems: 0 },
+    scanStatus: { ...idleScanStatus },
+    scanSchedule: manualScanSchedule,
+    connectionStatus: { lastTestedAt: null, ok: null },
+    pendingScanAfter: null,
+    sharedIndex: null,
+    message: "Server ready.",
+  };
+}
