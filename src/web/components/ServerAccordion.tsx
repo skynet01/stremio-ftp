@@ -1,4 +1,4 @@
-import { ChevronRight, CircleStop, KeyRound, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, CircleStop, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type { AddonCustomization, CatalogSort, ConnectionStatus, IndexStatus, ScanSchedule, ScanStatus } from "../api.js";
 import { CONTENT_TYPE_TOOLTIPS } from "./contentTypeTooltips.js";
 import {
@@ -143,7 +143,6 @@ export function ServerAccordion({
   onTestServer,
   onRefreshServer,
   onCancelServer,
-  onCreateSharedGroup,
   onUpdateScanSchedule,
 }: {
   servers: ServerForm[];
@@ -159,7 +158,6 @@ export function ServerAccordion({
   onTestServer: (serverId: number) => void;
   onRefreshServer: (serverId: number) => void;
   onCancelServer: (serverId: number) => void;
-  onCreateSharedGroup?: (serverId: number) => void;
   onUpdateScanSchedule: (serverId: number, intervalMinutes: number) => void;
 }) {
   const atServerCap = maxFtpServersPerProfile > 0 && servers.length >= maxFtpServersPerProfile;
@@ -548,17 +546,6 @@ export function ServerAccordion({
                         Rescan
                       </button>
                     )}
-                    {onCreateSharedGroup ? (
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        disabled={!profileReady || active || linkedNonMaster || isServerDraft(server)}
-                        onClick={() => onCreateSharedGroup(server.id)}
-                      >
-                        <KeyRound size={17} aria-hidden={true} />
-                        Create group
-                      </button>
-                    ) : null}
                     <button type="button" className="primary-button save-server-button" aria-label="Save FTP settings" disabled={!profileReady || active} onClick={() => onSaveServer(server.id)}>
                       Save FTP settings
                     </button>

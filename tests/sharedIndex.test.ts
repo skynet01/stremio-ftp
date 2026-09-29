@@ -61,7 +61,7 @@ describe("shared index groups", () => {
     expect(hashSharedIndexKey("shared-key")).toBe(hashSharedIndexKey("shared-key"));
   });
 
-  it("creates groups with hashed keys and safe list output", async () => {
+  it("creates groups with hashed keys and safe group output", async () => {
     const { db, service, profileId, serverId } = await serviceWithServer();
     const created = service.createSharedIndexGroupFromServer(profileId, serverId, {
       name: "Sputnik Main",
@@ -103,8 +103,8 @@ describe("shared index groups", () => {
       `,
     ).run(created.group.id, "/media/Maybe.mkv", "Maybe.mkv", "maybe.mkv", "movie", "movie", "Maybe", null, null, 70);
 
-    const listed = service.listSharedIndexGroups();
-    expect(listed[0]).toMatchObject({
+    const listed = service.getSharedIndexGroup(created.group.id);
+    expect(listed).toMatchObject({
       id: created.group.id,
       name: "Sputnik Main",
       linkedServers: 1,
@@ -457,7 +457,7 @@ describe("shared index groups", () => {
 
     const resolved = await resolve({ installToken: linked.installUrlToken, serverId: linkedServerId, sharedMediaId });
 
-    expect(resolved).toMatchObject({ filename: "Movie.2020.mkv", sharedIndexGroupId: created.group.id, ftpServerId: linkedServerId });
+    expect(resolved).toMatchObject({ filename: "Movie.2020.mkv", sizeBytes: 1024 });
     expect(counts).not.toHaveBeenCalled();
     counts.mockRestore();
   });

@@ -258,37 +258,32 @@ describe("app health", () => {
     errorSpy.mockRestore();
   });
 
-  it("separates admin restrictions from super admin dashboard access", async () => {
+  it("exempts admin browser UIDs from server caps in setup status", async () => {
     const db = new Database(":memory:");
     migrate(db);
     const config = {
       ...loadMinimalConfig(),
       adminBrowserUids: new Set(["admin-uid"]),
-      superAdminBrowserUids: new Set(["super-admin-uid"]),
       maxFtpServersPerProfile: 2,
       proxyStreamsDisabled: true,
     };
     const app = createApp(config, db);
 
     const adminResponse = await request(app).get("/api/setup").query({ browserUid: "admin-uid" }).expect(200);
-    expect(adminResponse.body).toEqual(
-      expect.objectContaining({
-        maxFtpServersPerProfile: 0,
-        proxyStreamsDisabled: false,
-        isAdmin: true,
-        isSuperAdmin: false,
-      }),
-    );
+    expect(adminResponse.body).toEqual({
+      setupTokenRequired: true,
+      maxFtpServersPerProfile: 0,
+      proxyStreamsDisabled: false,
+      isAdmin: true,
+    });
 
-    const superAdminResponse = await request(app).get("/api/setup").query({ browserUid: "super-admin-uid" }).expect(200);
-    expect(superAdminResponse.body).toEqual(
-      expect.objectContaining({
-        maxFtpServersPerProfile: 2,
-        proxyStreamsDisabled: true,
-        isAdmin: false,
-        isSuperAdmin: true,
-      }),
-    );
+    const userResponse = await request(app).get("/api/setup").query({ browserUid: "user-uid" }).expect(200);
+    expect(userResponse.body).toEqual({
+      setupTokenRequired: true,
+      maxFtpServersPerProfile: 2,
+      proxyStreamsDisabled: true,
+      isAdmin: false,
+    });
   });
 });
 

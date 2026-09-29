@@ -53,9 +53,6 @@ export function createFtpProxyResolver(
     return {
       filename: file.filename,
       sizeBytes: file.sizeBytes,
-      profileId,
-      ftpServerId: file.ftpServerId,
-      sharedIndexGroupId: file.sharedIndexGroupId,
       warmReadStream: () => {
         warmFtpClient(warmClients, warmKey, ftpConfig, ftpClientFactory);
       },

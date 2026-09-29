@@ -34,7 +34,7 @@ const ftpConfigSchema = z.object({
   roots: z.array(z.string().trim().min(1)).min(1),
 });
 
-export function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: string | null }) {
+function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: string | null }) {
   return !ftpConfig.username?.trim() || !ftpConfig.password;
 }
 
@@ -89,7 +89,7 @@ const saveServerSchema = serverIdSchema.extend({
 type AuthenticatedBody = z.infer<typeof authenticatedSchema>;
 type ProfileContext<T> = { res: Response; data: T; profileId: number };
 
-export function installUrls(baseUrl: string, token: string) {
+function installUrls(baseUrl: string, token: string) {
   const manifestUrl = `${baseUrl}/u/${token}/manifest.json`;
   return {
     manifestUrl,
@@ -103,9 +103,9 @@ export function profileRoutes(
   ftpClientFactory: FtpClientFactory,
   scanQueue: ScanQueue,
   mediaRepository: MediaRepository,
-  failedUnlocks: FailedUnlockLimiter = createFailedUnlockLimiter(config),
 ) {
   const router = Router();
+  const failedUnlocks = createFailedUnlockLimiter(config);
   const rateLimitProfiles = profileRateLimiter(config.profileRateLimitWindowMs, config.profileRateLimitMax);
   const isAdminBrowserUid = (browserUid: string) => service.isAdminBrowserUid(browserUid, config.adminBrowserUids);
   const enforceDeliveryModeFor = <T extends { streamDeliveryMode?: "proxy" | "direct" }>(browserUid: string, value: T): T =>
@@ -631,9 +631,9 @@ export class AttemptWindow {
   }
 }
 
-export type FailedUnlockLimiter = ReturnType<typeof createFailedUnlockLimiter>;
+type FailedUnlockLimiter = ReturnType<typeof createFailedUnlockLimiter>;
 
-export function createFailedUnlockLimiter(config: Pick<AppConfig, "profileRateLimitWindowMs" | "profileRateLimitMax">) {
+function createFailedUnlockLimiter(config: Pick<AppConfig, "profileRateLimitWindowMs" | "profileRateLimitMax">) {
   const maxFailures = Math.min(config.profileRateLimitMax, MAX_FAILED_UNLOCK_ATTEMPTS);
   const failures = new AttemptWindow(config.profileRateLimitWindowMs);
   const keyFor = (_req: Request, browserUid: string) => `uid:${browserUid}`;
@@ -652,7 +652,7 @@ export function createFailedUnlockLimiter(config: Pick<AppConfig, "profileRateLi
   };
 }
 
-export async function unlockWithFailureLimit(
+async function unlockWithFailureLimit(
   service: ProfileService,
   failedUnlocks: FailedUnlockLimiter,
   req: Request,

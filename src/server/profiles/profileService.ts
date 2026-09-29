@@ -121,51 +121,6 @@ export type SharedIndexGroup = {
 
 export type SharedIndexGroupIdentity = Omit<SharedIndexGroup, "catalogItemCounts" | "linkedServers">;
 
-export type SharedIndexGroupMaster = {
-  profileId: number;
-  browserUid: string;
-  countryCode: string | null;
-  serverId: number;
-  serverName: string;
-} | null;
-
-export type SharedIndexLinkedServer = {
-  profileId: number;
-  browserUid: string;
-  countryCode: string | null;
-  serverId: number;
-  serverName: string;
-};
-
-export type AdminProfileSummary = {
-  id: number;
-  browserUid: string;
-  createdAt: string;
-  updatedAt: string;
-  lastUnlockedAt: string | null;
-  lastCountryCode: string | null;
-  adminEnabled: boolean;
-  adminSource: AdminSource;
-  ftpServers: number;
-  configuredFtpServers: number;
-  indexedItems: number;
-  lastScanAt: string | null;
-  lastManifestAccessedAt: string | null;
-  pendingScans: number;
-};
-
-export type AdminProfileList = {
-  summary: {
-    profiles: number;
-    configuredProfiles: number;
-    ftpServers: number;
-    configuredFtpServers: number;
-    indexedItems: number;
-    pendingScans: number;
-  };
-  profiles: AdminProfileSummary[];
-};
-
 export type FtpServerCatalogSettings = {
   id: number;
   name: string;
@@ -803,55 +758,6 @@ export class ProfileService {
     return row ? sharedIndexGroupIdentityFromRow(row) : null;
   }
 
-  listSharedIndexGroups(): SharedIndexGroup[] {
-    const rows = this.db.prepare("select * from shared_index_groups order by name asc, id asc").all() as SharedIndexGroupRow[];
-    return rows.map((row) => this.sharedIndexGroupFromRow(row));
-  }
-
-  listSharedIndexLinkedServers(groupId: number): SharedIndexLinkedServer[] {
-    const rows = this.db
-      .prepare(
-        `
-        select p.id as profile_id, p.browser_uid, p.last_country_code, s.id as server_id, s.name as server_name
-        from profile_ftp_servers s
-        join profiles p on p.id = s.profile_id
-        where s.shared_index_group_id = ?
-        order by p.browser_uid asc, s.name asc, s.id asc
-      `,
-      )
-      .all(groupId) as Array<{ profile_id: number; browser_uid: string; last_country_code: string | null; server_id: number; server_name: string }>;
-    return rows.map((row) => ({
-      profileId: row.profile_id,
-      browserUid: row.browser_uid,
-      countryCode: row.last_country_code,
-      serverId: row.server_id,
-      serverName: row.server_name,
-    }));
-  }
-
-  sharedIndexGroupMaster(groupId: number): SharedIndexGroupMaster {
-    const row = this.db
-      .prepare(
-        `
-        select p.id as profile_id, p.browser_uid, p.last_country_code, s.id as server_id, s.name as server_name
-        from shared_index_groups g
-        join profile_ftp_servers s on s.id = g.master_profile_ftp_server_id
-        join profiles p on p.id = s.profile_id
-        where g.id = ?
-      `,
-      )
-      .get(groupId) as { profile_id: number; browser_uid: string; last_country_code: string | null; server_id: number; server_name: string } | undefined;
-    return row
-      ? {
-          profileId: row.profile_id,
-          browserUid: row.browser_uid,
-          countryCode: row.last_country_code,
-          serverId: row.server_id,
-          serverName: row.server_name,
-        }
-      : null;
-  }
-
   sharedIndexGroupScanSchedule(groupId: number): ScanSchedule {
     const row = this.db
       .prepare(
@@ -1232,134 +1138,12 @@ export class ProfileService {
     if (result.changes === 0) throw new ProfileNotFoundError();
   }
 
-  listAdminProfileSummaries(environmentAdminBrowserUids: ReadonlySet<string> = new Set()): AdminProfileList {
-    const rows = this.db
-      .prepare(
-        `
-        select
-          p.id,
-          p.browser_uid,
-          p.created_at,
-          p.updated_at,
-          p.last_unlocked_at,
-          p.last_country_code,
-          p.last_manifest_accessed_at,
-          p.admin_enabled,
-          count(s.id) as ftp_servers,
-          coalesce(sum(case when s.encrypted_ftp_config is not null then 1 else 0 end), 0) as configured_ftp_servers,
-          coalesce(sum(case
-            when s.shared_index_group_id is not null then coalesce(g.indexed_media_count, 0)
-            else coalesce(s.indexed_media_count, 0)
-          end), 0) as indexed_items,
-          max(case
-            when s.shared_index_group_id is not null then g.last_indexed_at
-            else s.last_indexed_at
-          end) as last_scan_at,
-          coalesce(sum(case when s.pending_scan_after is not null then 1 else 0 end), 0) as pending_scans
-        from profiles p
-        left join profile_ftp_servers s on s.profile_id = p.id
-        left join shared_index_groups g on g.id = s.shared_index_group_id
-        group by p.id
-        order by p.created_at desc, p.id desc
-      `,
-      )
-      .all() as Array<{
-      id: number;
-      browser_uid: string;
-      created_at: string;
-      updated_at: string;
-      last_unlocked_at: string | null;
-      last_country_code: string | null;
-      last_manifest_accessed_at: string | null;
-      admin_enabled: number;
-      ftp_servers: number;
-      configured_ftp_servers: number;
-      indexed_items: number;
-      last_scan_at: string | null;
-      pending_scans: number;
-    }>;
-
-    const profiles = rows.map((row) => {
-      const adminSource = adminSourceFor(row.browser_uid, Boolean(row.admin_enabled), environmentAdminBrowserUids);
-      return {
-        id: row.id,
-        browserUid: row.browser_uid,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        lastUnlockedAt: row.last_unlocked_at,
-        lastCountryCode: row.last_country_code,
-        adminEnabled: adminSource !== null,
-        adminSource,
-        ftpServers: row.ftp_servers,
-        configuredFtpServers: row.configured_ftp_servers,
-        indexedItems: row.indexed_items,
-        lastScanAt: row.last_scan_at,
-        lastManifestAccessedAt: row.last_manifest_accessed_at,
-        pendingScans: row.pending_scans,
-      };
-    });
-
-    return {
-      summary: {
-        profiles: profiles.length,
-        configuredProfiles: profiles.filter((profile) => profile.configuredFtpServers > 0).length,
-        ftpServers: profiles.reduce((sum, profile) => sum + profile.ftpServers, 0),
-        configuredFtpServers: profiles.reduce((sum, profile) => sum + profile.configuredFtpServers, 0),
-        indexedItems: profiles.reduce((sum, profile) => sum + profile.indexedItems, 0),
-        pendingScans: profiles.reduce((sum, profile) => sum + profile.pendingScans, 0),
-      },
-      profiles,
-    };
-  }
-
   listFtpServers(profileId: number): FtpServer[] {
     const rows = this.db
       .prepare("select * from profile_ftp_servers where profile_id = ? order by id asc")
       .all(profileId) as FtpServerRow[];
     if (!rows.length) throw new ProfileNotFoundError();
     return rows.map((row) => this.ftpServerFromRow(row));
-  }
-
-  ftpServerCatalogItemCounts(profileId: number, serverId: number) {
-    const enriched = this.db
-      .prepare(
-        `
-        select
-          count(*) as rows,
-          count(distinct case when status = 'matched' and catalog_kind = 'movie' then coalesce(meta_id, item_key) end) as movies,
-          count(distinct case when status = 'matched' and catalog_kind = 'series' then coalesce(meta_id, item_key) end) as series,
-          count(distinct case when status = 'matched' and catalog_kind = 'anime' then coalesce(meta_id, item_key) end) as anime,
-          count(distinct case when status = 'unmatched' then item_key end) as uncategorized
-        from catalog_enrichment
-        where profile_id = ?
-          and ftp_server_id = ?
-      `,
-      )
-      .get(profileId, serverId) as { rows: number; movies: number; series: number; anime: number; uncategorized: number };
-    if (enriched.rows > 0) {
-      return {
-        movies: enriched.movies,
-        series: enriched.series,
-        anime: enriched.anime,
-        uncategorized: enriched.uncategorized,
-      };
-    }
-
-    const row = this.db
-      .prepare(
-        `
-        select
-          coalesce(sum(case when catalog_kind = 'movie' then 1 else 0 end), 0) as movies,
-          coalesce(sum(case when catalog_kind = 'series' then 1 else 0 end), 0) as series,
-          coalesce(sum(case when catalog_kind = 'anime' then 1 else 0 end), 0) as anime,
-          coalesce(sum(case when catalog_kind not in ('movie', 'series', 'anime') then 1 else 0 end), 0) as uncategorized
-        from media_files
-        where profile_id = ?
-          and ftp_server_id = ?
-      `,
-      )
-      .get(profileId, serverId) as { movies: number; series: number; anime: number; uncategorized: number };
-    return row;
   }
 
   listFtpServerCatalogSettings(profileId: number): FtpServerCatalogSettings[] {

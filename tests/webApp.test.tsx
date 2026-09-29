@@ -5,20 +5,10 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App, globalScanProgressForServers, mergeServerStatus } from "../src/web/App";
 import {
-  bulkAdminProfiles,
-  cancelAdminSharedIndexScan,
-  createAdminSharedIndexGroup,
   cancelScan,
   createProfile,
   createFtpServer,
   deleteFtpServer,
-  deleteAdminSharedIndexGroup,
-  deleteAdminProfile,
-  issueAdminManifestToken,
-  linkAdminSharedIndexServer,
-  loadAdminSharedIndexGroups,
-  loadAdminProfiles,
-  loadAdminStreamStatus,
   loadCustomization,
   loadFtpSettings,
   loadServers,
@@ -26,18 +16,11 @@ import {
   loadServers,
   loadSetupStatus,
   rescanIndex,
-  rescanAdminSharedIndexGroup,
-  rescanAdminProfile,
-  rotateAdminSharedIndexKey,
   saveCustomization,
   saveFtpSettings,
   saveFtpServer,
   saveScanSchedule,
   saveSetupToken,
-  setAdminProfileEnabled,
-  setAdminSharedIndexMaster,
-  unlinkAdminSharedIndexServer,
-  updateAdminSharedIndexGroup,
   markSetupTokenValidated,
   setupTokenAvailable,
   setupTokenNeedsValidation,
@@ -47,38 +30,21 @@ import {
 } from "../src/web/api";
 
 vi.mock("../src/web/api", () => ({
-  bulkAdminProfiles: vi.fn(),
-  cancelAdminSharedIndexScan: vi.fn(),
-  createAdminSharedIndexGroup: vi.fn(),
   cancelScan: vi.fn(),
   createProfile: vi.fn(),
   createFtpServer: vi.fn(),
   deleteFtpServer: vi.fn(),
-  deleteAdminSharedIndexGroup: vi.fn(),
-  deleteAdminProfile: vi.fn(),
-  issueAdminManifestToken: vi.fn(),
-  linkAdminSharedIndexServer: vi.fn(),
-  loadAdminSharedIndexGroups: vi.fn(),
-  loadAdminProfiles: vi.fn(),
-  loadAdminStreamStatus: vi.fn(),
   loadCustomization: vi.fn(),
   loadFtpSettings: vi.fn(),
   loadServers: vi.fn(),
   loadScanStatus: vi.fn(),
   loadSetupStatus: vi.fn(),
   rescanIndex: vi.fn(),
-  rescanAdminSharedIndexGroup: vi.fn(),
-  rescanAdminProfile: vi.fn(),
-  rotateAdminSharedIndexKey: vi.fn(),
   saveCustomization: vi.fn(),
   saveFtpSettings: vi.fn(),
   saveFtpServer: vi.fn(),
   saveScanSchedule: vi.fn(),
   saveSetupToken: vi.fn(),
-  setAdminProfileEnabled: vi.fn(),
-  setAdminSharedIndexMaster: vi.fn(),
-  unlinkAdminSharedIndexServer: vi.fn(),
-  updateAdminSharedIndexGroup: vi.fn(),
   markSetupTokenValidated: vi.fn(),
   setupTokenAvailable: vi.fn(),
   setupTokenNeedsValidation: vi.fn(),
@@ -87,38 +53,21 @@ vi.mock("../src/web/api", () => ({
   validateSetupToken: vi.fn(),
 }));
 
-const bulkAdminProfilesMock = vi.mocked(bulkAdminProfiles);
-const cancelAdminSharedIndexScanMock = vi.mocked(cancelAdminSharedIndexScan);
-const createAdminSharedIndexGroupMock = vi.mocked(createAdminSharedIndexGroup);
 const cancelScanMock = vi.mocked(cancelScan);
 const createProfileMock = vi.mocked(createProfile);
 const createFtpServerMock = vi.mocked(createFtpServer);
 const deleteFtpServerMock = vi.mocked(deleteFtpServer);
-const deleteAdminSharedIndexGroupMock = vi.mocked(deleteAdminSharedIndexGroup);
-const deleteAdminProfileMock = vi.mocked(deleteAdminProfile);
-const issueAdminManifestTokenMock = vi.mocked(issueAdminManifestToken);
-const linkAdminSharedIndexServerMock = vi.mocked(linkAdminSharedIndexServer);
-const loadAdminSharedIndexGroupsMock = vi.mocked(loadAdminSharedIndexGroups);
-const loadAdminProfilesMock = vi.mocked(loadAdminProfiles);
-const loadAdminStreamStatusMock = vi.mocked(loadAdminStreamStatus);
 const loadCustomizationMock = vi.mocked(loadCustomization);
 const loadFtpSettingsMock = vi.mocked(loadFtpSettings);
 const loadServersMock = vi.mocked(loadServers);
 const loadScanStatusMock = vi.mocked(loadScanStatus);
 const loadSetupStatusMock = vi.mocked(loadSetupStatus);
 const rescanIndexMock = vi.mocked(rescanIndex);
-const rescanAdminSharedIndexGroupMock = vi.mocked(rescanAdminSharedIndexGroup);
-const rescanAdminProfileMock = vi.mocked(rescanAdminProfile);
-const rotateAdminSharedIndexKeyMock = vi.mocked(rotateAdminSharedIndexKey);
 const saveCustomizationMock = vi.mocked(saveCustomization);
 const saveFtpSettingsMock = vi.mocked(saveFtpSettings);
 const saveFtpServerMock = vi.mocked(saveFtpServer);
 const saveScanScheduleMock = vi.mocked(saveScanSchedule);
 const saveSetupTokenMock = vi.mocked(saveSetupToken);
-const setAdminProfileEnabledMock = vi.mocked(setAdminProfileEnabled);
-const setAdminSharedIndexMasterMock = vi.mocked(setAdminSharedIndexMaster);
-const unlinkAdminSharedIndexServerMock = vi.mocked(unlinkAdminSharedIndexServer);
-const updateAdminSharedIndexGroupMock = vi.mocked(updateAdminSharedIndexGroup);
 const markSetupTokenValidatedMock = vi.mocked(markSetupTokenValidated);
 const setupTokenAvailableMock = vi.mocked(setupTokenAvailable);
 const setupTokenNeedsValidationMock = vi.mocked(setupTokenNeedsValidation);
@@ -247,34 +196,10 @@ describe("App", () => {
       configurable: true,
       value: { writeText: vi.fn() },
     });
-    bulkAdminProfilesMock.mockReset();
-    cancelAdminSharedIndexScanMock.mockReset();
-    createAdminSharedIndexGroupMock.mockReset();
     cancelScanMock.mockReset();
     createProfileMock.mockReset();
     createFtpServerMock.mockReset();
     deleteFtpServerMock.mockReset();
-    deleteAdminSharedIndexGroupMock.mockReset();
-    deleteAdminProfileMock.mockReset();
-    issueAdminManifestTokenMock.mockReset();
-    linkAdminSharedIndexServerMock.mockReset();
-    loadAdminSharedIndexGroupsMock.mockReset();
-    loadAdminSharedIndexGroupsMock.mockResolvedValue({ groups: [] });
-    loadAdminProfilesMock.mockReset();
-    loadAdminProfilesMock.mockResolvedValue({
-      summary: {
-        profiles: 0,
-        configuredProfiles: 0,
-        ftpServers: 0,
-        configuredFtpServers: 0,
-        indexedItems: 0,
-        activeScans: 0,
-        pendingScans: 0,
-      },
-      profiles: [],
-    });
-    loadAdminStreamStatusMock.mockReset();
-    loadAdminStreamStatusMock.mockResolvedValue({ activeStreams: [], summary: { active: 0, profile: 0, shared: 0 } });
     loadCustomizationMock.mockReset();
     loadFtpSettingsMock.mockReset();
     loadServersMock.mockReset();
@@ -283,18 +208,11 @@ describe("App", () => {
     loadSetupStatusMock.mockReset();
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: true });
     rescanIndexMock.mockReset();
-    rescanAdminSharedIndexGroupMock.mockReset();
-    rescanAdminProfileMock.mockReset();
-    rotateAdminSharedIndexKeyMock.mockReset();
     saveCustomizationMock.mockReset();
     saveFtpSettingsMock.mockReset();
     saveFtpServerMock.mockReset();
     saveScanScheduleMock.mockReset();
     saveSetupTokenMock.mockReset();
-    setAdminProfileEnabledMock.mockReset();
-    setAdminSharedIndexMasterMock.mockReset();
-    unlinkAdminSharedIndexServerMock.mockReset();
-    updateAdminSharedIndexGroupMock.mockReset();
     markSetupTokenValidatedMock.mockReset();
     setupTokenAvailableMock.mockReset();
     setupTokenAvailableMock.mockReturnValue(true);
@@ -1696,745 +1614,15 @@ describe("App", () => {
     expect(screen.getByText("FTP login failed")).toBeTruthy();
   });
 
-  it("hides the admin dashboard for non-admin profiles", async () => {
-    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: false });
-    createProfileMock.mockResolvedValue({
-      profileId: 1,
-      recoveryUid: "browser-uid",
-      manifestUrl: "https://addon.example.test/u/token/manifest.json",
-      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
-    });
-    saveCustomizationMock.mockResolvedValue({ ok: true });
-
-    render(<App />);
-    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
-    await screen.findByRole("button", { name: "Log out" });
-
-    expect(screen.queryByRole("heading", { name: "Admin dashboard" })).toBeNull();
-    expect(loadAdminProfilesMock).not.toHaveBeenCalled();
-  });
-
-  it("hides the admin dashboard for admin profiles that are not super admins", async () => {
-    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: true, isSuperAdmin: false });
-    createProfileMock.mockResolvedValue({
-      profileId: 1,
-      recoveryUid: "admin-uid",
-      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
-      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
-    });
-    saveCustomizationMock.mockResolvedValue({ ok: true });
-
-    render(<App />);
-    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
-    await screen.findByRole("button", { name: "Log out" });
-
-    expect(screen.queryByRole("heading", { name: "Admin dashboard" })).toBeNull();
-    expect(loadAdminProfilesMock).not.toHaveBeenCalled();
-  });
-
-  it("keeps admin action results visible after the profile list refreshes", async () => {
-    loadAdminProfilesMock.mockResolvedValue({
-      summary: { profiles: 2, configuredProfiles: 2, ftpServers: 2, configuredFtpServers: 2, indexedItems: 2, activeScans: 0, pendingScans: 0 },
-      profiles: [adminProfileFixture(2, "first-user-uid"), adminProfileFixture(3, "second-user-uid")],
-    });
-    deleteAdminProfileMock.mockResolvedValue({ ok: true });
-    await openAdminDashboard();
-    await screen.findByText("Admin profile list loaded.");
-
-    fireEvent.click(screen.getByRole("button", { name: "Delete profile first-user-uid" }));
-    const dialog = await screen.findByRole("dialog", { name: "Delete first-user-uid?" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
-
-    await waitFor(() => expect(loadAdminProfilesMock).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Delete profile first-user-uid" })).toBeEnabled());
-    expect(screen.getByText("Deleted profile first-user-uid.")).toBeTruthy();
-    expect(screen.queryByText("Admin profile list loaded.")).toBeNull();
-  });
-
-  it("loads admin profiles, shared groups, and stream status in parallel", async () => {
-    loadAdminProfilesMock.mockReturnValue(new Promise(() => undefined));
-    await openAdminDashboard();
-
-    await waitFor(() => expect(loadAdminSharedIndexGroupsMock).toHaveBeenCalled());
-    await waitFor(() => expect(loadAdminStreamStatusMock).toHaveBeenCalled());
-    expect(screen.getByText("Loading admin profile list...")).toBeTruthy();
-  });
-
-  it("shows admin profile summaries for super admin profiles", async () => {
-    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
-    loadAdminProfilesMock.mockResolvedValue({
-      summary: {
-        profiles: 4,
-        configuredProfiles: 3,
-        ftpServers: 6,
-        configuredFtpServers: 5,
-        indexedItems: 44,
-        activeScans: 0,
-        pendingScans: 1,
-      },
-      profiles: [
-        {
-          id: 2,
-          browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852",
-          createdAt: "2026-05-16T00:00:00.000Z",
-          updatedAt: "2026-05-16T00:00:00.000Z",
-          lastUnlockedAt: null,
-          ftpServers: 2,
-          configuredFtpServers: 1,
-          ftpServerDetails: [
-            {
-              id: 9,
-              name: "Sputnik",
-              host: "sputnik.whatbox.ca",
-              indexedItems: 1200,
-              lastIndexedAt: null,
-              sharedIndex: { id: 5, name: "Sputnik Main", keyHint: "sputnik-main", autoLinked: true, lastIndexedAt: "2026-05-16T00:00:00.000Z" },
-            },
-            {
-              id: 10,
-              name: "Tamarind",
-              host: "tamarind.whatbox.ca",
-              indexedItems: 10,
-              catalogItemCounts: { movies: 4, anime: 2, series: 3, uncategorized: 1 },
-              lastIndexedAt: null,
-              sharedIndex: null,
-            },
-          ],
-          indexedItems: 44,
-          lastScanAt: null,
-          lastManifestAccessedAt: "2026-05-17T01:00:00.000Z",
-          activeScans: 0,
-          pendingScans: 1,
-          manifestUrl: null,
-          stremioInstallUrl: null,
-          lastCountryCode: "CA",
-          adminEnabled: false,
-          adminSource: null,
-        },
-        {
-          id: 3,
-          browserUid: "aa2f80d7-4971-4919-8f4e-ab80aa2de852",
-          createdAt: "2026-05-15T00:00:00.000Z",
-          updatedAt: "2026-05-15T00:00:00.000Z",
-          lastUnlockedAt: null,
-          ftpServers: 1,
-          configuredFtpServers: 1,
-          ftpServerDetails: [
-            {
-              id: 12,
-              name: "Whatbox",
-              host: "whatbox.example.test",
-              lastIndexedAt: "2026-05-16T00:00:00.000Z",
-              sharedIndex: { id: 5, name: "Sputnik Main", keyHint: "sputnik-main", autoLinked: false, lastIndexedAt: "2026-05-16T00:00:00.000Z" },
-            },
-          ],
-          indexedItems: 3,
-          lastScanAt: "2026-05-16T00:00:00.000Z",
-          lastManifestAccessedAt: "2026-05-16T02:00:00.000Z",
-          activeScans: 0,
-          pendingScans: 0,
-          manifestUrl: null,
-          stremioInstallUrl: null,
-          lastCountryCode: "GB",
-          adminEnabled: true,
-          adminSource: "database",
-        },
-        {
-          id: 4,
-          browserUid: "auto80d7-4971-4919-8f4e-ab80aa2de852",
-          createdAt: "2026-05-15T00:00:00.000Z",
-          updatedAt: "2026-05-15T00:00:00.000Z",
-          lastUnlockedAt: null,
-          ftpServers: 1,
-          configuredFtpServers: 1,
-          ftpServerDetails: [
-            {
-              id: 14,
-              name: "Auto",
-              host: "auto.example.test",
-              lastIndexedAt: null,
-              sharedIndex: { id: 5, name: "Sputnik Main", keyHint: "sputnik-main", autoLinked: true, lastIndexedAt: "2026-05-16T00:00:00.000Z" },
-            },
-          ],
-          indexedItems: 5,
-          lastScanAt: null,
-          lastManifestAccessedAt: null,
-          activeScans: 0,
-          pendingScans: 0,
-          manifestUrl: null,
-          stremioInstallUrl: null,
-          lastCountryCode: "US",
-          adminEnabled: false,
-          adminSource: null,
-        },
-        {
-          id: 5,
-          browserUid: "d54b36ac-626f-4e14-b084-ed1c5d33e688",
-          createdAt: "2026-06-03T21:26:44.985Z",
-          updatedAt: "2026-06-03T21:26:44.985Z",
-          lastUnlockedAt: null,
-          ftpServers: 2,
-          configuredFtpServers: 2,
-          ftpServerDetails: [
-            {
-              id: 16,
-              name: "Sputnik",
-              host: "sputnik.whatbox.ca",
-              lastIndexedAt: null,
-              sharedIndex: { id: 5, name: "Sputnik Main", keyHint: "sputnik-main", autoLinked: true, lastIndexedAt: "2026-05-16T00:00:00.000Z" },
-            },
-            {
-              id: 17,
-              name: "Tamarind",
-              host: "tamarind.whatbox.ca",
-              lastIndexedAt: null,
-              sharedIndex: { id: 7, name: "Tamarind", keyHint: "tamarind", autoLinked: false, lastIndexedAt: "2026-05-16T00:00:00.000Z" },
-            },
-          ],
-          indexedItems: 22,
-          lastScanAt: null,
-          lastManifestAccessedAt: null,
-          activeScans: 0,
-          pendingScans: 0,
-          manifestUrl: null,
-          stremioInstallUrl: null,
-          lastCountryCode: "US",
-          adminEnabled: false,
-          adminSource: null,
-        },
-      ],
-    });
-    const sharedGroup = {
-      id: 5,
-      keyHint: "sputnik-main",
-      name: "Sputnik Main",
-      host: "sputnik.whatbox.ca",
-      port: 21,
-      tlsMode: "explicit" as const,
-      allowInvalidCertificate: false,
-      rootPaths: ["/media"],
-      libraryLayout: "auto" as const,
-      catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
-      enabled: true,
-      autoLinkImports: true,
-      masterProfileFtpServerId: 9,
-      indexedMediaCount: 1200,
-      catalogItemCounts: { movies: 640, anime: 45, series: 390, uncategorized: 125 },
-      lastIndexedAt: "2026-05-16T00:00:00.000Z",
-      linkedServerCount: 12,
-      createdAt: "2026-05-16T00:00:00.000Z",
-      updatedAt: "2026-05-16T00:00:00.000Z",
-      linkedServers: [
-        { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", countryCode: "US", serverId: 9, serverName: "Server 1" },
-        { profileId: 3, browserUid: "aa2f80d7-4971-4919-8f4e-ab80aa2de852", countryCode: "CA", serverId: 12, serverName: "Whatbox" },
-      ],
-      masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", countryCode: "US", serverId: 9, serverName: "Server 1" },
-      scanSchedule: { intervalMinutes: 360, nextScheduledScanAt: "2026-05-16T06:00:00.000Z" },
-      scanStatus: { ...idleScanStatus },
-    };
-    const disabledGroup = {
-      ...sharedGroup,
-      id: 6,
-      keyHint: "disabled",
-      name: "Disabled Index",
-      enabled: false,
-      linkedServerCount: 0,
-      masterProfileFtpServerId: null,
-      masterServer: null,
-    };
-    const tamarindGroup = {
-      ...sharedGroup,
-      id: 7,
-      keyHint: "tamarind",
-      name: "Tamarind",
-      host: "tamarind.whatbox.ca",
-      masterProfileFtpServerId: 10,
-      linkedServerCount: 1,
-      linkedServers: [],
-      masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", countryCode: "US", serverId: 10, serverName: "Tamarind" },
-    };
-    loadAdminSharedIndexGroupsMock.mockResolvedValue({ groups: [sharedGroup, tamarindGroup, disabledGroup] });
-    setAdminProfileEnabledMock.mockResolvedValue({ profileId: 2, adminEnabled: true, adminSource: "database" });
-    rescanAdminProfileMock.mockResolvedValue({ profileId: 2, scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } });
-    rescanAdminSharedIndexGroupMock.mockResolvedValue({
-      group: { ...sharedGroup, scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } },
-      scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" },
-    });
-    rotateAdminSharedIndexKeyMock.mockResolvedValue({ group: sharedGroup, sharedIndexKey: "new-shared-key" });
-    linkAdminSharedIndexServerMock.mockResolvedValue({ group: { ...sharedGroup, linkedServerCount: 13 } });
-    unlinkAdminSharedIndexServerMock.mockResolvedValue({ group: { ...sharedGroup, linkedServerCount: 11 } });
-    issueAdminManifestTokenMock.mockResolvedValue({
-      profileId: 2,
-      manifestUrl: "https://addon.example.test/u/issued/manifest.json",
-      stremioInstallUrl: "stremio://addon.example.test/u/issued/manifest.json",
-    });
-    deleteAdminSharedIndexGroupMock.mockResolvedValue({ ok: true });
-    bulkAdminProfilesMock.mockResolvedValue({ action: "convert_to_proxy", profileIds: [2, 3], converted: 2 });
-    createProfileMock.mockResolvedValue({
-      profileId: 1,
-      recoveryUid: "admin-uid",
-      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
-      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
-    });
-    saveCustomizationMock.mockResolvedValue({ ok: true });
-
-    render(<App />);
-    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
-
-    await screen.findByRole("heading", { name: "Admin dashboard" });
-    await screen.findByRole("heading", { name: "Shared index groups" });
-    expect(screen.getByText("Sputnik Main")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Show linked servers for Sputnik Main" })).toHaveTextContent("12");
-    expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("Movie");
-    expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("640");
-    expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("Other");
-    expect(screen.getByLabelText("Sputnik Main catalog content types")).toHaveTextContent("125");
-    expect(screen.getAllByText("Master").length).toBeGreaterThan(0);
-    expect(screen.getByText("bf1f80d7-4971-4 / Server 1")).toBeTruthy();
-    expect(screen.queryByRole("columnheader", { name: "Manifest" })).toBeNull();
-    const partialRow = screen.getByRole("button", { name: "Copy recovery UID bf1f80d7-4971-4919-8f4e-ab80aa2de852" }).closest("tr")!;
-    expect(within(partialRow).getByText("Pending")).toBeTruthy();
-    expect(within(partialRow).getByText("Partial")).toBeTruthy();
-    const linkedRow = screen.getByRole("button", { name: "Copy recovery UID aa2f80d7-4971-4919-8f4e-ab80aa2de852" }).closest("tr")!;
-    expect(within(linkedRow).getByText("Linked")).toBeTruthy();
-    const autoLinkedRow = screen.getByRole("button", { name: "Copy recovery UID auto80d7-4971-4919-8f4e-ab80aa2de852" }).closest("tr")!;
-    expect(within(autoLinkedRow).getByText("Auto-L")).toBeTruthy();
-    const allLinkedMixedRow = screen.getByRole("button", { name: "Copy recovery UID d54b36ac-626f-4e14-b084-ed1c5d33e688" }).closest("tr")!;
-    expect(within(allLinkedMixedRow).getByText("Linked")).toBeTruthy();
-    expect(within(allLinkedMixedRow).queryByText("Partial")).toBeNull();
-    expect(screen.getByRole("columnheader", { name: /Last used/ })).toBeTruthy();
-    expect(screen.getAllByText("May 16, 2026, 6:00 PM").length).toBeGreaterThan(0);
-    expect(screen.queryByLabelText("Profile ID for Sputnik Main")).toBeNull();
-    expect(screen.queryByLabelText("Server ID for Sputnik Main")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Link server to Sputnik Main" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Set master for Sputnik Main" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Unlink server from Sputnik Main" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show linked servers for Sputnik Main" }));
-    const linkedServersDialog = await screen.findByRole("dialog", { name: "Sputnik Main" });
-    expect(within(linkedServersDialog).getByText("Whatbox")).toBeTruthy();
-    fireEvent.click(within(linkedServersDialog).getByRole("button", { name: "Close linked servers" }));
-    fireEvent.click(screen.getByRole("button", { name: /1\/2 linked/ }));
-    const serverDialog = await screen.findByRole("dialog", { name: "bf1f80d7-4971-4" });
-    expect(within(serverDialog).getByText("Auto-L")).toBeTruthy();
-    expect(within(serverDialog).getByText("Unlinked")).toBeTruthy();
-    expect(within(serverDialog).getByText("May 15, 2026, 5:00 PM")).toBeTruthy();
-    expect(within(serverDialog).getByText("1,210 total")).toBeTruthy();
-    expect(within(serverDialog).getByRole("columnheader", { name: "Movie" })).toBeTruthy();
-    expect(within(serverDialog).getByRole("columnheader", { name: "Series" })).toBeTruthy();
-    expect(within(serverDialog).getByRole("columnheader", { name: "Anime" })).toBeTruthy();
-    expect(within(serverDialog).getByRole("columnheader", { name: "Other" })).toBeTruthy();
-    const sputnikServerRow = within(serverDialog).getByText("Sputnik").closest("tr")!;
-    expect(within(sputnikServerRow).getByText("640")).toBeTruthy();
-    expect(within(sputnikServerRow).getByText("390")).toBeTruthy();
-    expect(within(sputnikServerRow).getByText("45")).toBeTruthy();
-    expect(within(sputnikServerRow).getByText("125")).toBeTruthy();
-    const tamarindServerRow = within(serverDialog).getAllByText("Tamarind").find((element) => element.tagName === "STRONG")!.closest("tr")!;
-    expect(within(tamarindServerRow).getByText("4")).toBeTruthy();
-    expect(within(tamarindServerRow).getByText("3")).toBeTruthy();
-    expect(within(tamarindServerRow).getByText("2")).toBeTruthy();
-    expect(within(tamarindServerRow).getByText("1")).toBeTruthy();
-    expect(within(serverDialog).queryByRole("button", { name: "Create group" })).toBeNull();
-    fireEvent.click(within(serverDialog).getByRole("button", { name: "Unlink" }));
-    await waitFor(() =>
-      expect(unlinkAdminSharedIndexServerMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        groupId: 5,
-        profileId: 2,
-        serverId: 9,
-      }),
-    );
-    const linkCallsBeforeSelection = linkAdminSharedIndexServerMock.mock.calls.length;
-    fireEvent.click(within(serverDialog).getByRole("button", { name: "Link" }));
-    expect(linkAdminSharedIndexServerMock).toHaveBeenCalledTimes(linkCallsBeforeSelection);
-    expect(await screen.findByText("Choose a shared index group before linking this server.")).toBeTruthy();
-    fireEvent.change(within(serverDialog).getByLabelText("Shared index group for Tamarind"), { target: { value: "5" } });
-    fireEvent.click(within(serverDialog).getByRole("button", { name: "Link" }));
-    await waitFor(() =>
-      expect(linkAdminSharedIndexServerMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        groupId: 5,
-        profileId: 2,
-        serverId: 10,
-      }),
-    );
-    fireEvent.click(within(serverDialog).getByRole("button", { name: "Close server list" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select bf1f80d7-4971-4919-8f4e-ab80aa2de852" }));
-    fireEvent.click(screen.getByRole("button", { name: "Bulk link servers" }));
-    const bulkLinkDialog = await screen.findByRole("dialog", { name: "Link selected servers" });
-    expect(within(bulkLinkDialog).getByText("Sputnik")).toBeTruthy();
-    expect(within(bulkLinkDialog).getAllByText("Tamarind").length).toBeGreaterThan(0);
-    expect(screen.getByLabelText("Shared index group for Sputnik")).toHaveValue("5");
-    linkAdminSharedIndexServerMock.mockRejectedValueOnce(new Error("FTP server does not match shared index group"));
-    fireEvent.click(within(bulkLinkDialog).getByRole("button", { name: "Link server buckets" }));
-    await waitFor(() =>
-      expect(linkAdminSharedIndexServerMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        groupId: 5,
-        profileId: 2,
-        serverId: 9,
-      }),
-    );
-    expect(await within(bulkLinkDialog).findByText("FTP server does not match shared index group")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Rescan Sputnik Main" }));
-    await waitFor(() =>
-      expect(rescanAdminSharedIndexGroupMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        groupId: 5,
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Rotate key for Sputnik Main" }));
-    const rotateDialog = await screen.findByRole("dialog", { name: "Rotate key for Sputnik Main?" });
-    expect(rotateAdminSharedIndexKeyMock).not.toHaveBeenCalled();
-    fireEvent.click(within(rotateDialog).getByRole("button", { name: "Cancel" }));
-    expect(rotateAdminSharedIndexKeyMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Rotate key for Sputnik Main" }));
-    const confirmedRotateDialog = await screen.findByRole("dialog", { name: "Rotate key for Sputnik Main?" });
-    fireEvent.click(within(confirmedRotateDialog).getByRole("button", { name: "Rotate key" }));
-    await waitFor(() =>
-      expect(rotateAdminSharedIndexKeyMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        groupId: 5,
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Delete Disabled Index" }));
-    const deleteDialog = await screen.findByRole("dialog", { name: "Delete Disabled Index?" });
-    expect(deleteAdminSharedIndexGroupMock).not.toHaveBeenCalled();
-    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Cancel" }));
-    expect(deleteAdminSharedIndexGroupMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Delete Disabled Index" }));
-    const confirmedDeleteDialog = await screen.findByRole("dialog", { name: "Delete Disabled Index?" });
-    fireEvent.click(within(confirmedDeleteDialog).getByRole("button", { name: "Delete group" }));
-    await waitFor(() =>
-      expect(deleteAdminSharedIndexGroupMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        groupId: 6,
-      }),
-    );
-    const uidButton = await screen.findByRole("button", { name: "Copy recovery UID bf1f80d7-4971-4919-8f4e-ab80aa2de852" });
-    expect(uidButton).toHaveTextContent("🇨🇦");
-    expect(uidButton).toHaveTextContent("bf1f80d7-4971");
-    expect(uidButton).not.toHaveTextContent("bf1f80d7-4971-4919-8f4e-ab80aa2de852");
-    expect(uidButton).toHaveAttribute("title", "CA");
-    fireEvent.click(uidButton);
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("bf1f80d7-4971-4919-8f4e-ab80aa2de852");
-    fireEvent.click(screen.getByRole("button", { name: "Issue manifest URL for bf1f80d7-4971-4919-8f4e-ab80aa2de852" }));
-    await waitFor(() =>
-      expect(issueAdminManifestTokenMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        profileId: 2,
-      }),
-    );
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("https://addon.example.test/u/issued/manifest.json");
-    expect(screen.queryByRole("columnheader", { name: "Country" })).toBeNull();
-    expect(screen.getAllByText("44").length).toBeGreaterThan(0);
-    expect(loadAdminProfilesMock).toHaveBeenCalledWith(expect.objectContaining({ passphrase: "passphrase" }));
-    bulkAdminProfilesMock.mockResolvedValueOnce({ action: "rescan", profileIds: [2], scans: [], summary: { profiles: 1, servers: 1, queued: 1, skipped: 0 } });
-    fireEvent.click(screen.getByRole("button", { name: "Rescan bf1f80d7-4971-4919-8f4e-ab80aa2de852" }));
-    const profileRefreshDialog = await screen.findByRole("dialog", { name: "Refresh 1 unlinked server?" });
-    fireEvent.click(within(profileRefreshDialog).getByRole("button", { name: "Refresh unlinked" }));
-    await waitFor(() =>
-      expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        profileIds: [2],
-        action: "rescan",
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Sort by Indexed" }));
-    let uidButtons = screen.getAllByRole("button", { name: /^Copy recovery UID / });
-    expect(uidButtons[0]).toHaveAccessibleName("Copy recovery UID aa2f80d7-4971-4919-8f4e-ab80aa2de852");
-    fireEvent.click(screen.getByRole("button", { name: "Sort by Indexed" }));
-    uidButtons = screen.getAllByRole("button", { name: /^Copy recovery UID / });
-    expect(uidButtons[0]).toHaveAccessibleName("Copy recovery UID bf1f80d7-4971-4919-8f4e-ab80aa2de852");
-
-    fireEvent.change(screen.getByLabelText("Search profiles"), { target: { value: "missing-uid" } });
-    expect(screen.queryByRole("button", { name: "Copy recovery UID bf1f80d7-4971-4919-8f4e-ab80aa2de852" })).toBeNull();
-    fireEvent.change(screen.getByLabelText("Search profiles"), { target: { value: "bf1f80d7" } });
-    expect(screen.getByRole("button", { name: "Copy recovery UID bf1f80d7-4971-4919-8f4e-ab80aa2de852" })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Promote bf1f80d7-4971-4919-8f4e-ab80aa2de852 to admin" }));
-    await waitFor(() =>
-      expect(setAdminProfileEnabledMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        profileId: 2,
-        adminEnabled: true,
-      }),
-    );
-    await waitFor(() => expect(screen.getAllByLabelText("Admin").length).toBeGreaterThan(0));
-  });
-
-  it("renames shared index groups from the title", async () => {
-    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
-    const sharedGroup = {
-      id: 5,
-      keyHint: "sputnik-main",
-      name: "Sputnik Main",
-      host: "sputnik.whatbox.ca",
-      port: 21,
-      tlsMode: "explicit" as const,
-      allowInvalidCertificate: false,
-      rootPaths: ["/media"],
-      libraryLayout: "auto" as const,
-      catalogContentTypes: { movies: true, series: true, anime: false, uncategorized: true },
-      enabled: true,
-      autoLinkImports: true,
-      masterProfileFtpServerId: 9,
-      indexedMediaCount: 1200,
-      catalogItemCounts: { movies: 640, anime: 45, series: 390, uncategorized: 125 },
-      lastIndexedAt: "2026-05-16T00:00:00.000Z",
-      linkedServerCount: 12,
-      createdAt: "2026-05-16T00:00:00.000Z",
-      updatedAt: "2026-05-16T00:00:00.000Z",
-      linkedServers: [],
-      masterServer: { profileId: 2, browserUid: "bf1f80d7-4971-4919-8f4e-ab80aa2de852", countryCode: "US", serverId: 9, serverName: "Server 1" },
-      scanSchedule: { intervalMinutes: 360, nextScheduledScanAt: "2026-05-16T06:00:00.000Z" },
-      scanStatus: { ...idleScanStatus },
-    };
-    loadAdminSharedIndexGroupsMock.mockResolvedValue({ groups: [sharedGroup] });
-    updateAdminSharedIndexGroupMock.mockResolvedValue({ group: { ...sharedGroup, name: "Renamed Pool" } });
-    createProfileMock.mockResolvedValue({
-      profileId: 1,
-      recoveryUid: "admin-uid",
-      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
-      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
-    });
-
-    render(<App />);
-    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
-
-    await screen.findByRole("heading", { name: "Admin dashboard" });
-    fireEvent.doubleClick(await screen.findByRole("button", { name: "Sputnik Main" }));
-    const renameInput = await screen.findByLabelText("Rename Sputnik Main");
-    fireEvent.change(renameInput, { target: { value: "Renamed Pool" } });
-    fireEvent.keyDown(renameInput, { key: "Enter" });
-
-    await waitFor(() =>
-      expect(updateAdminSharedIndexGroupMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        groupId: 5,
-        name: "Renamed Pool",
-        enabled: true,
-        autoLinkImports: true,
-      }),
-    );
-    expect(await screen.findByRole("button", { name: "Renamed Pool" })).toBeTruthy();
-  });
-
-  it("performs bulk admin actions for selected profiles", async () => {
-    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
-    loadAdminProfilesMock.mockResolvedValue({
-      summary: {
-        profiles: 2,
-        configuredProfiles: 2,
-        ftpServers: 2,
-        configuredFtpServers: 2,
-        indexedItems: 47,
-        activeScans: 0,
-        pendingScans: 0,
-      },
-      profiles: [
-        {
-          id: 2,
-          browserUid: "first-user-uid",
-          createdAt: "2026-05-16T00:00:00.000Z",
-          updatedAt: "2026-05-16T00:00:00.000Z",
-          lastUnlockedAt: null,
-          ftpServers: 1,
-          configuredFtpServers: 1,
-          indexedItems: 44,
-          lastScanAt: null,
-          lastManifestAccessedAt: null,
-          activeScans: 0,
-          pendingScans: 0,
-          manifestUrl: null,
-          stremioInstallUrl: null,
-          lastCountryCode: "CA",
-          adminEnabled: false,
-          adminSource: null,
-        },
-        {
-          id: 3,
-          browserUid: "second-user-uid",
-          createdAt: "2026-05-15T00:00:00.000Z",
-          updatedAt: "2026-05-15T00:00:00.000Z",
-          lastUnlockedAt: null,
-          ftpServers: 1,
-          configuredFtpServers: 1,
-          indexedItems: 3,
-          lastScanAt: null,
-          lastManifestAccessedAt: null,
-          activeScans: 0,
-          pendingScans: 0,
-          manifestUrl: null,
-          stremioInstallUrl: null,
-          lastCountryCode: "GB",
-          adminEnabled: false,
-          adminSource: null,
-        },
-      ],
-    });
-    bulkAdminProfilesMock
-      .mockResolvedValueOnce({
-        action: "rescan",
-        profileIds: [2, 3],
-        scans: [
-          { profileId: 2, serverId: 20, serverName: "Main", scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } },
-          { profileId: 3, serverId: 30, serverName: "Main", scanStatus: { ...idleScanStatus, status: "queued", trigger: "manual" } },
-        ],
-        summary: { profiles: 2, servers: 2, queued: 2, running: 0, halting: 0, cancelled: 0, skipped: 0, failed: 0 },
-      })
-      .mockResolvedValueOnce({
-        action: "convert_to_proxy",
-        profileIds: [2, 3],
-        converted: 2,
-        summary: { profiles: 2, servers: 2, converted: 2 },
-      })
-      .mockResolvedValueOnce({ action: "delete", profileIds: [2, 3], deleted: 2, summary: { profiles: 2, deleted: 2 } });
-    createProfileMock.mockResolvedValue({
-      profileId: 1,
-      recoveryUid: "admin-uid",
-      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
-      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
-    });
-    saveCustomizationMock.mockResolvedValue({ ok: true });
-    render(<App />);
-    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
-
-    await screen.findByRole("heading", { name: "Admin dashboard" });
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select first-user-uid" }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select second-user-uid" }));
-
-    expect(screen.getByText("2 selected")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Rescan selected" }));
-    await waitFor(() =>
-      expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        profileIds: [2, 3],
-        action: "rescan",
-      }),
-    );
-    expect(within(await screen.findByRole("dialog", { name: "Bulk action status" })).getByText("2 queued")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Close bulk action status" }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Convert selected to proxy" }));
-    await waitFor(() =>
-      expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        profileIds: [2, 3],
-        action: "convert_to_proxy",
-      }),
-    );
-    expect(within(await screen.findByRole("dialog", { name: "Bulk action status" })).getByText("2 converted")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Close bulk action status" }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
-    const deleteSelectedDialog = await screen.findByRole("dialog", { name: "Delete 2 selected profiles?" });
-    fireEvent.click(within(deleteSelectedDialog).getByRole("button", { name: "Delete selected" }));
-    await waitFor(() =>
-      expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        profileIds: [2, 3],
-        action: "delete",
-      }),
-    );
-  });
-
-  it("halts selected admin scans when selected profiles are already scanning", async () => {
-    loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
-    loadAdminProfilesMock.mockResolvedValue({
-      summary: {
-        profiles: 1,
-        configuredProfiles: 1,
-        ftpServers: 2,
-        configuredFtpServers: 2,
-        indexedItems: 0,
-        activeScans: 1,
-        pendingScans: 1,
-      },
-      profiles: [
-        {
-          id: 2,
-          browserUid: "first-user-uid",
-          createdAt: "2026-05-16T00:00:00.000Z",
-          updatedAt: "2026-05-16T00:00:00.000Z",
-          lastUnlockedAt: null,
-          ftpServers: 2,
-          configuredFtpServers: 2,
-          indexedItems: 0,
-          lastScanAt: null,
-          lastManifestAccessedAt: null,
-          activeScans: 1,
-          pendingScans: 1,
-          manifestUrl: null,
-          stremioInstallUrl: null,
-          lastCountryCode: "CA",
-          adminEnabled: false,
-          adminSource: null,
-        },
-      ],
-    });
-    bulkAdminProfilesMock.mockResolvedValueOnce({
-      action: "cancel_scan",
-      profileIds: [2],
-      scans: [
-        { profileId: 2, serverId: 20, serverName: "Main", scanStatus: { ...idleScanStatus, status: "cancelled", trigger: "manual", message: "Scan halted." } },
-        { profileId: 2, serverId: 21, serverName: "Mirror", scanStatus: { ...idleScanStatus, status: "cancelled", trigger: "manual", message: "Scan halted." } },
-      ],
-      summary: { profiles: 1, servers: 2, queued: 0, running: 0, halting: 0, cancelled: 2, skipped: 0, failed: 0 },
-    });
-    createProfileMock.mockResolvedValue({
-      profileId: 1,
-      recoveryUid: "admin-uid",
-      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
-      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
-    });
-    saveCustomizationMock.mockResolvedValue({ ok: true });
-
-    render(<App />);
-    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
-
-    await screen.findByRole("heading", { name: "Admin dashboard" });
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select first-user-uid" }));
-    fireEvent.click(screen.getByRole("button", { name: "Halt selected scans" }));
-
-    await waitFor(() =>
-      expect(bulkAdminProfilesMock).toHaveBeenCalledWith({
-        browserUid: expect.any(String),
-        passphrase: "passphrase",
-        profileIds: [2],
-        action: "cancel_scan",
-      }),
-    );
-    expect(within(await screen.findByRole("dialog", { name: "Bulk action status" })).getByText("2 cancelled")).toBeTruthy();
-  });
-
   it("debounces recovery UID setup lookups and ignores stale responses", async () => {
     vi.useFakeTimers();
     const resolvers = new Map<string, (value: Awaited<ReturnType<typeof loadSetupStatus>>) => void>();
     loadSetupStatusMock.mockImplementation((browserUid) => new Promise((resolve) => resolvers.set(browserUid ?? "", resolve)));
     createProfileMock.mockResolvedValue({
       profileId: 1,
-      recoveryUid: "admin-uid",
-      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
-      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
+      recoveryUid: "new-uid",
+      manifestUrl: "https://addon.example.test/u/new/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/new/manifest.json",
     });
     saveCustomizationMock.mockResolvedValue({ ok: true });
     const advance = async (ms: number) => {
@@ -2453,20 +1641,19 @@ describe("App", () => {
     expect(loadSetupStatusMock).toHaveBeenCalledTimes(2);
     expect(loadSetupStatusMock).toHaveBeenLastCalledWith("old-uid");
 
-    fireEvent.change(recoveryUid, { target: { value: "admin-uid" } });
+    fireEvent.change(recoveryUid, { target: { value: "new-uid" } });
     await advance(300);
     expect(loadSetupStatusMock).toHaveBeenCalledTimes(3);
-    expect(loadSetupStatusMock).toHaveBeenLastCalledWith("admin-uid");
+    expect(loadSetupStatusMock).toHaveBeenLastCalledWith("new-uid");
 
-    await act(async () => resolvers.get("admin-uid")?.({ setupTokenRequired: false, isSuperAdmin: true, maxFtpServersPerProfile: 5 }));
-    await act(async () => resolvers.get("old-uid")?.({ setupTokenRequired: false, isSuperAdmin: false, maxFtpServersPerProfile: 1 }));
+    await act(async () => resolvers.get("new-uid")?.({ setupTokenRequired: false, maxFtpServersPerProfile: 5 }));
+    await act(async () => resolvers.get("old-uid")?.({ setupTokenRequired: false, maxFtpServersPerProfile: 1 }));
 
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
     for (let attempt = 0; attempt < 20 && !screen.queryByRole("button", { name: "Log out" }); attempt += 1) await advance(0);
 
     expect(screen.getByText(/Up to 5 servers per profile\./)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create group" })).toBeTruthy();
   });
 
   it("requests setup status once on mount under StrictMode", async () => {
@@ -2668,41 +1855,4 @@ function serverFormFixture(id: number, name: string) {
     sharedIndex: null,
     message: "Server ready.",
   };
-}
-
-function adminProfileFixture(id: number, browserUid: string) {
-  return {
-    id,
-    browserUid,
-    createdAt: "2026-05-16T00:00:00.000Z",
-    updatedAt: "2026-05-16T00:00:00.000Z",
-    lastUnlockedAt: null,
-    lastCountryCode: null,
-    adminEnabled: false,
-    adminSource: null,
-    ftpServers: 1,
-    configuredFtpServers: 1,
-    indexedItems: 1,
-    lastScanAt: null,
-    lastManifestAccessedAt: null,
-    activeScans: 0,
-    pendingScans: 0,
-    manifestUrl: null,
-    stremioInstallUrl: null,
-  };
-}
-
-async function openAdminDashboard() {
-  loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
-  createProfileMock.mockResolvedValue({
-    profileId: 1,
-    recoveryUid: "admin-uid",
-    manifestUrl: "https://addon.example.test/u/admin/manifest.json",
-    stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
-  });
-  saveCustomizationMock.mockResolvedValue({ ok: true });
-  render(<App />);
-  fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
-  fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
-  await screen.findByRole("heading", { name: "Admin dashboard" });
 }

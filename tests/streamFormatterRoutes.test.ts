@@ -24,7 +24,6 @@ function config(): AppConfig {
     profileRateLimitMax: 30,
     tmdbApiKey: null,
     adminBrowserUids: new Set(),
-    superAdminBrowserUids: new Set(),
     scanGlobalConcurrency: 1,
     scanQueueMax: 10,
     scanCooldownMs: 60000,

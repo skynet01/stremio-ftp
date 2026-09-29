@@ -25,7 +25,6 @@ export type AppConfig = {
   maxFtpServersPerProfile: number;
   proxyStreamsDisabled: boolean;
   adminBrowserUids: ReadonlySet<string>;
-  superAdminBrowserUids: ReadonlySet<string>;
   emptyProfileCleanupDays: number;
   emptyProfileCleanupIntervalMs: number;
 };
@@ -116,7 +115,6 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     maxFtpServersPerProfile: nonNegativeNumberValue(env, "MAX_FTP_SERVERS_PER_PROFILE", 0),
     proxyStreamsDisabled: booleanValue(env, "DISABLE_PROXY_STREAMS", false),
     adminBrowserUids: uidSetValue(env, "ADMIN_BROWSER_UIDS"),
-    superAdminBrowserUids: uidSetValue(env, "SUPER_ADMIN_BROWSER_UIDS"),
     emptyProfileCleanupDays: nonNegativeNumberValue(env, "EMPTY_PROFILE_CLEANUP_DAYS", 7),
     emptyProfileCleanupIntervalMs: numberValue(env, "EMPTY_PROFILE_CLEANUP_INTERVAL_MS", 7 * 24 * 60 * 60 * 1000),
   };

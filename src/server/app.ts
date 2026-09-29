@@ -5,7 +5,6 @@ import { timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import helmet from "helmet";
-import { adminRoutes } from "./admin/adminRoutes.js";
 import type { AppConfig } from "./config.js";
 import { openDatabase } from "./db/database.js";
 import { createBasicFtpClientFactory } from "./ftp/basicFtpClient.js";
@@ -14,10 +13,9 @@ import type { FtpClientFactory } from "./ftp/ftpTypes.js";
 import { redactSecrets } from "./logging/redact.js";
 import { MediaRepository } from "./media/mediaRepository.js";
 import { ProfileService } from "./profiles/profileService.js";
-import { createFailedUnlockLimiter, profileRoutes } from "./profiles/profileRoutes.js";
+import { profileRoutes } from "./profiles/profileRoutes.js";
 import { createFtpProxyResolver } from "./proxy/ftpProxyResolver.js";
 import { createProxyRouter } from "./proxy/proxyRoutes.js";
-import { ProxyStreamTracker } from "./proxy/streamTracker.js";
 import { ScanQueue } from "./scanner/scanQueue.js";
 import { stremioRoutes } from "./stremio/routes.js";
 
@@ -56,7 +54,6 @@ export function createApp(
   const baseFtpClientFactory = options.ftpClientFactory ?? createBasicFtpClientFactory(config.ftpTimeoutMs);
   const ftpClientFactory = limitFtpClientFactoryByKey(baseFtpClientFactory, config.ftpMaxConnections);
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
-  const streamTracker = new ProxyStreamTracker();
   const scanScheduler = setInterval(
     guardedTimerTask("[scan-scheduler] Failed to enqueue scheduled scans:", () => scanQueue.enqueueDueScheduledScans()),
     config.scanSchedulerIntervalMs,
@@ -74,26 +71,21 @@ export function createApp(
     cleanupTimer.unref();
   }
   app.use("/api/profile", requireSetupToken(config));
-  app.use("/api/admin", requireSetupToken(config));
   app.get("/api/setup", (req, res) => {
     const browserUid = (req.query.browserUid ?? "").toString();
     const isAdmin = Boolean(browserUid) && profileService.isAdminBrowserUid(browserUid, config.adminBrowserUids);
-    const isSuperAdmin = Boolean(browserUid) && config.superAdminBrowserUids.has(browserUid);
     res.json({
       setupTokenRequired: Boolean(config.setupToken) || !config.allowPublicProfileApi,
       maxFtpServersPerProfile: isAdmin ? 0 : config.maxFtpServersPerProfile,
       proxyStreamsDisabled: isAdmin ? false : config.proxyStreamsDisabled,
       isAdmin,
-      isSuperAdmin,
     });
   });
   app.get("/api/setup/validate", requireSetupToken(config), (_req, res) => {
     res.json({ ok: true });
   });
-  const failedUnlocks = createFailedUnlockLimiter(config);
-  app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue, mediaRepository, failedUnlocks));
-  app.use("/api/admin", adminRoutes(config, profileService, scanQueue, streamTracker, failedUnlocks));
-  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory), streamTracker }));
+  app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue, mediaRepository));
+  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 
   app.get("/health", (_req, res) => {

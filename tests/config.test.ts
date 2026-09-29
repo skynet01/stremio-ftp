@@ -12,7 +12,6 @@ describe("loadConfig", () => {
       LOG_LEVEL: "debug",
       CONFIG_DIR: "/tmp/stremio-ftp-test",
       ADMIN_BROWSER_UIDS: "admin-1 admin-2",
-      SUPER_ADMIN_BROWSER_UIDS: "super-1,super-2",
     });
 
     expect(config.baseUrl).toBe("https://example.test");
@@ -33,7 +32,6 @@ describe("loadConfig", () => {
     expect(config.allowPublicProfileApi).toBe(false);
     expect(config.tmdbApiKey).toBe("tmdb-key");
     expect([...config.adminBrowserUids]).toEqual(["admin-1", "admin-2"]);
-    expect([...config.superAdminBrowserUids]).toEqual(["super-1", "super-2"]);
   });
 
   it("loads scan queue environment values", () => {

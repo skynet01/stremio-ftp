@@ -1,7 +1,6 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelScan,
-  createAdminSharedIndexGroup,
   createFtpServer,
   createProfile,
   deleteFtpServer,
@@ -103,7 +102,6 @@ const SERVER_LIBRARY_SETTING_KEYS = new Set<keyof ServerForm>([
 const SHARED_INDEX_UNLINK_REQUIRED_FRAGMENT = "will unlink it from the shared index group";
 const SCAN_STATUS_POLL_MS = 3000;
 const SETUP_STATUS_DEBOUNCE_MS = 300;
-const AdminDashboard = lazy(() => import("./components/AdminDashboard.js").then((module) => ({ default: module.AdminDashboard })));
 
 function browserUid() {
   const cryptoApi = globalThis.crypto;
@@ -366,7 +364,6 @@ export function App() {
   });
   const [passphrase, setPassphrase] = useState("");
   const [profileState, setProfileState] = useState<ProfileState>("new");
-  const [profileId, setProfileId] = useState<number | null>(null);
   const [profileMessage, setProfileMessage] = useState("Create or unlock this browser profile to install the addon.");
   const [manifestUrl, setManifestUrl] = useState<string | null>(null);
   const [stremioInstallUrl, setStremioInstallUrl] = useState<string | null>(null);
@@ -388,7 +385,6 @@ export function App() {
   const [changelogEntries, setChangelogEntries] = useState<ChangelogEntry[]>(APP_CHANGELOG);
   const [maxFtpServersPerProfile, setMaxFtpServersPerProfile] = useState(0);
   const [proxyStreamsDisabled, setProxyStreamsDisabled] = useState(false);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [importedSettings, setImportedSettings] = useState<ImportSummary | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [exportStripCredentials, setExportStripCredentials] = useState(true);
@@ -426,12 +422,10 @@ export function App() {
           if (isStale()) return;
           if (typeof status.maxFtpServersPerProfile === "number") setMaxFtpServersPerProfile(status.maxFtpServersPerProfile);
           if (typeof status.proxyStreamsDisabled === "boolean") setProxyStreamsDisabled(status.proxyStreamsDisabled);
-          setIsSuperAdmin(Boolean(status.isSuperAdmin));
           if (needsSetupProbe) setSetupTokenRequired(status.setupTokenRequired);
         })
         .catch(() => {
           if (isStale()) return;
-          setIsSuperAdmin(false);
           if (needsSetupProbe) setSetupTokenRequired(true);
         });
     };
@@ -623,7 +617,6 @@ export function App() {
         return;
       }
       const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase: rememberedPassphrase });
-      setProfileId(unlocked.profileId);
       rememberSession(rememberedPassphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
       setProfileState("unlocked");
       await loadServerState(rememberedPassphrase);
@@ -691,7 +684,6 @@ export function App() {
     setProfileMessage("Creating profile...");
     try {
       const created = await createProfile({ browserUid: recoveryUid, passphrase });
-      setProfileId(created.profileId);
       rememberSession(passphrase, created.manifestUrl, created.stremioInstallUrl);
       setProfileState("created");
       const importToApply = importedSettings;
@@ -738,7 +730,6 @@ export function App() {
     setProfileMessage("Unlocking profile...");
     try {
       const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase });
-      setProfileId(unlocked.profileId);
       rememberSession(passphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
       setProfileState("unlocked");
       await loadServerState();
@@ -760,34 +751,6 @@ export function App() {
       setCustomizationMessage("Addon branding saved. Reinstall or refresh the addon in Stremio to see it there.");
     } catch (error) {
       setCustomizationMessage(error instanceof Error ? error.message : "Unable to save addon branding.");
-    }
-  }
-
-  async function currentProfileId() {
-    if (profileId) return profileId;
-    const unlocked = await unlockProfile({ browserUid: recoveryUid, passphrase });
-    setProfileId(unlocked.profileId);
-    rememberSession(passphrase, unlocked.manifestUrl, unlocked.stremioInstallUrl);
-    return unlocked.profileId;
-  }
-
-  async function createSharedGroupFromServer(serverId: number) {
-    const server = serverById(serverId);
-    updateServer(serverId, { message: "Creating shared index group..." });
-    try {
-      const ownerProfileId = await currentProfileId();
-      const created = await createAdminSharedIndexGroup({
-        browserUid: recoveryUid,
-        passphrase,
-        profileId: ownerProfileId,
-        serverId,
-        name: server.name.trim() || `Server ${serverId}`,
-      });
-      await navigator.clipboard?.writeText(created.sharedIndexKey);
-      await loadServerState();
-      updateServer(serverId, { message: "Shared index group created. Shared index key copied." });
-    } catch (error) {
-      updateServer(serverId, { message: error instanceof Error ? error.message : "Unable to create shared index group." });
     }
   }
 
@@ -1301,7 +1264,6 @@ export function App() {
 
   function logout() {
     setProfileState("new");
-    setProfileId(null);
     setProfileMessage("Enter your passphrase to unlock this browser profile.");
     setManifestUrl(null);
     setStremioInstallUrl(null);
@@ -1460,7 +1422,6 @@ export function App() {
                 onTestServer={(serverId) => void testServer(serverId)}
                 onRefreshServer={(serverId) => void refreshServer(serverId)}
                 onCancelServer={(serverId) => void haltServer(serverId)}
-                onCreateSharedGroup={isSuperAdmin ? (serverId) => void createSharedGroupFromServer(serverId) : undefined}
                 onUpdateScanSchedule={(serverId, intervalMinutes) => void updateScanSchedule(serverId, intervalMinutes)}
               />
               {hasSavedServer ? (
@@ -1479,11 +1440,6 @@ export function App() {
                   </button>
                 </div>
               )}
-              {isSuperAdmin ? (
-                <Suspense fallback={null}>
-                  <AdminDashboard browserUid={recoveryUid} passphrase={passphrase} />
-                </Suspense>
-              ) : null}
             </>
           ) : null}
         </div>
