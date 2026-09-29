@@ -5,7 +5,13 @@ import { countryCodeFromRequest } from "../http/requestMetadata.js";
 import type { ProfileScanStatus } from "../scanner/scanQueue.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
 import { nextAlignedScanAt } from "../scanner/schedule.js";
-import { createFailedUnlockLimiter, unlockWithFailureLimit, type FailedUnlockLimiter } from "../profiles/profileRoutes.js";
+import {
+  createFailedUnlockLimiter,
+  installUrls,
+  isDraftFtpConfig,
+  unlockWithFailureLimit,
+  type FailedUnlockLimiter,
+} from "../profiles/profileRoutes.js";
 import {
   ProfileNotFoundError,
   ProfileRequestError,
@@ -43,25 +49,13 @@ const sharedIndexUpdateSchema = adminAuthSchema.extend({
   autoLinkImports: z.boolean().optional(),
 });
 const sharedIndexScheduleSchema = adminAuthSchema.extend({
-  intervalMinutes: z.number().int().min(0),
+  intervalMinutes: z.number().int().min(0).max(10080),
 });
 const sharedIndexServerTargetSchema = adminAuthSchema.extend({
   profileId: z.number().int().positive(),
   serverId: z.number().int().positive(),
   force: z.boolean().optional(),
 });
-
-function urls(baseUrl: string, token: string) {
-  const manifestUrl = `${baseUrl}/u/${token}/manifest.json`;
-  return {
-    manifestUrl,
-    stremioInstallUrl: manifestUrl.replace(/^https?:\/\//, "stremio://"),
-  };
-}
-
-function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: string | null }) {
-  return !ftpConfig.username?.trim() || !ftpConfig.password;
-}
 
 export function adminRoutes(
   config: AppConfig,
@@ -322,7 +316,7 @@ export function adminRoutes(
 
     try {
       const issued = service.issueInstallToken(profileId.data);
-      res.json({ profileId: profileId.data, ...urls(config.baseUrl, issued.installUrlToken) });
+      res.json({ profileId: profileId.data, ...installUrls(config.baseUrl, issued.installUrlToken) });
     } catch (error) {
       if (error instanceof ProfileNotFoundError) return res.status(404).json({ error: "Profile not found" });
       throw error;

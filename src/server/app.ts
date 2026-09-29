@@ -41,6 +41,7 @@ export function createApp(
       contentSecurityPolicy: {
         directives: {
           imgSrc: ["'self'", "data:", "https:"],
+          connectSrc: ["'self'", "https://api.github.com"],
           upgradeInsecureRequests: config.baseUrl.startsWith("https://") ? [] : null,
         },
       },
@@ -90,7 +91,7 @@ export function createApp(
     res.json({ ok: true });
   });
   const failedUnlocks = createFailedUnlockLimiter(config);
-  app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue, failedUnlocks));
+  app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue, mediaRepository, failedUnlocks));
   app.use("/api/admin", adminRoutes(config, profileService, scanQueue, streamTracker, failedUnlocks));
   app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory), streamTracker }));
   app.use(stremioRoutes(config, profileService, mediaRepository));

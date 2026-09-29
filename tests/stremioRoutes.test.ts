@@ -633,6 +633,10 @@ describe("stremio routes", () => {
         },
       },
     ]);
+    const fileStream = await request(app)
+      .get(`/u/${created.installUrlToken}/stream/movie/${String(otherCatalog.body.metas[0].id).replace("ftp-folder:", "ftp:")}.json`)
+      .expect(200);
+    expect(fileStream.body.streams).toEqual(stream.body.streams);
   });
 
   it("does not query TMDB while serving the Other catalog", async () => {

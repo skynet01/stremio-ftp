@@ -37,31 +37,9 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const customization = manifestCustomization(profiles, profileId, config.proxyStreamsDisabled, config.adminBrowserUids);
     const ftpConfigForServer = (serverId: number | null | undefined) =>
       serverId ? profiles.getFtpServerConfig(profileId, serverId) : profiles.getFtpConfig(profileId);
-    const folderRef = internalFolderRef(id);
-    if (folderRef) {
-      const files = mediaRepository.otherCatalogStreams(profileId, folderRef, {
-        ...catalogServerScope(profiles, profileId),
-        scopeToRepresentativeServer: splitOtherCatalogsEnabled(profiles, profileId, customization),
-      });
-      return res.json({
-        streams: files.map((file) =>
-          streamForMatch({
-            baseUrl: config.baseUrl,
-            installToken,
-            match: file,
-            streamDeliveryMode: customization.streamDeliveryMode,
-            ftpConfigForServer,
-            addonName: customization.addonName,
-            streamNameTemplate: customization.streamNameTemplate,
-            streamDescriptionTemplate: customization.streamDescriptionTemplate,
-          }),
-        ),
-      });
-    }
-
-    const fileId = internalFileId(id);
-    if (fileId) {
-      const files = mediaRepository.otherCatalogStreams(profileId, fileId, {
+    const otherCatalogRef = internalFolderRef(id) ?? internalFileId(id);
+    if (otherCatalogRef) {
+      const files = mediaRepository.otherCatalogStreams(profileId, otherCatalogRef, {
         ...catalogServerScope(profiles, profileId),
         scopeToRepresentativeServer: splitOtherCatalogsEnabled(profiles, profileId, customization),
       });

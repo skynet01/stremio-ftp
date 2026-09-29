@@ -676,6 +676,12 @@ describe("admin routes", () => {
       .expect(200);
     expect(scheduled.body.group.scanSchedule.intervalMinutes).toBe(360);
     expect(scheduled.body.scanSchedule).toEqual({ intervalMinutes: 360, nextScheduledScanAt: expect.any(String) });
+    const tooLong = await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/schedule`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", intervalMinutes: 10081 })
+      .expect(400);
+    expect(tooLong.body).toEqual({ error: "Invalid shared index schedule request" });
 
     const profileList = await request(app)
       .post("/api/admin/profiles")

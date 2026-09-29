@@ -64,6 +64,7 @@ describe("app health", () => {
     const response = await request(createApp(config, db)).get("/health").expect(200);
 
     expect(response.header["content-security-policy"]).toContain("img-src 'self' data: https:");
+    expect(response.header["content-security-policy"]).toContain("connect-src 'self' https://api.github.com");
   });
 
   it("does not force HTTPS upgrades when serving over plain HTTP", async () => {

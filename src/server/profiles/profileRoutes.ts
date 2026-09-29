@@ -5,7 +5,7 @@ import { MAX_STREAM_FORMATTER_TEMPLATE_LENGTH } from "../../shared/streamFormatt
 import type { AppConfig } from "../config.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import { countryCodeFromRequest } from "../http/requestMetadata.js";
-import { MediaRepository } from "../media/mediaRepository.js";
+import type { MediaRepository } from "../media/mediaRepository.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
 import {
   DuplicateProfileError,
@@ -34,13 +34,11 @@ const ftpConfigSchema = z.object({
   roots: z.array(z.string().trim().min(1)).min(1),
 });
 
-function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: string | null }) {
+export function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: string | null }) {
   return !ftpConfig.username?.trim() || !ftpConfig.password;
 }
 
 const authenticatedSchema = createSchema;
-type AuthenticatedBody = z.infer<typeof authenticatedSchema>;
-type ProfileContext<T> = { req: Request; res: Response; data: T; profileId: number };
 const saveFtpSchema = createSchema.extend({ ftpConfig: ftpConfigSchema });
 const serverIdSchema = createSchema.extend({ serverId: z.number().int().positive() });
 const saveScanScheduleSchema = createSchema.extend({
@@ -88,7 +86,10 @@ const saveServerSchema = serverIdSchema.extend({
   unlinkSharedIndex: z.boolean().optional(),
 });
 
-function urls(baseUrl: string, token: string) {
+type AuthenticatedBody = z.infer<typeof authenticatedSchema>;
+type ProfileContext<T> = { res: Response; data: T; profileId: number };
+
+export function installUrls(baseUrl: string, token: string) {
   const manifestUrl = `${baseUrl}/u/${token}/manifest.json`;
   return {
     manifestUrl,
@@ -101,6 +102,7 @@ export function profileRoutes(
   service: ProfileService,
   ftpClientFactory: FtpClientFactory,
   scanQueue: ScanQueue,
+  mediaRepository: MediaRepository,
   failedUnlocks: FailedUnlockLimiter = createFailedUnlockLimiter(config),
 ) {
   const router = Router();
@@ -127,7 +129,7 @@ export function profileRoutes(
       );
       if (profileId === null) return;
       try {
-        await handler({ req, res, data: parsed.data, profileId });
+        await handler({ res, data: parsed.data, profileId });
       } catch (error) {
         if (res.headersSent) throw error;
         if (error instanceof ProfileNotFoundError) return res.status(404).json({ error: "Profile or FTP server not found" });
@@ -144,7 +146,7 @@ export function profileRoutes(
       res.status(201).json({
         profileId: created.profileId,
         recoveryUid: parsed.data.browserUid,
-        ...urls(config.baseUrl, created.installUrlToken),
+        ...installUrls(config.baseUrl, created.installUrlToken),
       });
     } catch (error) {
       if (error instanceof DuplicateProfileError) return res.status(409).json({ error: "Profile already exists" });
@@ -162,7 +164,7 @@ export function profileRoutes(
         const issued = service.issueInstallToken(profileId);
         res.json({
           profileId,
-          ...urls(config.baseUrl, issued.installUrlToken),
+          ...installUrls(config.baseUrl, issued.installUrlToken),
         });
       },
       { recordCountry: true },
@@ -236,7 +238,7 @@ export function profileRoutes(
     withProfile(authenticatedSchema, "Invalid server load request", ({ res, profileId }) => {
       res.json({
         customization: service.getAddonCustomization(profileId),
-        ...serversWithStats(service, scanQueue, profileId),
+        ...serversWithStats(service, scanQueue, mediaRepository, profileId),
       });
     }),
   );
@@ -256,7 +258,7 @@ export function profileRoutes(
       const server = service.createFtpServer(profileId);
       res.status(201).json({
         server: serverPayload(service, scanQueue, server),
-        globalStats: globalStats(service, scanQueue, profileId),
+        globalStats: globalStats(service, scanQueue, mediaRepository, profileId),
       });
     }),
   );
@@ -296,7 +298,7 @@ export function profileRoutes(
       if (server.sharedIndex) scanQueue.cancelServerScan(profileId, server.id);
       res.json({
         server: serverPayload(service, scanQueue, server),
-        globalStats: globalStats(service, scanQueue, profileId),
+        globalStats: globalStats(service, scanQueue, mediaRepository, profileId),
       });
     }),
   );
@@ -318,7 +320,7 @@ export function profileRoutes(
         throw error;
       }
       res.json({
-        ...serversWithStats(service, scanQueue, profileId),
+        ...serversWithStats(service, scanQueue, mediaRepository, profileId),
       });
     }),
   );
@@ -412,7 +414,7 @@ export function profileRoutes(
           return res.json({
             scanStatus: scanStatuses[0],
             scanStatuses,
-            ...serversWithStats(service, scanQueue, profileId),
+            ...serversWithStats(service, scanQueue, mediaRepository, profileId),
           });
         }
         const serverId = data.serverId ?? service.defaultFtpServerId(profileId);
@@ -449,7 +451,7 @@ export function profileRoutes(
         indexStatus: service.getIndexStatus(profileId),
         scanStatus: scanQueue.getProfileScanStatus(profileId),
         scanSchedule: service.getScanSchedule(profileId),
-        ...serversWithStats(service, scanQueue, profileId),
+        ...serversWithStats(service, scanQueue, mediaRepository, profileId),
       });
     }),
   );
@@ -480,11 +482,11 @@ export function profileRoutes(
   return router;
 }
 
-function serversWithStats(service: ProfileService, scanQueue: ScanQueue, profileId: number) {
+function serversWithStats(service: ProfileService, scanQueue: ScanQueue, mediaRepository: MediaRepository, profileId: number) {
   const servers = service.listFtpServers(profileId);
   return {
     servers: servers.map((server) => serverPayload(service, scanQueue, server)),
-    globalStats: globalStats(service, scanQueue, profileId, servers),
+    globalStats: globalStats(service, scanQueue, mediaRepository, profileId, servers),
   };
 }
 
@@ -535,9 +537,15 @@ function isSharedIndexMaster(server: FtpServer) {
   return Boolean(server.sharedIndex?.isMaster);
 }
 
-function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: number, servers = service.listFtpServers(profileId)) {
+function globalStats(
+  service: ProfileService,
+  scanQueue: ScanQueue,
+  mediaRepository: MediaRepository,
+  profileId: number,
+  servers = service.listFtpServers(profileId),
+) {
   const linkedGroupIds = [...new Set(servers.map((server) => server.sharedIndex?.id).filter((id): id is number => typeof id === "number"))];
-  const counts = new MediaRepository(service.database).aggregateCountsForProfileWithSharedIndexes(profileId, linkedGroupIds);
+  const counts = mediaRepository.aggregateCountsForProfileWithSharedIndexes(profileId, linkedGroupIds);
   const statuses = [
     ...servers.filter((server) => !server.sharedIndex).map((server) => scanQueue.getServerScanStatus(profileId, server.id)),
     ...linkedGroupIds.map((groupId) => scanQueue.getSharedIndexScanStatus(groupId)),
@@ -685,13 +693,9 @@ function profileRateLimiter(windowMs: number, maxAttempts: number): RequestHandl
   };
 }
 
-function profileRateLimitKey(req: Parameters<RequestHandler>[0]) {
-  const cloudflareIp = firstHeaderValue(req.headers["cf-connecting-ip"]);
+function profileRateLimitKey(req: Request) {
+  const cloudflareIp = req.header("cf-connecting-ip")?.trim();
   if (cloudflareIp && isIP(cloudflareIp)) return `ip:${cloudflareIp}`;
 
   return `ip:${req.ip || req.socket.remoteAddress || "unknown"}`;
-}
-
-function firstHeaderValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
 }
