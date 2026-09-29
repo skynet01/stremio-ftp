@@ -101,7 +101,7 @@ describe("MediaRepository", () => {
     const initial = repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-01", 10);
     repo.saveCatalogEnrichmentUnmatched(initial[0].id, "2026-01-01");
     repo.saveCatalogEnrichmentMatch(initial[1].id, { id: "tt1111111", type: "movie", name: "Known Movie" }, "2026-01-01");
-    db.prepare("update catalog_enrichment set algorithm_version = 6").run();
+    db.prepare("update catalog_enrichment set algorithm_version = 7").run();
     repo.syncCatalogEnrichmentCandidates(profileId, serverId, candidates, "2026-01-02");
     const pending = repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-02", 10);
     expect(pending.map((row) => row.parsedTitle).sort()).toEqual(["known movie", "lost movie"]);
@@ -122,6 +122,27 @@ describe("MediaRepository", () => {
     repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), "2026-01-01");
     expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-01", 10)[0]).toMatchObject({ alternateTitle: "novocaine", alternateYear: 2025 });
   });
+
+  it.each([
+    ["/TV Shows/Golden Boy (1995)/Golden Boy.S1.02.H264.FSBS.3DFF.mkv", "golden boy", 1995],
+    ["/TV Shows/Dragon Ball (1986)/Dragon ball E030_3DFF_FSBS.mkv", "dragon ball", 1986],
+  ])("carries the folder year into series enrichment for %s", (path, title, year) => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    db.prepare("update profile_ftp_servers set library_layout = 'folders' where id = ?").run(serverId);
+    const repo = new MediaRepository(db);
+    repo.upsertParsedFile(profileId, { ...parseMediaPath(path, { libraryLayout: "folders" })!, ftpServerId: serverId });
+    repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["series", "anime"]), "2026-01-01");
+
+    expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-01", 10)[0]).toMatchObject({
+      parsedTitle: title,
+      parsedYear: null,
+      alternateYear: year,
+    });
+  });
+
   it("upserts and queries episode rows", () => {
     const db = new Database(":memory:");
     migrate(db);

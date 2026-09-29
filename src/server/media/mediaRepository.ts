@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
-import { PARSER_VERSION, parseMediaPath, type ParsedMedia, type ParseMediaOptions } from "./parser.js";
+import { PARSER_VERSION, parseMediaPath, seriesFolderYearOf, type ParsedMedia, type ParseMediaOptions } from "./parser.js";
 
-const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 7;
+const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 8;
 
 export type ParsedMediaFileInput = Omit<ParsedMedia, "catalogKind"> & {
   catalogKind?: ParsedMedia["catalogKind"];
@@ -31,6 +31,7 @@ export type CatalogItem = {
   parsedYear: number | null;
   imdbId: string | null;
   alternateTitle?: string | null;
+  // Also carries a known series folder year when the filename has no year.
   alternateYear?: number | null;
 };
 
@@ -39,6 +40,7 @@ export type CatalogEnrichmentCandidate = CatalogItem & {
   ftpServerId: number;
   itemKey: string;
   status?: "pending" | "matched" | "unmatched" | "retry";
+  existingMeta?: PersistedCatalogMeta | null;
 };
 
 export type PersistedCatalogMeta = {
@@ -118,7 +120,7 @@ function storedParseValues(parsed: ParsedMedia) {
 function alternateForPath(ftpPath: string, libraryLayout: ParseMediaOptions["libraryLayout"], parsedTitle?: string) {
   const parsed = parseMediaPath(ftpPath, { libraryLayout, contentTypes: { movies: true, series: true, anime: true } });
   if (!parsed || (parsedTitle && parsed.parsedTitle !== parsedTitle)) return { alternateTitle: null, alternateYear: null };
-  return { alternateTitle: parsed.alternateTitle, alternateYear: parsed.alternateYear };
+  return { alternateTitle: parsed.alternateTitle, alternateYear: parsed.alternateYear ?? (parsed.mediaKind === "series" ? seriesFolderYearOf(ftpPath, parsed.parsedTitle) : null) };
 }
 
 export class MediaRepository {
@@ -1170,7 +1172,7 @@ export class MediaRepository {
     const rows = this.db
       .prepare(
         `
-        select id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year, source_imdb_id, alternate_title, alternate_year, status
+        select id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year, source_imdb_id, alternate_title, alternate_year, status, meta_id, meta_type, meta_name, release_info
         from catalog_enrichment
         where profile_id = ?
           and ftp_server_id = ?
@@ -1195,6 +1197,10 @@ export class MediaRepository {
       alternate_title: string | null;
       alternate_year: number | null;
       status: "pending" | "matched" | "unmatched" | "retry";
+      meta_id: string | null;
+      meta_type: "movie" | "series" | null;
+      meta_name: string | null;
+      release_info: string | null;
     }>;
     return rows.map((row) => ({
       id: row.id,
@@ -1208,6 +1214,9 @@ export class MediaRepository {
       alternateTitle: row.alternate_title,
       alternateYear: row.alternate_year,
       status: row.status,
+      existingMeta: row.meta_id && row.meta_type && row.meta_name
+        ? { id: row.meta_id, type: row.meta_type, name: row.meta_name, releaseInfo: row.release_info ?? undefined }
+        : null,
     }));
   }
 
@@ -1253,15 +1262,14 @@ export class MediaRepository {
       .prepare(
         `
         update catalog_enrichment
-        set status = case when status = 'matched' then 'matched' else 'unmatched' end,
-            meta_id = case when status = 'matched' then meta_id else null end,
-            meta_type = case when status = 'matched' then meta_type else null end,
-            meta_name = case when status = 'matched' then meta_name else null end,
-            poster = case when status = 'matched' then poster else null end,
-            background = case when status = 'matched' then background else null end,
-            description = case when status = 'matched' then description else null end,
-            release_info = case when status = 'matched' then release_info else null end,
-            genres = case when status = 'matched' then genres else null end,
+        set status = case when meta_id is not null then 'matched' else 'unmatched' end,
+            meta_type = case when meta_id is not null then meta_type else null end,
+            meta_name = case when meta_id is not null then meta_name else null end,
+            poster = case when meta_id is not null then poster else null end,
+            background = case when meta_id is not null then background else null end,
+            description = case when meta_id is not null then description else null end,
+            release_info = case when meta_id is not null then release_info else null end,
+            genres = case when meta_id is not null then genres else null end,
             algorithm_version = ?,
             attempts = attempts + 1,
             error = null,

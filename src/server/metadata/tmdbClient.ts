@@ -1,4 +1,4 @@
-import type { CatalogItem } from "../media/mediaRepository.js";
+import type { CatalogItem, PersistedCatalogMeta } from "../media/mediaRepository.js";
 import { normalizeTitle } from "../media/normalizer.js";
 import { TtlCache } from "./ttlCache.js";
 
@@ -171,6 +171,20 @@ export function clearTmdbCatalogCache() {
   catalogMetaCache.clear();
 }
 
+export function catalogMetaMatchesItem(item: CatalogItem, meta: PersistedCatalogMeta, catalogKind: TmdbCatalogKind): boolean {
+  if (meta.type !== (catalogKind === "movie" ? "movie" : "series")) return false;
+  if (titleRelationshipScore(item.parsedTitle, meta.name) <= 0 &&
+    (!item.alternateTitle || titleRelationshipScore(item.alternateTitle, meta.name) <= 0)) return false;
+  const year = searchYear(item, catalogKind);
+  const alternateYear = item.alternateTitle ? item.alternateYear : null;
+  const metaYear = Number(meta.releaseInfo?.slice(0, 4));
+  return !year || !metaYear || Math.abs(year - metaYear) <= 1 || Boolean(alternateYear && Math.abs(alternateYear - metaYear) <= 1);
+}
+
+function searchYear(item: CatalogItem, catalogKind: TmdbCatalogKind): number | null {
+  return item.parsedYear ?? (catalogKind === "movie" ? null : item.alternateYear ?? null);
+}
+
 async function metaFromImdbId(item: CatalogItem, imdbId: string, apiKey: string | null, catalogKind: TmdbCatalogKind): Promise<CatalogMeta | null> {
   if (!apiKey) return fallbackMeta(item, imdbId, catalogKind);
   const url = new URL(`https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}`);
@@ -197,7 +211,7 @@ async function metaFromSearch(item: CatalogItem, apiKey: string | null, catalogK
   }
   const variant = hadResults ? wordNumberSequelTitle(query) ?? romanNumeralSequelTitle(query) : romanNumeralSequelTitle(query) ?? wordNumberSequelTitle(query);
   if (variant && variant !== query) return metaFromSearchQuery(item, apiKey, catalogKind, variant, true);
-  return item.parsedYear ? metaFromSearchQuery(item, apiKey, catalogKind, query, false) : null;
+  return searchYear(item, catalogKind) ? metaFromSearchQuery(item, apiKey, catalogKind, query, false) : null;
 }
 
 async function metaFromSearchQuery(
@@ -212,8 +226,9 @@ async function metaFromSearchQuery(
   const url = new URL(`https://api.themoviedb.org/3/search/${searchType}`);
   url.searchParams.set("api_key", apiKey);
   url.searchParams.set("query", query);
-  if (includeYear && item.parsedYear) {
-    url.searchParams.set(catalogKind === "movie" ? "year" : "first_air_date_year", String(item.parsedYear));
+  const year = searchYear(item, catalogKind);
+  if (includeYear && year) {
+    url.searchParams.set(catalogKind === "movie" ? "year" : "first_air_date_year", String(year));
   }
 
   const body = await fetchJson<TmdbSearchResponse<TmdbMovie | TmdbTv>>(url);
@@ -233,6 +248,7 @@ async function resultWithImdbId(
   apiKey: string,
   query: string,
 ) {
+  const normalizedQuery = normalizeRelationshipTitle(query);
   const ranked = results
     .filter((result): result is (TmdbMovie | TmdbTv) & { id: number } => Boolean(result.id))
     .filter((result) => resultHasPlausibleYear(item, catalogKind, result))
@@ -241,9 +257,10 @@ async function resultWithImdbId(
       index,
       score: resultScore(item, catalogKind, result),
       titleScore: titleRelationshipScore(query, resultTitle(result, catalogKind)),
+      exactTitle: normalizeRelationshipTitle(resultTitle(result, catalogKind)) === normalizedQuery,
     }))
     .filter((candidate) => candidate.titleScore > 0)
-    .sort((a, b) => b.score - a.score || a.index - b.index);
+    .sort((a, b) => Number(b.exactTitle) - Number(a.exactTitle) || b.score - a.score || a.index - b.index);
 
   for (const candidate of ranked) {
     const externalIds = await fetchExternalIds(searchType, candidate.result.id, apiKey);
@@ -255,11 +272,12 @@ async function resultWithImdbId(
 function resultScore(item: CatalogItem, catalogKind: TmdbCatalogKind, result: TmdbMovie | TmdbTv) {
   const titleScore = titleRelationshipScore(item.parsedTitle, resultTitle(result, catalogKind));
   const resultYear = resultReleaseYear(result, catalogKind);
+  const year = searchYear(item, catalogKind);
   const yearScore =
-    item.parsedYear && resultYear
-      ? item.parsedYear === resultYear
+    year && resultYear
+      ? year === resultYear
         ? 50
-        : Math.abs(item.parsedYear - resultYear) <= 1
+        : Math.abs(year - resultYear) <= 1
           ? 10
           : -50
       : 0;
@@ -268,7 +286,8 @@ function resultScore(item: CatalogItem, catalogKind: TmdbCatalogKind, result: Tm
 
 function resultHasPlausibleYear(item: CatalogItem, catalogKind: TmdbCatalogKind, result: TmdbMovie | TmdbTv) {
   const resultYear = resultReleaseYear(result, catalogKind);
-  return !item.parsedYear || !resultYear || Math.abs(item.parsedYear - resultYear) <= 1;
+  const year = searchYear(item, catalogKind);
+  return !year || !resultYear || Math.abs(year - resultYear) <= 1;
 }
 
 function titleRelationshipScore(expectedTitle: string, resultTitleValue: string) {
@@ -279,14 +298,13 @@ function titleRelationshipScore(expectedTitle: string, resultTitleValue: string)
   const expectedTokens = relationshipTokens(normalizedExpectedTitle);
   const resultTokens = relationshipTokens(normalizedResultTitle);
   if (!expectedTokens.length || !resultTokens.length) return 0;
-  if (expectedTokens.join(" ") === resultTokens.join(" ")) return 100;
+  if (expectedTokens.join(" ") === resultTokens.join(" ")) return 50;
   const expectedSet = new Set(expectedTokens);
   const resultSet = new Set(resultTokens);
-  if (expectedSet.size === 1 && resultSet.has(expectedTokens[0])) return 25;
-  if (resultSet.size === 1 && expectedSet.has(resultTokens[0])) return 25;
+  if (expectedSet.size === 1) return resultTokens[0] === expectedTokens[0] ? 25 : 0;
+  if (Array.from(expectedSet).every((token) => resultSet.has(token))) return 25;
   const commonTokens = Array.from(expectedSet).filter((token) => resultSet.has(token)).length;
-  if (commonTokens < 2) return 0;
-  return commonTokens / expectedSet.size >= 0.5 || commonTokens / resultSet.size >= 0.5 ? 25 : 0;
+  return expectedTokens.some((token) => /^(?:[2-9]|1\d|20)$/.test(token)) && commonTokens >= 2 ? 25 : 0;
 }
 
 function normalizeRelationshipTitle(value: string) {

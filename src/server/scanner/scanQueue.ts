@@ -10,7 +10,7 @@ import {
 } from "../ftp/crawler.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { CatalogEnrichmentCandidate, MediaRepository } from "../media/mediaRepository.js";
-import { tmdbCatalogEnrichment, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
+import { catalogMetaMatchesItem, tmdbCatalogEnrichment, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
 import type { ProfileService } from "../profiles/profileService.js";
 import { nextAlignedScanAt } from "./schedule.js";
 
@@ -585,7 +585,11 @@ export class ScanQueue {
       const result = await tmdbCatalogEnrichment(candidate, apiKey, tmdbLookupKind(candidate));
       const now = new Date().toISOString();
       if (result.status === "matched") {
-        this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
+        if (candidate.existingMeta && catalogMetaMatchesItem(candidate, candidate.existingMeta, tmdbLookupKind(candidate))) {
+          this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
+        } else {
+          this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
+        }
       } else if (result.status === "unmatched") {
         this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
       } else {
@@ -638,7 +642,11 @@ export class ScanQueue {
       const result = await tmdbCatalogEnrichment(candidate, apiKey, tmdbLookupKind(candidate));
       const now = new Date().toISOString();
       if (result.status === "matched") {
-        this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
+        if (candidate.existingMeta && catalogMetaMatchesItem(candidate, candidate.existingMeta, tmdbLookupKind(candidate))) {
+          this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
+        } else {
+          this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
+        }
       } else if (result.status === "unmatched") {
         this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
       } else {

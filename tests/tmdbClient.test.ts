@@ -318,6 +318,98 @@ describe("tmdbCatalogMeta", () => {
     expect(new URL(String(fetchMock.mock.calls[1][0])).searchParams.get("first_air_date_year")).toBeNull();
   });
 
+  it.each([
+    ["golden boy", 1995, "Golden Boy", "Golden Boy", 2022, "tt0159145", "tt2229167"],
+    ["dragon ball", 1986, "Dragon Ball", "Dragon Ball Z", 1986, "tt0088504", "tt0121220"],
+  ])("uses the folder year and exact TV title for %s", async (parsedTitle, year, correctTitle, decoyTitle, decoyYear, correctId, decoyId) => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/tv") {
+        return { ok: true, json: async () => ({ results: url.searchParams.get("first_air_date_year") === String(year)
+          ? [
+              { id: 1, name: decoyTitle, first_air_date: `${decoyYear}-01-01` },
+              { id: 2, name: correctTitle, first_air_date: `${year}-01-01` },
+            ]
+          : [{ id: 1, name: decoyTitle, first_air_date: `${decoyYear}-01-01` }] }) };
+      }
+      if (url.pathname === "/3/tv/1/external_ids") return { ok: true, json: async () => ({ imdb_id: decoyId }) };
+      if (url.pathname === "/3/tv/2/external_ids") return { ok: true, json: async () => ({ imdb_id: correctId }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: "series", catalogKind: "series", parsedTitle, parsedYear: null, alternateYear: year, imdbId: null }, "tmdb-key")).resolves.toMatchObject({
+      status: "matched",
+      meta: { id: correctId, name: correctTitle },
+    });
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("first_air_date_year")).toBe(String(year));
+  });
+
+  it("rejects Heavens Fall when searching for The Fall", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [{ id: 1, title: "Heavens Fall", release_date: "2006-01-01" }] }) };
+      if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0425094" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle: "the fall", parsedYear: 2006, imdbId: null }, "tmdb-key")).resolves.toEqual({ status: "unmatched" });
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/movie/1/external_ids");
+  });
+
+  it("prefers an exact TV title and matching first-air year over a longer result", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/tv") return { ok: true, json: async () => ({ results: [
+        { id: 1, name: "Northbound: Origins", first_air_date: "2004-01-01" },
+        { id: 2, name: "Northbound", first_air_date: "2004-06-01" },
+      ] }) };
+      if (url.pathname === "/3/tv/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0000001" }) };
+      if (url.pathname === "/3/tv/2/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0000002" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: "series", catalogKind: "series", parsedTitle: "northbound", parsedYear: 2004, imdbId: null }, "tmdb-key")).resolves.toMatchObject({
+      status: "matched", meta: { id: "tt0000002" },
+    });
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("first_air_date_year")).toBe("2004");
+  });
+
+  it("prefers an exact TV title even when its first-air date is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/tv") return { ok: true, json: async () => ({ results: [
+        { id: 1, name: "Harbor Lights Z", first_air_date: "2004-01-01" },
+        { id: 2, name: "Harbor Lights" },
+      ] }) };
+      if (url.pathname === "/3/tv/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0000001" }) };
+      if (url.pathname === "/3/tv/2/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0000002" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    }));
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: "series", catalogKind: "series", parsedTitle: "harbor lights", parsedYear: 2004, imdbId: null }, "tmdb-key")).resolves.toMatchObject({
+      status: "matched", meta: { id: "tt0000002" },
+    });
+  });
+
+  it.each([
+    ["the harbor", "Blue Harbor"],
+    ["bright summer nights", "Summer Nights"],
+  ])("rejects %s against a result with only partial significant-word coverage", async (parsedTitle, candidateTitle) => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [{ id: 1, title: candidateTitle, release_date: "2001-01-01" }] }) };
+      if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0000001" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle, parsedYear: 2001, imdbId: null }, "tmdb-key")).resolves.toEqual({ status: "unmatched" });
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/movie/1/external_ids");
+  });
+
   it("does not search movies for an unmatched series", async () => {
     const fetchMock = vi
       .fn()

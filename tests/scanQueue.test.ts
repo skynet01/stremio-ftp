@@ -927,8 +927,61 @@ describe("ScanQueue", () => {
       meta_id: "tt0133093",
       meta_name: "The Matrix",
       genres: '["Drama"]',
-      algorithm_version: 7,
+      algorithm_version: 8,
     });
+  });
+
+  it.each([
+    ["The Fall", "tt0460791", false],
+    ["Heavens Fall", "tt9999999", false],
+    ["The Fall", "tt0460791", true],
+  ])("rechecks a stored %s match before accepting a replacement (expected: %s, retry: %s)", async (storedName, expectedId, retryFirst) => {
+    const path = "/The Fall (2006)/The Fall_35_8_RIGHT_ONLY_00_v1.8.6_halfSBS.mp4";
+    const { db, profileService, queue } = createHarness(
+      async () => ({
+        list: async (directory) => directory === "/"
+          ? [{ name: "The Fall (2006)", path: "/The Fall (2006)", type: "directory" }]
+          : [{ name: path.split("/").at(-1)!, path, type: "file", size: 1024 * 1024 }],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, tmdbApiKey: "tmdb-key", scanCooldownMs: 0 },
+    );
+    const profileId = await createProfileWithFtp(profileService);
+    profileService.saveAddonCustomization(profileId, { catalogEnabled: true });
+    let rechecking = false;
+    let retrying = retryFirst;
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (rechecking && retrying && url.pathname === "/3/search/movie") {
+        retrying = false;
+        return { ok: false, status: 429, json: async () => ({}) };
+      }
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: rechecking
+        ? [
+            { id: 3, title: "Heavens Fall", release_date: "2006-01-01" },
+            { id: 2, title: "The Fall", release_date: "2006-01-01" },
+          ]
+        : [{ id: 1, title: "The Fall", release_date: "2006-01-01" }] }) };
+      if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0460791" }) };
+      if (url.pathname === "/3/movie/2/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt9999999" }) };
+      if (url.pathname === "/3/movie/3/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0425094" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    }));
+
+    const first = queue.enqueueProfileScan(profileId, "manual");
+    await waitForNextStatus(queue, profileId, first.id - 1, "succeeded");
+    db.prepare("update catalog_enrichment set meta_name = ?, algorithm_version = 1 where profile_id = ?").run(storedName, profileId);
+    rechecking = true;
+    const second = queue.enqueueProfileScan(profileId, "manual");
+    await waitForNextStatus(queue, profileId, second.id - 1, "succeeded");
+    if (retryFirst) {
+      db.prepare("update catalog_enrichment set next_attempt_at = '2026-01-01' where profile_id = ?").run(profileId);
+      const third = queue.enqueueProfileScan(profileId, "manual");
+      await waitForNextStatus(queue, profileId, third.id - 1, "succeeded");
+    }
+
+    expect(db.prepare("select meta_id from catalog_enrichment where profile_id = ?").get(profileId)).toEqual({ meta_id: expectedId });
   });
 
   it("reparses and enriches stored files without connecting to FTP", async () => {
