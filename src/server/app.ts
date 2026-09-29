@@ -56,19 +56,18 @@ export function createApp(
   const ftpClientFactory = limitFtpClientFactoryByKey(baseFtpClientFactory, config.ftpMaxConnections);
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
   const streamTracker = new ProxyStreamTracker();
-  const scanScheduler = setInterval(() => scanQueue.enqueueDueScheduledScans(), config.scanSchedulerIntervalMs);
+  const scanScheduler = setInterval(
+    guardedTimerTask("[scan-scheduler] Failed to enqueue scheduled scans:", () => scanQueue.enqueueDueScheduledScans()),
+    config.scanSchedulerIntervalMs,
+  );
   scanScheduler.unref();
   if (config.emptyProfileCleanupDays > 0) {
     const ageMs = config.emptyProfileCleanupDays * 24 * 60 * 60 * 1000;
-    const runCleanup = () => {
-      try {
-        const cutoff = new Date(Date.now() - ageMs).toISOString();
-        const removed = profileService.deleteEmptyProfilesOlderThan(cutoff);
-        if (removed > 0) console.log(`[cleanup] Removed ${removed} empty profile(s) older than ${config.emptyProfileCleanupDays} day(s).`);
-      } catch (error) {
-        console.error("[cleanup] Failed to remove empty profiles:", error);
-      }
-    };
+    const runCleanup = guardedTimerTask("[cleanup] Failed to remove empty profiles:", () => {
+      const cutoff = new Date(Date.now() - ageMs).toISOString();
+      const removed = profileService.deleteEmptyProfilesOlderThan(cutoff);
+      if (removed > 0) console.log(`[cleanup] Removed ${removed} empty profile(s) older than ${config.emptyProfileCleanupDays} day(s).`);
+    });
     runCleanup();
     const cleanupTimer = setInterval(runCleanup, config.emptyProfileCleanupIntervalMs);
     cleanupTimer.unref();
@@ -116,6 +115,16 @@ export function createApp(
   app.use(jsonErrorHandler());
 
   return app;
+}
+
+function guardedTimerTask(failureMessage: string, task: () => void) {
+  return () => {
+    try {
+      task();
+    } catch (error) {
+      console.error(failureMessage, redactSecrets(error instanceof Error ? error.message : String(error)));
+    }
+  };
 }
 
 function jsonErrorHandler(): express.ErrorRequestHandler {

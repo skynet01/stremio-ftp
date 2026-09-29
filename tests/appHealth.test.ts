@@ -9,6 +9,7 @@ import type { AppConfig } from "../src/server/config";
 import { openDatabase } from "../src/server/db/database";
 import { migrate } from "../src/server/db/schema";
 import { ProfileService } from "../src/server/profiles/profileService";
+import { ScanQueue } from "../src/server/scanner/scanQueue";
 
 describe("app health", () => {
   afterEach(() => {
@@ -180,6 +181,28 @@ describe("app health", () => {
     const response = await request(app).get("/api/setup/validate").set("x-setup-token", "setup-secret-123").expect(200);
 
     expect(response.body).toEqual({ ok: true });
+  });
+
+  it("keeps running when a scheduled scan tick throws", () => {
+    vi.useFakeTimers();
+    try {
+      const db = new Database(":memory:");
+      migrate(db);
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const tick = vi.spyOn(ScanQueue.prototype, "enqueueDueScheduledScans").mockImplementation(() => {
+        throw new Error("Shared index group has no valid master server password=hunter2");
+      });
+      createApp({ ...loadMinimalConfig(), scanSchedulerIntervalMs: 1000 }, db);
+
+      expect(() => vi.advanceTimersByTime(2500)).not.toThrow();
+
+      expect(tick).toHaveBeenCalledTimes(2);
+      const logged = errorSpy.mock.calls.flat().map(String).join("\n");
+      expect(logged).toContain("Shared index group has no valid master server");
+      expect(logged).not.toContain("hunter2");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("opens file databases in WAL mode with normal synchronous writes", () => {
