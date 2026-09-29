@@ -41,17 +41,26 @@ export const createBasicFtpClient: FtpClientFactory = createBasicFtpClientFactor
 function openLimitedDownloadStream(client: Client, remotePath: string, start: number, end: number) {
   const output = new PassThrough();
   let remaining = Math.max(0, end - start + 1);
-  let finished = false;
+  let closeRequested = false;
+  let outputEnded = false;
 
   const closeClient = () => {
-    if (finished) return;
-    finished = true;
+    if (closeRequested) return;
+    closeRequested = true;
     client.close();
+  };
+
+  // Once the output is ended deliberately, closing the FTP client must not discard bytes the consumer has not read yet.
+  const endOutput = () => {
+    if (outputEnded) return;
+    outputEnded = true;
+    output.end();
   };
 
   const sink = new Writable({
     write(chunk: Buffer, _encoding, callback) {
       if (remaining <= 0) {
+        endOutput();
         closeClient();
         callback();
         return;
@@ -62,7 +71,7 @@ function openLimitedDownloadStream(client: Client, remotePath: string, start: nu
 
       const afterWrite = () => {
         if (remaining <= 0) {
-          output.end();
+          endOutput();
           closeClient();
         }
         callback();
@@ -74,23 +83,27 @@ function openLimitedDownloadStream(client: Client, remotePath: string, start: nu
         afterWrite();
       }
     },
-    final(callback) {
-      output.end();
-      closeClient();
-      callback();
-    },
     destroy(error, callback) {
-      closeClient();
-      output.destroy(error ?? undefined);
+      if (error) {
+        closeClient();
+        if (!outputEnded) output.destroy(error);
+      }
       callback(error);
     },
   });
 
   output.once("close", closeClient);
-  void client.downloadTo(sink, remotePath, start).catch((error) => {
-    closeClient();
-    output.destroy(error instanceof Error ? error : new Error("FTP download failed"));
-  });
+  client.downloadTo(sink, remotePath, start).then(
+    () => {
+      endOutput();
+      closeClient();
+    },
+    (error) => {
+      closeClient();
+      if (outputEnded) return;
+      output.destroy(error instanceof Error ? error : new Error("FTP download failed"));
+    },
+  );
 
   return output;
 }
