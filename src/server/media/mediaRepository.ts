@@ -754,39 +754,6 @@ export class MediaRepository {
     return this.db.transaction(work)();
   }
 
-  directorySnapshotMatchesModifiedAt(profileId: number, ftpServerId: number | null | undefined, dirPath: string, modifiedAt: string) {
-    const row = this.db
-      .prepare(
-        `
-        select id
-        from scan_directory_snapshots
-        where profile_id = ?
-          and (? is null or ftp_server_id = ?)
-          and dir_path = ?
-          and modified_at = ?
-        limit 1
-      `,
-      )
-      .get(profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath), modifiedAt) as { id: number } | undefined;
-    return Boolean(row);
-  }
-
-  sharedDirectorySnapshotMatchesModifiedAt(sharedIndexGroupId: number, dirPath: string, modifiedAt: string) {
-    const row = this.db
-      .prepare(
-        `
-        select id
-        from shared_directory_snapshots
-        where shared_index_group_id = ?
-          and dir_path = ?
-          and modified_at = ?
-        limit 1
-      `,
-      )
-      .get(sharedIndexGroupId, normalizeRootPath(dirPath), modifiedAt) as { id: number } | undefined;
-    return Boolean(row);
-  }
-
   directorySnapshotMatchesFingerprint(
     profileId: number,
     ftpServerId: number | null | undefined,
@@ -878,33 +845,6 @@ export class MediaRepository {
       snapshot.modifiedAt ?? null,
       snapshot.lastSeenAt,
     );
-  }
-
-  touchDirectorySnapshot(profileId: number, ftpServerId: number | null | undefined, dirPath: string, lastSeenAt: string) {
-    this.db
-      .prepare(
-        `
-        update scan_directory_snapshots
-        set last_seen_at = ?
-        where profile_id = ?
-          and (? is null or ftp_server_id = ?)
-          and dir_path = ?
-      `,
-      )
-      .run(lastSeenAt, profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath));
-  }
-
-  touchSharedDirectorySnapshot(sharedIndexGroupId: number, dirPath: string, lastSeenAt: string) {
-    this.db
-      .prepare(
-        `
-        update shared_directory_snapshots
-        set last_seen_at = ?
-        where shared_index_group_id = ?
-          and dir_path = ?
-      `,
-      )
-      .run(lastSeenAt, sharedIndexGroupId, normalizeRootPath(dirPath));
   }
 
   clearDirectorySnapshots(profileId: number, ftpServerId?: number | null) {

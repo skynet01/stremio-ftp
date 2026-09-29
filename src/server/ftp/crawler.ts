@@ -204,11 +204,11 @@ export function isScanCancelledError(error: unknown): error is ScanCancelledErro
   return error instanceof ScanCancelledError;
 }
 
-function throwIfScanCancelled(signal?: AbortSignal) {
+export function throwIfScanCancelled(signal?: AbortSignal) {
   if (signal?.aborted) throw new ScanCancelledError();
 }
 
-function isTransientFtpDisconnect(error: unknown) {
+export function isTransientFtpDisconnect(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /\b(FIN packet|ECONNRESET|ETIMEDOUT|EPIPE|socket.*closed|connection.*(?:closed|reset|timeout|timed out))\b/i.test(message);
 }

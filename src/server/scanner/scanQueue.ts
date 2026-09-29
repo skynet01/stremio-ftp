@@ -1,6 +1,13 @@
 import type Database from "better-sqlite3";
 import type { AppConfig } from "../config.js";
-import { crawlProfileRoot, FtpCrawlSession, isScanCancelledError, ScanCancelledError, type CrawlProgress } from "../ftp/crawler.js";
+import {
+  crawlProfileRoot,
+  FtpCrawlSession,
+  isScanCancelledError,
+  isTransientFtpDisconnect,
+  throwIfScanCancelled,
+  type CrawlProgress,
+} from "../ftp/crawler.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { CatalogEnrichmentCandidate, MediaRepository } from "../media/mediaRepository.js";
 import { tmdbCatalogEnrichment, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
@@ -1055,14 +1062,6 @@ function formatDuration(durationMs: number) {
   if (!hours) return `${minutes}m`;
   if (!minutes) return `${hours}h`;
   return `${hours}h ${minutes}m`;
-}
-
-function isTransientFtpDisconnect(error: string) {
-  return /\b(FIN packet|ECONNRESET|ETIMEDOUT|EPIPE|socket.*closed|connection.*(?:closed|reset|timeout|timed out))\b/i.test(error);
-}
-
-function throwIfScanCancelled(signal: AbortSignal) {
-  if (signal.aborted) throw new ScanCancelledError();
 }
 
 function optionalScanJobRow(row: unknown): ScanJobRow | undefined {
