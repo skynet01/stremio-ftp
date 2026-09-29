@@ -22,6 +22,34 @@ describe("ProfileService", () => {
     expect(rotated.installUrlToken).not.toBe(created.installUrlToken);
   });
 
+  it("skips last-unlocked writes for repeat unlocks within five minutes", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, key);
+    const created = await service.createProfile("browser-uid", "passphrase", "US");
+    const unlockState = () =>
+      db.prepare("select last_unlocked_at, last_country_code, updated_at from profiles where id = ?").get(created.profileId) as {
+        last_unlocked_at: string | null;
+        last_country_code: string | null;
+        updated_at: string;
+      };
+    const recent = new Date(Date.now() - 60_000).toISOString();
+    db.prepare("update profiles set last_unlocked_at = ?, updated_at = ? where id = ?").run(recent, recent, created.profileId);
+
+    await service.unlockProfile("browser-uid", "passphrase");
+    await service.unlockProfile("browser-uid", "passphrase", "US");
+    expect(unlockState()).toEqual({ last_unlocked_at: recent, last_country_code: "US", updated_at: recent });
+
+    await service.unlockProfile("browser-uid", "passphrase", "GB");
+    expect(unlockState().last_country_code).toBe("GB");
+    expect(unlockState().last_unlocked_at).not.toBe(recent);
+
+    const stale = new Date(Date.now() - 10 * 60_000).toISOString();
+    db.prepare("update profiles set last_unlocked_at = ? where id = ?").run(stale, created.profileId);
+    await service.unlockProfile("browser-uid", "passphrase");
+    expect(Date.parse(unlockState().last_unlocked_at!)).toBeGreaterThan(Date.parse(stale));
+  });
+
   it("stores encrypted ftp config", async () => {
     const db = new Database(":memory:");
     migrate(db);

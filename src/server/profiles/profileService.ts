@@ -265,6 +265,8 @@ function adminSourceFor(browserUid: string, databaseAdminEnabled: boolean, envir
   return null;
 }
 
+const UNLOCK_WRITE_INTERVAL_MS = 5 * 60_000;
+
 export class DuplicateProfileError extends Error {
   constructor() {
     super("Profile already exists");
@@ -325,10 +327,15 @@ export class ProfileService {
   }
 
   async unlockProfile(browserUid: string, passphrase: string, countryCode: string | null = null) {
-    const row = this.db.prepare("select id, passphrase_verifier from profiles where browser_uid = ?").get(browserUid) as
-      | { id: number; passphrase_verifier: string }
+    const row = this.db
+      .prepare("select id, passphrase_verifier, last_unlocked_at, last_country_code from profiles where browser_uid = ?")
+      .get(browserUid) as
+      | { id: number; passphrase_verifier: string; last_unlocked_at: string | null; last_country_code: string | null }
       | undefined;
     if (!row || !(await verifyPassphrase(passphrase, row.passphrase_verifier))) throw new InvalidPassphraseError();
+    const sinceLastUnlockMs = row.last_unlocked_at ? Date.now() - Date.parse(row.last_unlocked_at) : Number.NaN;
+    const recentlyUnlocked = sinceLastUnlockMs >= 0 && sinceLastUnlockMs < UNLOCK_WRITE_INTERVAL_MS;
+    if (recentlyUnlocked && (!countryCode || countryCode === row.last_country_code)) return { profileId: row.id };
     const now = new Date().toISOString();
     if (countryCode) {
       this.db.prepare("update profiles set last_unlocked_at = ?, last_country_code = ?, updated_at = ? where id = ?").run(

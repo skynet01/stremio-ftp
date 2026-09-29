@@ -427,6 +427,28 @@ describe("profile routes", () => {
     expect(attempts.current("ip:203.0.113.1", 1500)).toBeNull();
   });
 
+  it("loads FTP servers once per scan status poll", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const listServers = vi.spyOn(ProfileService.prototype, "listFtpServers");
+
+    const response = await request(app)
+      .post("/api/profile/index/status")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(response.body.servers).toHaveLength(1);
+    expect(response.body.globalStats.servers).toBe(1);
+    expect(listServers).toHaveBeenCalledTimes(1);
+  });
+
   it("does not rate limit scan status polling during active scans", async () => {
     const db = new Database(":memory:");
     migrate(db);

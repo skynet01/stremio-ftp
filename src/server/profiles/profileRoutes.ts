@@ -236,8 +236,7 @@ export function profileRoutes(
     withProfile(authenticatedSchema, "Invalid server load request", ({ res, profileId }) => {
       res.json({
         customization: service.getAddonCustomization(profileId),
-        servers: serverPayloads(service, scanQueue, profileId),
-        globalStats: globalStats(service, scanQueue, profileId),
+        ...serversWithStats(service, scanQueue, profileId),
       });
     }),
   );
@@ -319,8 +318,7 @@ export function profileRoutes(
         throw error;
       }
       res.json({
-        servers: serverPayloads(service, scanQueue, profileId),
-        globalStats: globalStats(service, scanQueue, profileId),
+        ...serversWithStats(service, scanQueue, profileId),
       });
     }),
   );
@@ -414,8 +412,7 @@ export function profileRoutes(
           return res.json({
             scanStatus: scanStatuses[0],
             scanStatuses,
-            servers: serverPayloads(service, scanQueue, profileId),
-            globalStats: globalStats(service, scanQueue, profileId),
+            ...serversWithStats(service, scanQueue, profileId),
           });
         }
         const serverId = data.serverId ?? service.defaultFtpServerId(profileId);
@@ -452,8 +449,7 @@ export function profileRoutes(
         indexStatus: service.getIndexStatus(profileId),
         scanStatus: scanQueue.getProfileScanStatus(profileId),
         scanSchedule: service.getScanSchedule(profileId),
-        servers: serverPayloads(service, scanQueue, profileId),
-        globalStats: globalStats(service, scanQueue, profileId),
+        ...serversWithStats(service, scanQueue, profileId),
       });
     }),
   );
@@ -484,9 +480,12 @@ export function profileRoutes(
   return router;
 }
 
-function serverPayloads(service: ProfileService, scanQueue: ScanQueue, profileId: number) {
+function serversWithStats(service: ProfileService, scanQueue: ScanQueue, profileId: number) {
   const servers = service.listFtpServers(profileId);
-  return servers.map((server) => serverPayload(service, scanQueue, server));
+  return {
+    servers: servers.map((server) => serverPayload(service, scanQueue, server)),
+    globalStats: globalStats(service, scanQueue, profileId, servers),
+  };
 }
 
 function serverPayload(service: ProfileService, scanQueue: ScanQueue, server: FtpServer) {
@@ -536,8 +535,7 @@ function isSharedIndexMaster(server: FtpServer) {
   return Boolean(server.sharedIndex?.isMaster);
 }
 
-function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: number) {
-  const servers = service.listFtpServers(profileId);
+function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: number, servers = service.listFtpServers(profileId)) {
   const linkedGroupIds = [...new Set(servers.map((server) => server.sharedIndex?.id).filter((id): id is number => typeof id === "number"))];
   const counts = new MediaRepository(service.database).aggregateCountsForProfileWithSharedIndexes(profileId, linkedGroupIds);
   const statuses = [
