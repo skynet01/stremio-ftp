@@ -1612,6 +1612,46 @@ describe("App", () => {
     ).toBeTruthy();
   });
 
+  it("reports failed server saves from Save & Generate instead of claiming success", async () => {
+    loadFtpSettingsMock.mockResolvedValue({
+      ftpConfig: {
+        host: "",
+        port: 21,
+        username: "",
+        password: "",
+        passwordConfigured: false,
+        tlsMode: "explicit",
+        allowInvalidCertificate: false,
+        roots: ["/"],
+      },
+      indexStatus: { lastScanAt: null, mediaItems: 0 },
+      connectionStatus: { lastTestedAt: null, ok: null },
+      scanStatus: { ...idleScanStatus },
+      scanSchedule: manualScanSchedule,
+    });
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "browser-uid",
+      manifestUrl: "https://addon.example.test/u/token/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/token/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+    saveFtpSettingsMock.mockRejectedValue(new Error("FTP login failed"));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("button", { name: "Save & Generate" });
+    fireEvent.change(screen.getByLabelText("Host"), { target: { value: "ftp.example.test" } });
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Generate" }));
+
+    expect((await screen.findAllByText("Could not save 1 server. Check the server settings for details.")).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Manifest URL is ready/)).toBeNull();
+    expect(screen.getByText("FTP login failed")).toBeTruthy();
+  });
+
   it("hides the admin dashboard for non-admin profiles", async () => {
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: false });
     createProfileMock.mockResolvedValue({

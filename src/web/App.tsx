@@ -818,7 +818,7 @@ export function App() {
     setExpandedServerId(form.id);
   }
 
-  async function saveServer(serverId: number) {
+  async function saveServer(serverId: number): Promise<boolean> {
     const server = serverById(serverId);
     updateServer(serverId, { message: "Saving server settings..." });
     try {
@@ -836,7 +836,7 @@ export function App() {
         await saveFtpSettings({ browserUid: recoveryUid, passphrase, ftpConfig: ftpConfigFromServer(server) });
         await saveCustomization({ browserUid: recoveryUid, passphrase, customization: normalizedCustomization(server) });
         updateServer(targetServerId, { message: "FTP and library settings saved. Refresh the index to find files." });
-        return;
+        return true;
       }
       const serverRequest = {
         browserUid: recoveryUid,
@@ -866,7 +866,7 @@ export function App() {
         });
         if (!confirmed) {
           updateServer(serverId, { message: "Save cancelled. Server remains linked to the shared index." });
-          return;
+          return false;
         }
         updateServer(serverId, { message: "Unlinking from shared index and saving server settings..." });
         result = await saveFtpServer({ ...serverRequest, unlinkSharedIndex: true });
@@ -891,8 +891,10 @@ export function App() {
         ),
       );
       setGlobalStats(result.globalStats);
+      return true;
     } catch (error) {
       updateServer(serverId, { message: error instanceof Error ? error.message : "Unable to save server settings." });
+      return false;
     }
   }
 
@@ -1153,23 +1155,13 @@ export function App() {
     setCustomizationMessage("Saving all servers...");
     let saved = 0;
     let failed = 0;
-    for (const candidate of servers) {
-      const server = servers.find((entry) => entry.id === candidate.id) ?? candidate;
-      const hasFreshPassword = Boolean(server.password);
-      const hasReadyCreds = hasFreshPassword || server.passwordConfigured;
+    for (const server of servers) {
+      const hasReadyCreds = Boolean(server.password) || server.passwordConfigured;
       if (!server.host.trim() || !server.username.trim() || !hasReadyCreds) continue;
-      try {
-        await saveServer(server.id);
-        saved += 1;
-      } catch {
-        failed += 1;
-      }
+      if (await saveServer(server.id)) saved += 1;
+      else failed += 1;
     }
-    setCustomizationMessage(
-      saved > 0
-        ? `${saved} server${saved === 1 ? "" : "s"} saved${failed ? `, ${failed} failed` : ""}. Manifest URL is ready.`
-        : "No server has complete FTP credentials yet. Fill in host, username, and password.",
-    );
+    setCustomizationMessage(saveAllSummary(saved, failed));
   }
 
   async function persistImportedServers(summary: ImportSummary, browserUidForApi: string, passphraseForApi: string) {
@@ -1457,6 +1449,12 @@ export function App() {
       {confirmDialog}
     </main>
   );
+}
+
+function saveAllSummary(saved: number, failed: number) {
+  if (saved > 0) return `${saved} server${saved === 1 ? "" : "s"} saved${failed ? `, ${failed} failed` : ""}. Manifest URL is ready.`;
+  if (failed > 0) return `Could not save ${failed} server${failed === 1 ? "" : "s"}. Check the server settings for details.`;
+  return "No server has complete FTP credentials yet. Fill in host, username, and password.";
 }
 
 function scanStatusMessage(scanStatus: ScanStatus) {
