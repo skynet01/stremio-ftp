@@ -1351,7 +1351,6 @@ export function App() {
         addonLogoUrl={addonLogoUrl}
         editable={settingsUnlocked}
         profileReady={profileReady}
-        profileState={profileState}
         recoveryUid={recoveryUid}
         manifestReady={Boolean(manifestUrl)}
         onEditLogo={() => setEditingLogo(true)}

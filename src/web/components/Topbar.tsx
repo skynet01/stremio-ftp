@@ -1,8 +1,6 @@
 import { Copy, Trash2 } from "lucide-react";
 import { StatusBadge } from "./ui.js";
 
-type ProfileState = "new" | "creating" | "created" | "unlocked" | "error";
-
 export function Topbar({
   addonName,
   addonLogoUrl,
@@ -18,7 +16,6 @@ export function Topbar({
   addonLogoUrl: string;
   editable: boolean;
   profileReady: boolean;
-  profileState?: ProfileState;
   recoveryUid?: string;
   manifestReady?: boolean;
   onEditLogo: () => void;

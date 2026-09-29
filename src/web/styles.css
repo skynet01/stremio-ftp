@@ -845,21 +845,8 @@ textarea:focus-visible,
     0 34px 80px -44px rgba(0, 0, 0, 0.9);
 }
 
-.ftp-form,
 .status-panel {
   height: 100%;
-}
-
-.ftp-form {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-}
-
-.ftp-form .button-row,
-.status-panel .button-grid {
-  margin-top: auto;
-  padding-top: 24px;
 }
 
 .panel::before {
@@ -1098,8 +1085,7 @@ input:-webkit-autofill:active {
   border: 0;
 }
 
-.button-row,
-.button-grid {
+.button-row {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -2816,15 +2802,6 @@ input:-webkit-autofill:active {
   letter-spacing: 0.08em;
 }
 
-.direct-stream-warning {
-  margin: 14px 0 0;
-  color: var(--amber);
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.68rem;
-  letter-spacing: 0.045em;
-  line-height: 1.55;
-}
-
 .manifest-url {
   display: grid;
   gap: 7px;
@@ -3094,12 +3071,6 @@ input:-webkit-autofill:active {
   align-items: center;
   gap: 10px;
   margin-top: 18px;
-}
-
-.compact-toggle-row {
-  align-items: flex-start;
-  margin-top: 8px;
-  line-height: 1.4;
 }
 
 .toggle-row input {
@@ -3586,13 +3557,11 @@ input:-webkit-autofill:active {
   }
 
   .button-row,
-  .button-grid,
   .install-action-row {
     justify-content: stretch;
   }
 
   .button-row > *,
-  .button-grid > *,
   .install-action-row > * {
     flex: 1 1 100%;
   }
