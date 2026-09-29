@@ -215,7 +215,7 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
   stream.once("end", markFinished);
   stream.on("error", (error) => {
     markFinished();
-    logProxyTiming(timing, "stream_error");
+    logProxyTiming(timing, "stream_error", error);
     if (!res.headersSent) {
       res.sendStatus(500);
       return;
@@ -242,7 +242,7 @@ function startProxyTiming(req: Request, routeKind: ProxyTiming["routeKind"], hea
   };
 }
 
-function logProxyTiming(timing: ProxyTiming, outcome: string) {
+function logProxyTiming(timing: ProxyTiming, outcome: string, error?: unknown) {
   if (timing.logged) return;
   timing.logged = true;
   console.info(
@@ -262,6 +262,7 @@ function logProxyTiming(timing: ProxyTiming, outcome: string) {
       firstByteMs: timing.firstByteMs,
       totalMs: elapsedMs(timing.startedAt),
       bytesFromFtp: timing.bytesFromFtp,
+      ...(error instanceof Error ? { error: error.message.slice(0, 200) } : {}),
     }),
   );
 }
