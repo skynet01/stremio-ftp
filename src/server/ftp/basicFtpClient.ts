@@ -1,6 +1,6 @@
 import { Client, FileType, FTPError, type AccessOptions } from "basic-ftp";
 import { PassThrough, Writable } from "node:stream";
-import { TLSSocket, type ConnectionOptions } from "node:tls";
+import type { ConnectionOptions } from "node:tls";
 import { splitFtpHost } from "../../shared/ftpHost.js";
 import type { FtpConfig } from "../profiles/profileService.js";
 import type { FtpClient, FtpClientFactory, FtpReadStreamOptions } from "./ftpTypes.js";
@@ -29,8 +29,6 @@ type RememberedHost = {
 // Per-host facts learned from earlier logins, bounded so a long-running server cannot grow them without limit.
 class FtpHostMemory {
   private readonly hosts = new Map<string, RememberedHost>();
-  private readonly tlsSessions = new Map<string, Buffer>();
-  private readonly tlsResumptionOff = new Map<string, true>();
 
   constructor(private readonly maxEntries: number) {}
 
@@ -52,20 +50,6 @@ class FtpHostMemory {
     const host = this.hosts.get(hostKey);
     if (host) host.byteRangesRejected = true;
   }
-
-  tlsSession(sessionKey: string) {
-    return this.tlsSessions.get(sessionKey);
-  }
-
-  rememberTlsSession(sessionKey: string, session: Buffer) {
-    if (this.tlsResumptionOff.has(sessionKey)) return;
-    setBounded(this.tlsSessions, sessionKey, session, this.maxEntries);
-  }
-
-  stopResumingTls(sessionKey: string) {
-    this.tlsSessions.delete(sessionKey);
-    setBounded(this.tlsResumptionOff, sessionKey, true, this.maxEntries);
-  }
 }
 
 function setBounded<T>(map: Map<string, T>, key: string, value: T, maxEntries: number) {
@@ -86,9 +70,8 @@ export function createBasicFtpClientFactory(
     signal?.addEventListener("abort", closeOnAbort, { once: true });
     const target = loginTarget(config);
     const hostKey = `${target.host.toLowerCase()}:${target.port}`;
-    const sessionKey = tlsSessionKey(config, target);
     try {
-      if (playback) await leanLogin(client, target, hosts, hostKey, sessionKey);
+      if (playback) await leanLogin(client, target, hosts, hostKey);
       else await fullLogin(client, target, hosts, hostKey);
     } catch (error) {
       await closeBasicFtpClient(client);
@@ -97,7 +80,6 @@ export function createBasicFtpClientFactory(
       signal?.removeEventListener("abort", closeOnAbort);
     }
 
-    const tlsResumed = sessionKey !== null && controlSessionResumed(client);
     let idle = true;
     let transferDone = Promise.resolve(true);
     return {
@@ -116,28 +98,20 @@ export function createBasicFtpClientFactory(
         transferDone = Promise.resolve(false);
         const { start, end } = input;
         const bounded = !input.openEnded && end < Number.MAX_SAFE_INTEGER;
-        try {
-          const byteRange = bounded && hosts.supportsByteRanges(hostKey)
-            ? await requestByteRange(client, start, end, () => hosts.rejectByteRanges(hostKey))
-            : false;
-          const download = openLimitedDownloadStream(client, path, {
-            start,
-            end,
-            byteRange,
-            onRangeOverrun: () => hosts.rejectByteRanges(hostKey),
-          });
-          transferDone = download.done.then((clean) => {
-            idle = clean && !client.closed;
-            return idle;
-          });
-          return await download.opened;
-        } catch (error) {
-          // Servers that require data connections to reuse the control connection's TLS session might not accept
-          // that session when it was itself resumed. Any transfer that cannot start on such a login turns resumption
-          // off for the host, so the next login does a full handshake.
-          if (sessionKey && tlsResumed) hosts.stopResumingTls(sessionKey);
-          throw error;
-        }
+        const byteRange = bounded && hosts.supportsByteRanges(hostKey)
+          ? await requestByteRange(client, start, end, () => hosts.rejectByteRanges(hostKey))
+          : false;
+        const download = openLimitedDownloadStream(client, path, {
+          start,
+          end,
+          byteRange,
+          onRangeOverrun: () => hosts.rejectByteRanges(hostKey),
+        });
+        transferDone = download.done.then((clean) => {
+          idle = clean && !client.closed;
+          return idle;
+        });
+        return await download.opened;
       },
       isReusable: () => idle && !client.closed,
       whenTransferDone: () => transferDone,
@@ -162,12 +136,6 @@ function loginTarget(config: FtpConfig): LoginTarget {
   };
 }
 
-// A TLS session is only resumed by a later connection with the same host and certificate policy.
-function tlsSessionKey(config: FtpConfig, target: LoginTarget) {
-  if (config.tlsMode === "none") return null;
-  return [config.tlsMode, target.host.toLowerCase(), target.port, config.allowInvalidCertificate ? "any-certificate" : "verified"].join("\0");
-}
-
 // Client.access(): the full setup scans need for directory listings. Its FEAT answer is kept for playback logins.
 async function fullLogin(client: Client, target: LoginTarget, hosts: FtpHostMemory, hostKey: string) {
   const readFeatures = client.features.bind(client);
@@ -182,15 +150,14 @@ async function fullLogin(client: Client, target: LoginTarget, hosts: FtpHostMemo
 // A playback login only sets up what a download uses: the session, binary mode and, over TLS, a protected data
 // channel. It skips STRU F and OPTS MLST, sends OPTS UTF8 only to servers that advertise UTF8, and reads FEAT once
 // per host. Each skipped command is a round trip before the first byte can flow.
-async function leanLogin(client: Client, target: LoginTarget, hosts: FtpHostMemory, hostKey: string, sessionKey: string | null) {
-  const tlsOptions: ConnectionOptions = { ...target.secureOptions, session: sessionKey ? hosts.tlsSession(sessionKey) : undefined };
+async function leanLogin(client: Client, target: LoginTarget, hosts: FtpHostMemory, hostKey: string) {
+  const tlsOptions: ConnectionOptions = { ...target.secureOptions };
   if (target.secure === "implicit") {
     await client.connectImplicitTLS(target.host, target.port, tlsOptions);
   } else {
     await client.connect(target.host, target.port);
     if (target.secure === true) await client.useTLS({ ...tlsOptions, host: target.host });
   }
-  if (sessionKey) rememberTlsSessions(client, hosts, sessionKey);
   await client.login(target.user, target.password);
   let features = hosts.features(hostKey);
   if (!features) {
@@ -203,22 +170,6 @@ async function leanLogin(client: Client, target: LoginTarget, hosts: FtpHostMemo
     await client.sendIgnoringError("PBSZ 0");
     await client.sendIgnoringError("PROT P");
   }
-}
-
-// Offering the last session of a host lets the next control connection skip part of the TLS handshake. A server
-// that does not know the session any more simply runs a full handshake.
-function rememberTlsSessions(client: Client, hosts: FtpHostMemory, sessionKey: string) {
-  const socket = client.ftp.socket;
-  if (!(socket instanceof TLSSocket)) return;
-  const current = socket.getSession();
-  if (current) hosts.rememberTlsSession(sessionKey, current);
-  // TLS 1.3 hands out session tickets after the handshake.
-  socket.on("session", (session: Buffer) => hosts.rememberTlsSession(sessionKey, session));
-}
-
-function controlSessionResumed(client: Client) {
-  const socket = client.ftp.socket;
-  return socket instanceof TLSSocket && socket.isSessionReused();
 }
 
 // RANG (draft-bryan-ftp-range) makes the server stop after `end`, so a bounded transfer ends with 226 and the login

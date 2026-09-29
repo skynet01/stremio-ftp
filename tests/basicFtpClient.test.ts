@@ -150,7 +150,7 @@ describe("createBasicFtpClientFactory playback login", () => {
     expect(server.sessions[1]).toEqual(["USER other", "PASS ***", "TYPE I"]);
   });
 
-  it("protects the data channel of an explicit TLS playback login and resumes the TLS session next time", async () => {
+  it("protects the data channel of an explicit TLS playback login without resuming TLS sessions", async () => {
     const file = patternedBuffer(64 * 1024);
     const server = await startFakeFtpServer({ files: { "/video.mkv": file }, features: ["SIZE"], tls: true });
     const factory = createBasicFtpClientFactory(5000);
@@ -163,29 +163,7 @@ describe("createBasicFtpClientFactory playback login", () => {
 
     expect(received.equals(file.subarray(100, 60_001))).toBe(true);
     expect(server.sessions[1]).toEqual(["AUTH TLS", "USER user", "PASS ***", "TYPE I", "PBSZ 0", "PROT P"]);
-    expect(server.resumedTlsSessions).toBeGreaterThanOrEqual(1);
-  });
-
-  it("stops resuming TLS sessions to a host that refuses transfers on a resumed login", async () => {
-    const file = patternedBuffer(64 * 1024);
-    const server = await startFakeFtpServer({ files: { "/video.mkv": file }, features: ["SIZE"], tls: true, refuseDataOnResumedTls: true });
-    const factory = createBasicFtpClientFactory(5000);
-    const config: FtpConfig = { ...ftpConfig(server.port), tlsMode: "explicit", allowInvalidCertificate: true };
-    const readTail = async () => {
-      const client = await factory(config, { playback: true });
-      try {
-        return await readSlowly(await client.openReadStream("/video.mkv", { start: 1000, end: file.length - 1 }));
-      } finally {
-        await client.close();
-      }
-    };
-
-    await readTail();
-    await expect(readTail()).rejects.toThrow("425");
-    const afterFallback = await readTail();
-
-    expect(afterFallback.equals(file.subarray(1000))).toBe(true);
-    expect(server.resumedTlsSessions).toBe(1);
+    expect(server.resumedTlsSessions).toBe(0);
   });
 });
 
@@ -366,8 +344,6 @@ async function startFakeFtpServer(options: {
   rang?: "honor" | "reject" | "ignore-end";
   // Accept AUTH TLS and protect data connections after PROT P.
   tls?: boolean;
-  // Refuse transfers (425) on control connections whose TLS session was resumed.
-  refuseDataOnResumedTls?: boolean;
   // Hold back the 226 after a transfer's data, like a slow control connection.
   confirmDelayMs?: number;
 }): Promise<FakeFtpServer> {
@@ -520,11 +496,6 @@ async function startFakeFtpServer(options: {
           dataSocket = null;
           if (!file || !transferSocket) {
             reply("550 Not found");
-            return;
-          }
-          if (options.refuseDataOnResumedTls && resumedTls) {
-            void transferSocket.then((socket) => socket.destroy());
-            reply("425 Unable to build data connection: Operation not permitted");
             return;
           }
           const start = range ? range.start : restOffset;
