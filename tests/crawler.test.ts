@@ -478,6 +478,103 @@ describe("crawler", () => {
     expect(repo.findMovie(profileId, "", "movie", 2020)).toHaveLength(1);
   });
 
+  it("reconnects with a fresh FTP client when a disconnect leaves the old client closed", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+    const closedClients: number[] = [];
+    let clientsCreated = 0;
+    const factory: FtpClientFactory = async () => {
+      clientsCreated += 1;
+      const clientId = clientsCreated;
+      let disconnected = false;
+      return {
+        list: async (path) => {
+          if (disconnected) throw new Error("Client is closed because Server sent FIN packet unexpectedly, closing connection.");
+          if (clientId === 1 && path === "/Movies") {
+            disconnected = true;
+            throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+          }
+          if (path === "/") {
+            return [
+              { name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" },
+              { name: "TV", path: "/TV", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" },
+            ];
+          }
+          if (path === "/Movies") return [{ name: "Movie.2020.mkv", path: "/Movies/Movie.2020.mkv", type: "file", size: 1000 }];
+          if (path === "/TV") return [{ name: "Show.Name.S01E01.mkv", path: "/TV/Show.Name.S01E01.mkv", type: "file", size: 1000 }];
+          throw new Error(`unexpected path ${path}`);
+        },
+        openReadStream: async () => {
+          throw new Error("not used");
+        },
+        close: async () => {
+          closedClients.push(clientId);
+        },
+      };
+    };
+
+    const result = await crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo });
+
+    expect(result.filesSeen).toBe(2);
+    expect(clientsCreated).toBe(2);
+    expect(closedClients).toEqual([1, 2]);
+    expect(repo.findMovie(profileId, "", "movie", 2020)).toHaveLength(1);
+    expect(repo.findEpisode(profileId, "show name", 1, 1)).toHaveLength(1);
+    expect(db.prepare("select count(*) as count from scan_directory_snapshots").get()).toEqual({ count: 3 });
+  });
+
+  it("gives up after repeated transient disconnects even with fresh clients", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+    let clientsCreated = 0;
+    let clientsClosed = 0;
+    const factory: FtpClientFactory = async () => {
+      clientsCreated += 1;
+      return {
+        list: async () => {
+          throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+        },
+        openReadStream: async () => {
+          throw new Error("not used");
+        },
+        close: async () => {
+          clientsClosed += 1;
+        },
+      };
+    };
+
+    await expect(crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo })).rejects.toThrow("FIN packet");
+    expect(clientsCreated).toBe(3);
+    expect(clientsClosed).toBe(3);
+  });
+
+  it("does not retry non-transient FTP failures on a new client", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+    let clientsCreated = 0;
+    const factory: FtpClientFactory = async () => {
+      clientsCreated += 1;
+      return {
+        list: async () => {
+          throw new Error("550 Permission denied");
+        },
+        openReadStream: async () => {
+          throw new Error("not used");
+        },
+        close: async () => undefined,
+      };
+    };
+
+    await expect(crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo })).rejects.toThrow("550 Permission denied");
+    expect(clientsCreated).toBe(1);
+  });
+
   it("throws a clear error when maximum crawl depth is exceeded", async () => {
     const db = new Database(":memory:");
     migrate(db);

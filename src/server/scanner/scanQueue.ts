@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { AppConfig } from "../config.js";
-import { crawlProfileRoot, isScanCancelledError, ScanCancelledError, type CrawlProgress } from "../ftp/crawler.js";
+import { crawlProfileRoot, FtpCrawlSession, isScanCancelledError, ScanCancelledError, type CrawlProgress } from "../ftp/crawler.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { CatalogEnrichmentCandidate, MediaRepository } from "../media/mediaRepository.js";
 import { tmdbCatalogEnrichment, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
@@ -389,24 +389,30 @@ export class ScanQueue {
 
     let filesSeen = 0;
     const startedAt = Date.now();
-    for (const rootPath of ftpConfig.roots) {
-      throwIfScanCancelled(signal);
-      const result = await crawlProfileRoot({
-        profileId: scanConfig.profileId,
-        ftpServerId: scanConfig.serverId,
-        sharedIndexGroupId,
-        rootPath,
-        ftpConfig,
-        factory: this.ftpClientFactory,
-        repo: this.mediaRepository,
-        parserOptions: {
-          contentTypes: scanConfig.customization.catalogContentTypes,
-          libraryLayout: scanConfig.customization.libraryLayout,
-        },
-        onProgress: (progress) => this.saveProgress(jobId, startedAt, progress, progressBaselineItems, scanMode),
-        signal,
-      });
-      filesSeen += result.filesSeen;
+    const session = new FtpCrawlSession(this.ftpClientFactory, ftpConfig, signal);
+    try {
+      for (const rootPath of ftpConfig.roots) {
+        throwIfScanCancelled(signal);
+        const result = await crawlProfileRoot({
+          profileId: scanConfig.profileId,
+          ftpServerId: scanConfig.serverId,
+          sharedIndexGroupId,
+          rootPath,
+          ftpConfig,
+          factory: this.ftpClientFactory,
+          session,
+          repo: this.mediaRepository,
+          parserOptions: {
+            contentTypes: scanConfig.customization.catalogContentTypes,
+            libraryLayout: scanConfig.customization.libraryLayout,
+          },
+          onProgress: (progress) => this.saveProgress(jobId, startedAt, progress, progressBaselineItems, scanMode),
+          signal,
+        });
+        filesSeen += result.filesSeen;
+      }
+    } finally {
+      await session.close();
     }
 
     throwIfScanCancelled(signal);
@@ -449,23 +455,29 @@ export class ScanQueue {
 
     let filesSeen = 0;
     const startedAt = Date.now();
-    for (const rootPath of ftpConfig.roots) {
-      throwIfScanCancelled(signal);
-      const result = await crawlProfileRoot({
-        profileId,
-        ftpServerId,
-        rootPath,
-        ftpConfig,
-        factory: this.ftpClientFactory,
-        repo: this.mediaRepository,
-        parserOptions: {
-          contentTypes: customization.catalogContentTypes,
-          libraryLayout: customization.libraryLayout,
-        },
-        onProgress: (progress) => this.saveProgress(jobId, startedAt, progress, progressBaselineItems, scanMode),
-        signal,
-      });
-      filesSeen += result.filesSeen;
+    const session = new FtpCrawlSession(this.ftpClientFactory, ftpConfig, signal);
+    try {
+      for (const rootPath of ftpConfig.roots) {
+        throwIfScanCancelled(signal);
+        const result = await crawlProfileRoot({
+          profileId,
+          ftpServerId,
+          rootPath,
+          ftpConfig,
+          factory: this.ftpClientFactory,
+          session,
+          repo: this.mediaRepository,
+          parserOptions: {
+            contentTypes: customization.catalogContentTypes,
+            libraryLayout: customization.libraryLayout,
+          },
+          onProgress: (progress) => this.saveProgress(jobId, startedAt, progress, progressBaselineItems, scanMode),
+          signal,
+        });
+        filesSeen += result.filesSeen;
+      }
+    } finally {
+      await session.close();
     }
 
     throwIfScanCancelled(signal);

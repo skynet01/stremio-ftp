@@ -1,7 +1,7 @@
 import type { MediaRepository } from "../media/mediaRepository.js";
 import { parseMediaPath, type ParseMediaOptions } from "../media/parser.js";
 import type { FtpConfig } from "../profiles/profileService.js";
-import type { FtpClientFactory, FtpEntry } from "./ftpTypes.js";
+import type { FtpClient, FtpClientFactory, FtpEntry } from "./ftpTypes.js";
 
 const MAX_CRAWL_DEPTH = 64;
 const MAX_CRAWL_ENTRIES = 100000;
@@ -15,6 +15,7 @@ export type CrawlProfileRootInput = {
   rootPath: string;
   ftpConfig: FtpConfig;
   factory: FtpClientFactory;
+  session?: FtpCrawlSession;
   repo: MediaRepository;
   parserOptions?: ParseMediaOptions;
   onProgress?: (progress: CrawlProgress) => void;
@@ -36,12 +37,60 @@ type PendingDirectorySnapshot = {
   lastSeenAt: string;
 };
 
-export async function crawlProfileRoot(input: CrawlProfileRootInput) {
-  const client = await input.factory(input.ftpConfig);
-  const closeClientOnAbort = () => {
-    void client.close();
+export class FtpCrawlSession {
+  private client: FtpClient | null = null;
+  private readonly disconnectOnAbort = () => {
+    void this.disconnect();
   };
-  input.signal?.addEventListener("abort", closeClientOnAbort, { once: true });
+
+  constructor(
+    private readonly factory: FtpClientFactory,
+    private readonly ftpConfig: FtpConfig,
+    private readonly signal?: AbortSignal,
+  ) {
+    signal?.addEventListener("abort", this.disconnectOnAbort, { once: true });
+  }
+
+  async list(path: string) {
+    for (let attempt = 1; ; attempt += 1) {
+      throwIfScanCancelled(this.signal);
+      try {
+        let client = this.client;
+        if (!client) {
+          client = await this.factory(this.ftpConfig);
+          this.client = client;
+          if (this.signal?.aborted) {
+            await this.disconnect();
+            throw new ScanCancelledError();
+          }
+        }
+        return await client.list(path);
+      } catch (error) {
+        if (this.signal?.aborted) throw new ScanCancelledError();
+        if (!isTransientFtpDisconnect(error) || attempt >= MAX_TRANSIENT_LIST_ATTEMPTS) throw error;
+        await this.disconnect();
+      }
+    }
+  }
+
+  async close() {
+    this.signal?.removeEventListener("abort", this.disconnectOnAbort);
+    await this.disconnect();
+  }
+
+  private async disconnect() {
+    const client = this.client;
+    this.client = null;
+    try {
+      await client?.close();
+    } catch {
+      // The connection is already unusable; closing is best effort.
+    }
+  }
+}
+
+export async function crawlProfileRoot(input: CrawlProfileRootInput) {
+  const session = input.session ?? new FtpCrawlSession(input.factory, input.ftpConfig, input.signal);
   const crawlStartedAt = new Date().toISOString();
   const visitedDirectories = new Set<string>();
   const pendingSnapshots: PendingDirectorySnapshot[] = [];
@@ -63,7 +112,7 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     directoriesSeen += 1;
     report(normalizedPath);
 
-    const entries = await listDirectoryWithRetries(input, client, normalizedPath);
+    const entries = await session.list(normalizedPath);
 
     const fingerprint = fingerprintEntries(entries);
     if (canSkipDirectoryTraversalWithSnapshot(input, normalizedPath, entries, fingerprint)) {
@@ -121,27 +170,8 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
     }
     return { filesSeen };
   } finally {
-    input.signal?.removeEventListener("abort", closeClientOnAbort);
-    await client.close();
+    if (!input.session) await session.close();
   }
-}
-
-async function listDirectoryWithRetries(
-  input: CrawlProfileRootInput,
-  client: Awaited<ReturnType<FtpClientFactory>>,
-  path: string,
-) {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= MAX_TRANSIENT_LIST_ATTEMPTS; attempt += 1) {
-    try {
-      return await client.list(path);
-    } catch (error) {
-      if (input.signal?.aborted) throw new ScanCancelledError();
-      lastError = error;
-      if (!isTransientFtpDisconnect(error) || attempt === MAX_TRANSIENT_LIST_ATTEMPTS) throw error;
-    }
-  }
-  throw lastError;
 }
 
 export class ScanCancelledError extends Error {

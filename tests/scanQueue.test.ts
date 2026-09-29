@@ -381,6 +381,50 @@ describe("ScanQueue", () => {
     expect(server.pendingScanAfter).toEqual(expect.any(String));
   });
 
+  it("reuses one FTP connection across configured roots and reconnects after a disconnect", async () => {
+    let clientsCreated = 0;
+    let clientsClosed = 0;
+    const { profileService, queue } = createHarness(async () => {
+      clientsCreated += 1;
+      const clientId = clientsCreated;
+      let disconnected = false;
+      return {
+        list: async (path) => {
+          if (disconnected) throw new Error("Client is closed because Server sent FIN packet unexpectedly, closing connection.");
+          if (clientId === 1 && path === "/TV") {
+            disconnected = true;
+            throw new Error("Server sent FIN packet unexpectedly, closing connection.");
+          }
+          if (path === "/Movies") return [{ name: "Movie.2020.mkv", path: "/Movies/Movie.2020.mkv", type: "file", size: 1000 }];
+          if (path === "/TV") return [{ name: "Show.Name.S01E01.mkv", path: "/TV/Show.Name.S01E01.mkv", type: "file", size: 1000 }];
+          if (path === "/Anime") return [{ name: "Other.Show.S01E02.mkv", path: "/Anime/Other.Show.S01E02.mkv", type: "file", size: 1000 }];
+          return [];
+        },
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => {
+          clientsClosed += 1;
+        },
+      };
+    });
+    const created = await profileService.createProfile(`browser-${Math.random()}`, "passphrase");
+    profileService.saveFtpConfig(created.profileId, {
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/Movies", "/TV", "/Anime"],
+    });
+
+    queue.enqueueProfileScan(created.profileId, "manual");
+    const finished = await waitForStatus(queue, created.profileId, "succeeded");
+
+    expect(finished.filesSeen).toBe(3);
+    expect(clientsCreated).toBe(2);
+    expect(clientsClosed).toBe(2);
+  });
+
   it("retries failed full scans as full scans without trusting partial snapshots", async () => {
     let rootCalls = 0;
     const retryRootList = deferred<Array<{ name: string; path: string; type: "directory"; modifiedAt: string }>>();
