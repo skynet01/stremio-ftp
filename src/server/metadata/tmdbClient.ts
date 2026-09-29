@@ -59,6 +59,7 @@ const TMDB_CACHE_MAX_ENTRIES = 1000;
 const TMDB_TIMEOUT_MS = 10000;
 const catalogMetaCache = new TtlCache<Promise<CatalogMeta | null>>(TMDB_CACHE_MAX_ENTRIES);
 const TITLE_RELATIONSHIP_STOP_WORDS = new Set(["a", "an", "and", "in", "of", "or", "the", "to"]);
+const TITLE_REGION_TOKENS = new Set(["au", "ca", "nz", "uk", "us"]);
 const TITLE_NUMBER_TOKENS = new Map([
   ["one", "1"],
   ["i", "1"],
@@ -174,12 +175,31 @@ export function clearTmdbCatalogCache() {
 
 export function catalogMetaMatchesItem(item: CatalogItem, meta: PersistedCatalogMeta, catalogKind: TmdbCatalogKind): boolean {
   if (meta.type !== (catalogKind === "movie" ? "movie" : "series")) return false;
-  if (titleRelationshipScore(titleWithoutEditionSuffix(item.parsedTitle), meta.name) <= 0 &&
-    (!item.alternateTitle || titleRelationshipScore(titleWithoutEditionSuffix(item.alternateTitle), meta.name) <= 0)) return false;
+  if (metaTitleScore(item, meta) <= 0) return false;
   const year = searchYear(item);
   const alternateYear = item.alternateTitle ? item.alternateYear : null;
   const metaYear = Number(meta.releaseInfo?.slice(0, 4));
   return !year || !metaYear || Math.abs(year - metaYear) <= 1 || Boolean(alternateYear && Math.abs(alternateYear - metaYear) <= 1);
+}
+
+// Decides what a recheck keeps: a still-valid stored match wins unless the fresh match's title is a closer fit.
+export function catalogRecheckChoice(
+  item: CatalogItem,
+  existing: PersistedCatalogMeta | null | undefined,
+  fresh: PersistedCatalogMeta | null,
+  catalogKind: TmdbCatalogKind,
+): "existing" | "fresh" | "none" {
+  const existingValid = Boolean(existing && catalogMetaMatchesItem(item, existing, catalogKind));
+  if (!fresh) return existingValid ? "existing" : "none";
+  if (!existingValid || item.imdbId) return "fresh";
+  return metaTitleScore(item, fresh) > metaTitleScore(item, existing!) ? "fresh" : "existing";
+}
+
+function metaTitleScore(item: CatalogItem, meta: PersistedCatalogMeta) {
+  return Math.max(
+    titleRelationshipScore(titleWithoutEditionSuffix(item.parsedTitle), meta.name),
+    item.alternateTitle ? titleRelationshipScore(titleWithoutEditionSuffix(item.alternateTitle), meta.name) : 0,
+  );
 }
 
 function searchYear(item: CatalogItem): number | null {
@@ -300,11 +320,18 @@ function titleRelationshipScore(expectedTitle: string, resultTitleValue: string)
   const resultTokens = relationshipTokens(normalizedResultTitle);
   if (!expectedTokens.length || !resultTokens.length) return 0;
   if (expectedTokens.join(" ") === resultTokens.join(" ")) return 50;
+  // "The Office US" -> "The Office"; "Borat" -> "Borat: Cultural Learnings of America..."
+  if (TITLE_REGION_TOKENS.has(expectedTokens.at(-1)!) && !resultTokens.includes(expectedTokens.at(-1)!) &&
+    expectedTokens.slice(0, -1).join(" ") === resultTokens.join(" ")) return 25;
+  const resultMainTitle = resultTitleValue.split(/\s*[:–—]\s*|\s+-\s+/)[0];
+  if (resultMainTitle !== resultTitleValue && relationshipTokens(normalizeRelationshipTitle(resultMainTitle)).join(" ") === expectedTokens.join(" ")) return 25;
   const expectedSet = new Set(expectedTokens);
   const resultSet = new Set(resultTokens);
   if (expectedSet.size === 1) return 0;
   if (Array.from(expectedSet).every((token) => resultSet.has(token))) return 25;
   const commonTokens = Array.from(expectedSet).filter((token) => resultSet.has(token)).length;
+  // Regional variants such as "Sorcerer's Stone" / "Philosopher's Stone" differ by one word in a long title.
+  if (commonTokens >= 3 && commonTokens / expectedSet.size >= 0.75 && commonTokens / resultSet.size >= 0.75) return 25;
   return expectedTokens.some((token) => /^(?:[2-9]|1\d|20)$/.test(token)) && commonTokens >= 2 ? 25 : 0;
 }
 

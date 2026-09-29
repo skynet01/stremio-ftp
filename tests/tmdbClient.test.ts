@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { catalogMetaMatchesItem, clearTmdbCatalogCache, tmdbCatalogEnrichment, tmdbCatalogMeta } from "../src/server/metadata/tmdbClient";
+import { catalogMetaMatchesItem, catalogRecheckChoice, clearTmdbCatalogCache, tmdbCatalogEnrichment, tmdbCatalogMeta } from "../src/server/metadata/tmdbClient";
 
 describe("tmdbCatalogMeta", () => {
   afterEach(() => {
@@ -478,6 +478,39 @@ describe("tmdbCatalogMeta", () => {
 
     await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle, parsedYear: 2001, imdbId: null }, "tmdb-key")).resolves.toEqual({ status: "unmatched" });
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/movie/1/external_ids");
+  });
+
+  it.each([
+    ["harry potter and the sorcerers stone", 2001, "Harry Potter and the Philosopher's Stone", "movie"],
+    ["borat", 2006, "Borat: Cultural Learnings of America for Make Benefit Glorious Nation of Kazakhstan", "movie"],
+    ["the office us", 2005, "The Office", "series"],
+  ] as const)("matches %s to the regional or subtitled TMDB title", async (parsedTitle, year, title, kind) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname.startsWith("/3/search/")) return { ok: true, json: async () => ({ results: [
+        { id: 1, title, name: title, release_date: `${year}-01-01`, first_air_date: `${year}-01-01` },
+      ] }) };
+      if (url.pathname.endsWith("/external_ids")) return { ok: true, json: async () => ({ imdb_id: "tt0000001" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    }));
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: kind, catalogKind: kind, parsedTitle, parsedYear: year, imdbId: null }, "tmdb-key")).resolves.toMatchObject({
+      status: "matched", meta: { id: "tt0000001", name: title },
+    });
+  });
+
+  it("chooses between a stored match and a recheck result", () => {
+    const item = { mediaKind: "series" as const, catalogKind: "series" as const, parsedTitle: "harbor lights", parsedYear: 2004, imdbId: null };
+    const exact = { id: "tt0000002", type: "series" as const, name: "Harbor Lights", releaseInfo: "2004" };
+    const longer = { id: "tt0000001", type: "series" as const, name: "Harbor Lights Origins", releaseInfo: "2004" };
+    const unrelated = { id: "tt0000003", type: "series" as const, name: "Blue Harbor", releaseInfo: "2004" };
+
+    expect(catalogRecheckChoice(item, longer, exact, "series")).toBe("fresh");
+    expect(catalogRecheckChoice(item, exact, longer, "series")).toBe("existing");
+    expect(catalogRecheckChoice(item, exact, null, "series")).toBe("existing");
+    expect(catalogRecheckChoice(item, unrelated, null, "series")).toBe("none");
+    expect(catalogRecheckChoice(item, unrelated, longer, "series")).toBe("fresh");
+    expect(catalogRecheckChoice(item, null, null, "series")).toBe("none");
   });
 
   it("does not search movies for an unmatched series", async () => {

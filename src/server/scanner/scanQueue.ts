@@ -10,7 +10,7 @@ import {
 } from "../ftp/crawler.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import type { CatalogEnrichmentCandidate, MediaRepository } from "../media/mediaRepository.js";
-import { catalogMetaMatchesItem, tmdbCatalogEnrichment, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
+import { catalogRecheckChoice, tmdbCatalogEnrichment, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
 import type { ProfileService } from "../profiles/profileService.js";
 import { nextAlignedScanAt } from "./schedule.js";
 
@@ -582,21 +582,7 @@ export class ScanQueue {
         this.saveEnrichmentProgress(jobId, processed, total, candidate);
         continue;
       }
-      const result = await tmdbCatalogEnrichment(candidate, apiKey, tmdbLookupKind(candidate));
-      const now = new Date().toISOString();
-      if (result.status === "matched") {
-        if (candidate.existingMeta && catalogMetaMatchesItem(candidate, candidate.existingMeta, tmdbLookupKind(candidate))) {
-          this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
-        } else {
-          this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
-        }
-      } else if (result.status === "unmatched") {
-        this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
-      } else {
-        retryCount += 1;
-        const nextAttemptAt = new Date(Date.now() + ENRICHMENT_RETRY_DELAY_MS).toISOString();
-        this.mediaRepository.saveCatalogEnrichmentRetry(candidate.id, result.error, nextAttemptAt, now);
-      }
+      if (!(await this.enrichCatalogCandidate(candidate, apiKey))) retryCount += 1;
       processed += 1;
       this.saveEnrichmentProgress(jobId, processed, total, candidate);
     }
@@ -639,21 +625,7 @@ export class ScanQueue {
         this.saveEnrichmentProgress(jobId, processed, total, candidate);
         continue;
       }
-      const result = await tmdbCatalogEnrichment(candidate, apiKey, tmdbLookupKind(candidate));
-      const now = new Date().toISOString();
-      if (result.status === "matched") {
-        if (candidate.existingMeta && catalogMetaMatchesItem(candidate, candidate.existingMeta, tmdbLookupKind(candidate))) {
-          this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
-        } else {
-          this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, result.meta, now);
-        }
-      } else if (result.status === "unmatched") {
-        this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
-      } else {
-        retryCount += 1;
-        const nextAttemptAt = new Date(Date.now() + ENRICHMENT_RETRY_DELAY_MS).toISOString();
-        this.mediaRepository.saveCatalogEnrichmentRetry(candidate.id, result.error, nextAttemptAt, now);
-      }
+      if (!(await this.enrichCatalogCandidate(candidate, apiKey))) retryCount += 1;
       processed += 1;
       this.saveEnrichmentProgress(jobId, processed, total, candidate);
     }
@@ -662,6 +634,24 @@ export class ScanQueue {
       this.profileService.schedulePendingScan(profileId, ftpServerId, new Date(Date.now() + ENRICHMENT_RETRY_DELAY_MS).toISOString());
     }
     return this.mediaRepository.catalogEnrichmentStats(profileId, ftpServerId);
+  }
+
+  // Returns false when the lookup failed and the candidate was scheduled for retry.
+  private async enrichCatalogCandidate(candidate: CatalogEnrichmentCandidate, apiKey: string | null) {
+    const catalogKind = tmdbLookupKind(candidate);
+    const result = await tmdbCatalogEnrichment(candidate, apiKey, catalogKind);
+    const now = new Date().toISOString();
+    if (result.status === "retry") {
+      const nextAttemptAt = new Date(Date.now() + ENRICHMENT_RETRY_DELAY_MS).toISOString();
+      this.mediaRepository.saveCatalogEnrichmentRetry(candidate.id, result.error, nextAttemptAt, now);
+      return false;
+    }
+    const fresh = result.status === "matched" ? result.meta : null;
+    const choice = catalogRecheckChoice(candidate, candidate.existingMeta, fresh, catalogKind);
+    if (choice === "existing") this.mediaRepository.keepCatalogEnrichmentMatch(candidate.id, now);
+    else if (choice === "fresh") this.mediaRepository.saveCatalogEnrichmentMatch(candidate.id, fresh!, now);
+    else this.mediaRepository.saveCatalogEnrichmentUnmatched(candidate.id, now);
+    return true;
   }
 
   private saveEnrichmentProgress(jobId: number | null, processed: number, total: number, candidate: CatalogEnrichmentCandidate | null) {

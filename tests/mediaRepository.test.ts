@@ -90,7 +90,7 @@ describe("MediaRepository", () => {
     expect(db.prepare("select count(*) as count from shared_media_files").get()).toEqual({ count: 1 });
   });
 
-  it("stamps an unmatched item after one algorithm recheck while preserving a prior match if recheck finds none", () => {
+  it("stamps rechecked items so a kept match and an unmatched item are not rechecked again", () => {
     const db = new Database(":memory:");
     migrate(db);
     const profileId = createProfile(db);
@@ -105,7 +105,10 @@ describe("MediaRepository", () => {
     repo.syncCatalogEnrichmentCandidates(profileId, serverId, candidates, "2026-01-02");
     const pending = repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-02", 10);
     expect(pending.map((row) => row.parsedTitle).sort()).toEqual(["known movie", "lost movie"]);
-    for (const row of pending) repo.saveCatalogEnrichmentUnmatched(row.id, "2026-01-02");
+    for (const row of pending) {
+      if (row.existingMeta) repo.keepCatalogEnrichmentMatch(row.id, "2026-01-02");
+      else repo.saveCatalogEnrichmentUnmatched(row.id, "2026-01-02");
+    }
     expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-02", 10)).toEqual([]);
     expect(db.prepare("select status, meta_id from catalog_enrichment where parsed_title = 'known movie'").get()).toEqual({ status: "matched", meta_id: "tt1111111" });
   });

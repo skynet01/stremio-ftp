@@ -936,6 +936,7 @@ describe("ScanQueue", () => {
     ["Heavens Fall", "tt9999999", false, false],
     ["The Fall", "tt0460791", true, false],
     ["The Fall", "tt0460791", false, true],
+    ["Heavens Fall", null, false, true],
   ])("rechecks a stored %s match before accepting a replacement (expected: %s, retry: %s, live dates: %s)", async (storedName, expectedId, retryFirst, liveDates) => {
     const path = "/The Fall (2006)/The Fall_35_8_RIGHT_ONLY_00_v1.8.6_halfSBS.mp4";
     const { db, profileService, queue } = createHarness(

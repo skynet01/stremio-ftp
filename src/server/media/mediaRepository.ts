@@ -1262,20 +1262,38 @@ export class MediaRepository {
       .prepare(
         `
         update catalog_enrichment
-        set status = case when meta_id is not null then 'matched' else 'unmatched' end,
-            meta_type = case when meta_id is not null then meta_type else null end,
-            meta_name = case when meta_id is not null then meta_name else null end,
-            poster = case when meta_id is not null then poster else null end,
-            background = case when meta_id is not null then background else null end,
-            description = case when meta_id is not null then description else null end,
-            release_info = case when meta_id is not null then release_info else null end,
-            genres = case when meta_id is not null then genres else null end,
+        set status = 'unmatched',
+            meta_id = null,
+            meta_type = null,
+            meta_name = null,
+            poster = null,
+            background = null,
+            description = null,
+            release_info = null,
+            genres = null,
             algorithm_version = ?,
             attempts = attempts + 1,
             error = null,
             next_attempt_at = null,
             updated_at = ?
         where id = ?
+      `,
+      )
+      .run(CATALOG_ENRICHMENT_ALGORITHM_VERSION, nowIso, enrichmentId);
+  }
+
+  keepCatalogEnrichmentMatch(enrichmentId: number, nowIso: string) {
+    this.db
+      .prepare(
+        `
+        update catalog_enrichment
+        set status = 'matched',
+            algorithm_version = ?,
+            attempts = attempts + 1,
+            error = null,
+            next_attempt_at = null,
+            updated_at = ?
+        where id = ? and meta_id is not null
       `,
       )
       .run(CATALOG_ENRICHMENT_ALGORITHM_VERSION, nowIso, enrichmentId);
