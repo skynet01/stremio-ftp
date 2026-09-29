@@ -1725,6 +1725,34 @@ describe("App", () => {
     expect(loadAdminProfilesMock).not.toHaveBeenCalled();
   });
 
+  it("keeps admin action results visible after the profile list refreshes", async () => {
+    loadAdminProfilesMock.mockResolvedValue({
+      summary: { profiles: 2, configuredProfiles: 2, ftpServers: 2, configuredFtpServers: 2, indexedItems: 2, activeScans: 0, pendingScans: 0 },
+      profiles: [adminProfileFixture(2, "first-user-uid"), adminProfileFixture(3, "second-user-uid")],
+    });
+    deleteAdminProfileMock.mockResolvedValue({ ok: true });
+    await openAdminDashboard();
+    await screen.findByText("Admin profile list loaded.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete profile first-user-uid" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete first-user-uid?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
+
+    await waitFor(() => expect(loadAdminProfilesMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete profile first-user-uid" })).toBeEnabled());
+    expect(screen.getByText("Deleted profile first-user-uid.")).toBeTruthy();
+    expect(screen.queryByText("Admin profile list loaded.")).toBeNull();
+  });
+
+  it("loads admin profiles, shared groups, and stream status in parallel", async () => {
+    loadAdminProfilesMock.mockReturnValue(new Promise(() => undefined));
+    await openAdminDashboard();
+
+    await waitFor(() => expect(loadAdminSharedIndexGroupsMock).toHaveBeenCalled());
+    await waitFor(() => expect(loadAdminStreamStatusMock).toHaveBeenCalled());
+    expect(screen.getByText("Loading admin profile list...")).toBeTruthy();
+  });
+
   it("shows admin profile summaries for super admin profiles", async () => {
     loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
     loadAdminProfilesMock.mockResolvedValue({
@@ -2543,4 +2571,41 @@ function serverFormFixture(id: number, name: string) {
     sharedIndex: null,
     message: "Server ready.",
   };
+}
+
+function adminProfileFixture(id: number, browserUid: string) {
+  return {
+    id,
+    browserUid,
+    createdAt: "2026-05-16T00:00:00.000Z",
+    updatedAt: "2026-05-16T00:00:00.000Z",
+    lastUnlockedAt: null,
+    lastCountryCode: null,
+    adminEnabled: false,
+    adminSource: null,
+    ftpServers: 1,
+    configuredFtpServers: 1,
+    indexedItems: 1,
+    lastScanAt: null,
+    lastManifestAccessedAt: null,
+    activeScans: 0,
+    pendingScans: 0,
+    manifestUrl: null,
+    stremioInstallUrl: null,
+  };
+}
+
+async function openAdminDashboard() {
+  loadSetupStatusMock.mockResolvedValue({ setupTokenRequired: false, isAdmin: false, isSuperAdmin: true });
+  createProfileMock.mockResolvedValue({
+    profileId: 1,
+    recoveryUid: "admin-uid",
+    manifestUrl: "https://addon.example.test/u/admin/manifest.json",
+    stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
+  });
+  saveCustomizationMock.mockResolvedValue({ ok: true });
+  render(<App />);
+  fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+  await screen.findByRole("heading", { name: "Admin dashboard" });
 }

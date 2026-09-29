@@ -72,6 +72,10 @@ type BulkLinkResult = {
   }>;
 };
 
+type RefreshOptions = {
+  quiet?: boolean;
+};
+
 type CreateSharedGroupTarget = {
   profileId: number;
   profileUid: string;
@@ -106,14 +110,14 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
   const [createSharedDraft, setCreateSharedDraft] = useState({ name: "", keyHint: "" });
   const { confirm, confirmDialog } = useConfirmDialog();
 
-  async function refreshProfiles() {
+  async function refreshProfiles({ quiet = false }: RefreshOptions = {}) {
     setLoading(true);
-    setMessage("Loading admin profile list...");
+    if (!quiet) setMessage("Loading admin profile list...");
     try {
       const loaded = await loadAdminProfiles({ browserUid, passphrase });
       setData(loaded);
       setSelectedProfileIds((current) => new Set([...current].filter((profileId) => loaded.profiles.some((profile) => profile.id === profileId))));
-      setMessage(loaded.profiles.length ? "Admin profile list loaded." : "No profiles are set up yet.");
+      if (!quiet) setMessage(loaded.profiles.length ? "Admin profile list loaded." : "No profiles are set up yet.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load admin profiles.");
     } finally {
@@ -121,27 +125,16 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     }
   }
 
-  async function refreshSharedGroups() {
-    try {
-      const loaded = await loadAdminSharedIndexGroups({ browserUid, passphrase });
-      setSharedGroups(loaded.groups);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load shared index groups.");
-    }
-  }
-
-  async function refreshStreamStatus() {
-    try {
-      setStreamStatus(await loadAdminStreamStatus({ browserUid, passphrase }));
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to load stream status.");
-    }
-  }
-
-  async function refreshAdminData() {
-    await refreshProfiles();
-    await refreshSharedGroups();
-    await refreshStreamStatus();
+  async function refreshAdminData(options: RefreshOptions = {}) {
+    const [, sharedGroupsResult, streamStatusResult] = await Promise.allSettled([
+      refreshProfiles(options),
+      loadAdminSharedIndexGroups({ browserUid, passphrase }),
+      loadAdminStreamStatus({ browserUid, passphrase }),
+    ]);
+    if (sharedGroupsResult.status === "fulfilled") setSharedGroups(sharedGroupsResult.value.groups);
+    else setMessage(sharedGroupsResult.reason instanceof Error ? sharedGroupsResult.reason.message : "Unable to load shared index groups.");
+    if (streamStatusResult.status === "fulfilled") setStreamStatus(streamStatusResult.value);
+    else setMessage(streamStatusResult.reason instanceof Error ? streamStatusResult.reason.message : "Unable to load stream status.");
   }
 
   async function refreshUnlinkedIndexes(targetProfiles: AdminProfileSummary[], label: string) {
@@ -155,7 +148,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       const result = await bulkAdminProfiles({ browserUid, passphrase, profileIds, action: "rescan" });
       setBulkResult(result);
       setMessage(`Queued ${result.summary?.queued ?? 0} unlinked server scans for ${label}.`);
-      await refreshAdminData();
+      await refreshAdminData({ quiet: true });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to queue unlinked refresh.");
     } finally {
@@ -209,7 +202,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       setCreateSharedTarget(null);
       setCreateSharedDraft({ name: "", keyHint: "" });
       setMessage(`Shared index group created for ${created.group.host}.`);
-      await refreshAdminData();
+      await refreshAdminData({ quiet: true });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to create shared index group.");
     } finally {
@@ -269,7 +262,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       setSharedGroups((current) => current.filter((candidate) => candidate.id !== group.id));
       if (revealedSharedKey?.groupId === group.id) setRevealedSharedKey(null);
       setMessage(`${group.name} deleted.`);
-      await refreshAdminData();
+      await refreshAdminData({ quiet: true });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to delete shared index group.");
     } finally {
@@ -358,7 +351,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
     try {
       await deleteAdminProfile({ browserUid, passphrase, profileId: profile.id });
       setMessage(`Deleted profile ${profile.browserUid}.`);
-      await refreshProfiles();
+      await refreshProfiles({ quiet: true });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to delete profile.");
     } finally {
@@ -415,7 +408,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       setBulkResult(result);
       if (action === "delete") setSelectedProfileIds(new Set());
       setMessage(bulkActionMessage(result, profileIds.length));
-      await refreshProfiles();
+      await refreshProfiles({ quiet: true });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to run bulk admin action.");
     } finally {
@@ -469,7 +462,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       if (updatedGroup) setSharedGroups((current) => upsertSharedGroup(current, updatedGroup));
       setBulkLinkResult({ linked, failed, skipped, errors });
       setMessage(errors.length ? `Bulk link complete with ${failed} failed. Open the link dialog for details.` : `Bulk link complete: ${linked} linked, ${skipped} skipped, ${failed} failed.`);
-      await refreshAdminData();
+      await refreshAdminData({ quiet: true });
     } finally {
       setBulkBusy(false);
     }
@@ -487,7 +480,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       const result = await linkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId, serverId });
       setSharedGroups((current) => upsertSharedGroup(current, result.group));
       setMessage("Server linked to shared index group.");
-      await refreshAdminData();
+      await refreshAdminData({ quiet: true });
     } catch (error) {
       const serverName = profiles.find((profile) => profile.id === profileId)?.ftpServerDetails?.find((server) => server.id === serverId)?.name ?? "Server";
       setMessage(`${serverName} link failed: ${error instanceof Error ? error.message : "Unable to link server."}`);
@@ -516,7 +509,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       const result = await linkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId, serverId, force: true });
       setSharedGroups((current) => upsertSharedGroup(current, result.group));
       setMessage("Server force-linked to shared index group.");
-      await refreshAdminData();
+      await refreshAdminData({ quiet: true });
     } catch (error) {
       const serverName = profiles.find((profile) => profile.id === profileId)?.ftpServerDetails?.find((server) => server.id === serverId)?.name ?? "Server";
       setMessage(`${serverName} force link failed: ${error instanceof Error ? error.message : "Unable to link server."}`);
@@ -531,7 +524,7 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
       const result = await unlinkAdminSharedIndexServer({ browserUid, passphrase, groupId, profileId, serverId });
       setSharedGroups((current) => upsertSharedGroup(current, result.group));
       setMessage("Server unlinked from shared index group.");
-      await refreshAdminData();
+      await refreshAdminData({ quiet: true });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to unlink server.");
     } finally {
