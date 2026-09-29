@@ -87,9 +87,10 @@ describe("createBasicFtpClientFactory", () => {
     const server = await startFakeFtpServer({ files: { "/video.mkv": file }, abortAfterBytes: 64 * 1024 });
     const client = await createBasicFtpClientFactory(5000)(ftpConfig(server.port));
 
-    const stream = await client.openReadStream("/video.mkv", { start: 0, end: Number.MAX_SAFE_INTEGER });
+    // The abort can reach the client before or after the first byte, so the open or the read fails.
+    const read = async () => readSlowly(await client.openReadStream("/video.mkv", { start: 0, end: Number.MAX_SAFE_INTEGER }));
 
-    await expect(readSlowly(stream)).rejects.toThrow();
+    await expect(read()).rejects.toThrow();
   });
 
   it("closes the FTP connection when the consumer destroys the stream", async () => {
