@@ -6,6 +6,7 @@ import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
 import { MediaRepository } from "../src/server/media/mediaRepository";
+import { clearCinemetaCache } from "../src/server/metadata/cinemetaClient";
 import { clearTmdbCatalogCache } from "../src/server/metadata/tmdbClient";
 import { ProfileService } from "../src/server/profiles/profileService";
 import { stremioRoutes } from "../src/server/stremio/routes";
@@ -67,6 +68,7 @@ function persistUnmatchedCatalog(repository: MediaRepository, profileId: number,
 
 describe("stremio routes", () => {
   afterEach(() => {
+    clearCinemetaCache();
     clearTmdbCatalogCache();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -1368,6 +1370,47 @@ describe("stremio routes", () => {
     expect(response.body.streams[0].url).toBe(
       "ftp://user%20name:p%40ss%2Fword@ftp.example.test:2121/movies/The.Matrix.1999.1080p.mkv",
     );
+  });
+
+  it("still returns movie streams by IMDb id when Cinemeta is unavailable", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    service.saveFtpConfig(created.profileId, {
+      host: "ftp.example.test",
+      port: 2121,
+      username: "user",
+      password: "pass",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/movies"],
+    });
+    const repository = new MediaRepository(db);
+    repository.upsertParsedFile(created.profileId, {
+      mediaKind: "movie",
+      ftpPath: "/movies/The.Matrix.1999.1080p.mkv",
+      filename: "The.Matrix.1999.1080p.mkv",
+      normalizedFilename: "the matrix 1999 1080p",
+      extension: "mkv",
+      parsedTitle: "matrix",
+      parsedYear: 1999,
+      season: null,
+      episode: null,
+      imdbId: "tt0133093",
+      quality: "1080p",
+      confidence: 95,
+      sizeBytes: 1024,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) })),
+    );
+    const app = createApp(config, db);
+
+    const response = await request(app).get(`/u/${created.installUrlToken}/stream/movie/tt0133093.json`).expect(200);
+
+    expect(response.body.streams).toHaveLength(1);
   });
 
   it("returns duplicate title streams from every configured FTP server", async () => {

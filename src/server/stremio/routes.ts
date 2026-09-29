@@ -61,7 +61,6 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
 
     try {
       const metadata = await fetchCinemetaMeta(type, cinemetaId(type, id), config.maxOnDemandSearchMs);
-      if (!metadata) return res.json({ streams: [] });
 
       const streams = await resolveStreams({
         baseUrl: config.baseUrl,
