@@ -405,7 +405,7 @@ describe("stream resolver", () => {
       id: "tt7654321",
       metadata: { name: "The Movie!", releaseInfo: "2021" },
       streamDeliveryMode: "direct",
-      ftpConfig: {
+      ftpConfigForServer: () => ({
         host: "ftp.example.test",
         port: 2121,
         username: "user name",
@@ -413,7 +413,7 @@ describe("stream resolver", () => {
         tlsMode: "none",
         allowInvalidCertificate: false,
         roots: ["/Movies"],
-      },
+      }),
       mediaRepository: {
         findEpisode: () => [],
         findMovie: () => [

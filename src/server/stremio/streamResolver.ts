@@ -24,6 +24,7 @@ export type MediaMatch = {
   streamDeliveryMode?: StreamDeliveryMode | null;
 };
 
+const YEAR_PATTERN = /\b(19\d{2}|20\d{2})\b/;
 // Stored titles are normalizeTitle() output, which never contains "#", so this
 // matches no title and findMovie falls back to IMDb id and enrichment meta_id.
 const IMDB_ID_ONLY_TITLE = "#imdb-id-only";
@@ -49,7 +50,6 @@ export async function resolveStreams(input: {
   metadata: { name: string; releaseInfo?: string } | null;
   mediaRepository: RepoLike;
   streamDeliveryMode?: StreamDeliveryMode;
-  ftpConfig?: FtpConfig | null;
   ftpConfigForServer?: FtpConfigForServer;
   addonName?: string;
   streamNameTemplate?: string | null;
@@ -63,7 +63,6 @@ export async function resolveStreams(input: {
     installToken: input.installToken,
     match,
     streamDeliveryMode: input.streamDeliveryMode,
-    ftpConfig: input.ftpConfig,
     ftpConfigForServer,
     addonName: input.addonName,
     streamNameTemplate: input.streamNameTemplate,
@@ -76,7 +75,6 @@ export function streamForMatch(input: {
   installToken: string;
   match: MediaMatch;
   streamDeliveryMode?: StreamDeliveryMode;
-  ftpConfig?: FtpConfig | null;
   ftpConfigForServer?: FtpConfigForServer;
   addonName?: string;
   streamNameTemplate?: string | null;
@@ -84,7 +82,7 @@ export function streamForMatch(input: {
 }) {
   const { match } = input;
   const deliveryMode = match.streamDeliveryMode ?? input.streamDeliveryMode;
-  const ftpConfig = deliveryMode === "direct" ? (input.ftpConfigForServer?.(match.ftpServerId) ?? input.ftpConfig) : null;
+  const ftpConfig = deliveryMode === "direct" ? input.ftpConfigForServer?.(match.ftpServerId) : null;
   const formatterContext = streamFormatterContext({
     addonName: input.addonName,
     match,
@@ -153,7 +151,7 @@ function streamFormatterContext({
       serverId: match.ftpServerId ?? null,
       serverName,
       serverPrefix: serverName ? `${serverName} - ` : "",
-      type: deliveryMode === "direct" ? "http" : "http",
+      type: "http",
       proxied: deliveryMode !== "direct",
       library: false,
       indexer: serverName,
@@ -213,7 +211,7 @@ function streamFormatterContext({
 
 function releaseParts(filename: string) {
   const stem = filename.replace(/\.[^/.]+$/, "");
-  const year = stem.match(/\b(19\d{2}|20\d{2})\b/)?.[1] ?? "";
+  const year = stem.match(YEAR_PATTERN)?.[1] ?? "";
   const seasonEpisode = stem.match(/\bS(\d{1,2})E(\d{1,3})\b/i);
   const stop = year ? stem.indexOf(year) : seasonEpisode?.index ?? stem.search(/\b(?:2160p|1080p|720p|480p)\b/i);
   const titleSource = stop && stop > 0 ? stem.slice(0, stop) : stem;
@@ -257,12 +255,12 @@ function encodeFtpPath(ftpPath: string): string {
 
 function movieMatches(input: Parameters<typeof resolveStreams>[0]): MediaMatch[] {
   if (!isImdbId(input.id)) return [];
-  const title = input.metadata ? normalizeTitle(input.metadata.name) : "";
+  const title = normalizeTitle(input.metadata?.name ?? "");
   return input.mediaRepository.findMovie(input.profileId, input.id, title || IMDB_ID_ONLY_TITLE, yearFrom(input.metadata?.releaseInfo));
 }
 
 function episodeMatches(input: Parameters<typeof resolveStreams>[0]): MediaMatch[] {
-  const title = input.metadata ? normalizeTitle(input.metadata.name) : "";
+  const title = normalizeTitle(input.metadata?.name ?? "");
   if (!title) return [];
   const parts = input.id.split(":");
   if (parts.length !== 3) return [];
@@ -278,6 +276,6 @@ function isPositiveDecimalInteger(value: string): boolean {
 }
 
 function yearFrom(releaseInfo?: string): number | null {
-  const year = releaseInfo?.match(/\b(19\d{2}|20\d{2})\b/)?.[1];
+  const year = releaseInfo?.match(YEAR_PATTERN)?.[1];
   return year ? Number(year) : null;
 }
