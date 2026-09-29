@@ -1,4 +1,4 @@
-import { request as httpRequest } from "node:http";
+import { request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import request from "supertest";
@@ -201,7 +201,7 @@ describe("proxy routes", () => {
 
     const express = (await import("express")).default;
     const app = express().use(router);
-    const server = app.listen(0);
+    const server = await listenOnLoopback(app);
 
     try {
       const port = (server.address() as AddressInfo).port;
@@ -246,7 +246,7 @@ describe("proxy routes", () => {
 
     const express = (await import("express")).default;
     const app = express().use(router);
-    const server = app.listen(0);
+    const server = await listenOnLoopback(app);
 
     try {
       const port = (server.address() as AddressInfo).port;
@@ -279,7 +279,7 @@ describe("proxy routes", () => {
 
     const express = (await import("express")).default;
     const app = express().use(router);
-    const server = app.listen(0);
+    const server = await listenOnLoopback(app);
 
     try {
       const port = (server.address() as AddressInfo).port;
@@ -317,7 +317,7 @@ describe("proxy routes", () => {
 
     const express = (await import("express")).default;
     const app = express().use(router);
-    const server = app.listen(0);
+    const server = await listenOnLoopback(app);
 
     try {
       const port = (server.address() as AddressInfo).port;
@@ -353,6 +353,15 @@ describe("proxy routes", () => {
     }
   });
 });
+
+// Listen on 127.0.0.1 (not the `::` wildcard) so the port can't be shared with another
+// process's 127.0.0.1 listener; see tests/setup/supertestLoopback.ts.
+function listenOnLoopback(app: { listen(port: number, host: string, callback: () => void): Server }) {
+  return new Promise<Server>((resolve, reject) => {
+    const server = app.listen(0, "127.0.0.1", () => resolve(server));
+    server.once("error", reject);
+  });
+}
 
 async function waitFor(predicate: () => boolean) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
