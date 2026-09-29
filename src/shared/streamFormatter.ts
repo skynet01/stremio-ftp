@@ -34,9 +34,15 @@ export type StreamFormatterContext = {
 
 type TemplateKind = "name" | "description";
 
+type TemplateNode = string | ValueNode | ConditionalNode;
+type ValueNode = { path: string; modifiers: string[] };
+type ConditionalNode = { condition: string[]; whenTrue: TemplateNode[]; whenFalse: TemplateNode[] };
+
 const REMOVE_LINE = "\u0000REMOVE_LINE\u0000";
 const CONDITIONALS = new Set(["istrue", "isfalse", "exists"]);
 const OPERATORS = new Set(["and", "or", "xor"]);
+const COMPILED_TEMPLATE_CACHE_LIMIT = 128;
+const compiledTemplates = new Map<string, TemplateNode[]>();
 
 const SMALL_CAPS: Record<string, string> = {
   a: "ᴀ",
@@ -69,10 +75,10 @@ const SMALL_CAPS: Record<string, string> = {
 
 export function renderStreamTemplate(template: string | null | undefined, context: StreamFormatterContext, kind: TemplateKind): string {
   const fallback = kind === "name" ? DEFAULT_STREAM_NAME_TEMPLATE : DEFAULT_STREAM_DESCRIPTION_TEMPLATE;
-  const rendered = renderTemplate(template?.trim() || fallback, context);
+  const rendered = renderNodes(compiledTemplate(template?.trim() || fallback), context);
   const normalized = kind === "name" ? normalizeName(rendered) : normalizeDescription(rendered);
   if (normalized) return normalized;
-  const fallbackRendered = renderTemplate(fallback, context);
+  const fallbackRendered = renderNodes(compiledTemplate(fallback), context);
   return kind === "name" ? normalizeName(fallbackRendered) : normalizeDescription(fallbackRendered);
 }
 
@@ -179,35 +185,73 @@ export function formatStreamBytes(bytes: number | null | undefined, concise = fa
   return concise ? `${formatted}${units[unit]}` : `${formatted} ${units[unit]}`;
 }
 
-function renderTemplate(template: string, context: StreamFormatterContext): string {
-  const ends = expressionEnds(template);
-  let output = "";
-  for (let index = 0; index < template.length; index += 1) {
-    const end = template[index] === "{" ? ends[index + 1] : -1;
-    if (end === -1) {
-      output += template[index];
-      continue;
-    }
-    output += renderExpression(template.slice(index + 1, end), context);
-    index = end;
+function compiledTemplate(template: string): TemplateNode[] {
+  const cached = compiledTemplates.get(template);
+  if (cached) {
+    compiledTemplates.delete(template);
+    compiledTemplates.set(template, cached);
+    return cached;
   }
-  return output;
+  const nodes = compileTemplate(template);
+  compiledTemplates.set(template, nodes);
+  if (compiledTemplates.size > COMPILED_TEMPLATE_CACHE_LIMIT) {
+    const oldest = compiledTemplates.keys().next().value;
+    if (oldest !== undefined) compiledTemplates.delete(oldest);
+  }
+  return nodes;
 }
 
-function renderExpression(expression: string, context: StreamFormatterContext): string {
+function compileTemplate(template: string): TemplateNode[] {
+  const ends = expressionEnds(template);
+  const nodes: TemplateNode[] = [];
+  let literal = "";
+  let literalStart = 0;
+  for (let index = 0; index < template.length; index += 1) {
+    const end = template[index] === "{" ? ends[index + 1] : -1;
+    if (end === -1) continue;
+    literal += template.slice(literalStart, index);
+    const node = compileExpression(template.slice(index + 1, end));
+    if (typeof node === "string") {
+      literal += node;
+    } else {
+      if (literal) nodes.push(literal);
+      literal = "";
+      nodes.push(node);
+    }
+    index = end;
+    literalStart = end + 1;
+  }
+  literal += template.slice(literalStart);
+  if (literal) nodes.push(literal);
+  return nodes;
+}
+
+function compileExpression(expression: string): TemplateNode {
   const trimmed = expression.trim();
   if (trimmed === "tools.newLine") return "\n";
   if (trimmed === "tools.removeLine") return REMOVE_LINE;
 
   const conditional = splitConditional(trimmed);
   if (conditional) {
-    const branch = evaluateCondition(conditional.condition, context) ? conditional.trueBranch : conditional.falseBranch;
-    return renderTemplate(branch, context);
+    return {
+      condition: splitTopLevel(conditional.condition, "::").map((part) => part.trim()).filter(Boolean),
+      whenTrue: compileTemplate(conditional.trueBranch),
+      whenFalse: compileTemplate(conditional.falseBranch),
+    };
   }
 
   const [path, ...modifiers] = splitTopLevel(trimmed, "::").map((part) => part.trim());
-  const value = applyModifiers(valueAtPath(path, context), modifiers);
-  return stringifyValue(value);
+  return { path, modifiers };
+}
+
+function renderNodes(nodes: TemplateNode[], context: StreamFormatterContext): string {
+  let output = "";
+  for (const node of nodes) {
+    if (typeof node === "string") output += node;
+    else if ("path" in node) output += stringifyValue(applyModifiers(valueAtPath(node.path, context), node.modifiers));
+    else output += renderNodes(evaluateCondition(node.condition, context) ? node.whenTrue : node.whenFalse, context);
+  }
+  return output;
 }
 
 function splitConditional(expression: string): { condition: string; trueBranch: string; falseBranch: string } | null {
@@ -222,8 +266,7 @@ function splitConditional(expression: string): { condition: string; trueBranch: 
   };
 }
 
-function evaluateCondition(condition: string, context: StreamFormatterContext) {
-  const tokens = splitTopLevel(condition, "::").map((part) => part.trim()).filter(Boolean);
+function evaluateCondition(tokens: string[], context: StreamFormatterContext) {
   if (!tokens.length) return false;
 
   let index = 0;

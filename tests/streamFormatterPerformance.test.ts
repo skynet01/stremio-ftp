@@ -49,4 +49,18 @@ describe("stream formatter performance", () => {
     expect(renderStreamTemplate(templates[0], context, "description")).toBe(templates[0]);
     expect(duration).toBeLessThan(250);
   });
+
+  it("renders a long realistic template repeatedly within budget", () => {
+    const section =
+      "{stream.title::exists::and::stream.library::isfalse[\"✎  {stream.title::title::truncate(35)}\"||\"\"]}{stream.visualTags::exists[\" {stream.visualTags::sort::join(' · ')}\"||\"\"]}{stream.size::>0[\" {stream.size::sbytes}\"||\"\"]}\n";
+    const template = section.repeat(Math.floor(TEMPLATE_CAP / section.length));
+    expect(template.length).toBeGreaterThan(TEMPLATE_CAP - section.length);
+
+    const duration = elapsed(() => {
+      for (let round = 0; round < 200; round += 1) renderStreamTemplate(template, context, "description");
+    });
+
+    expect(renderStreamTemplate(template, context, "description").split("\n")[0]).toBe("✎  The Matrix HDR 5GB");
+    expect(duration).toBeLessThan(2000);
+  });
 });
