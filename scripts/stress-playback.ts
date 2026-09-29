@@ -12,6 +12,7 @@
 //   --server-user-cap=3       fake FTP server: max sessions per user (530 beyond it; 0 = unlimited)
 //   --release-lag-ms=0        fake FTP server: a closed session keeps counting this long
 //   --latency-ms=0            fake FTP server: delay added to every control reply
+//   --no-rang                 fake FTP server: do not advertise or accept RANG (every seek uses REST)
 //   --ftp-timeout-ms=15000    app FTP_TIMEOUT_MS
 //   --pool-idle-ms=2000       app FTP_POOL_IDLE_MS (0 turns pooling off); the "quiet" checks wait this out
 //   --login-failure-cache-ms=1000  app FTP_LOGIN_FAILURE_CACHE_MS (how long a 530 fails fast)
@@ -66,6 +67,7 @@ for (const cap of caps) {
     serverUserCap: numberArg(args, "server-user-cap", 3),
     releaseLagMs: numberArg(args, "release-lag-ms", 0),
     latencyMs: numberArg(args, "latency-ms", 0),
+    rang: !args.has("no-rang"),
     ftpTimeoutMs: numberArg(args, "ftp-timeout-ms", 15_000),
     poolIdleMs: numberArg(args, "pool-idle-ms", 2_000),
     loginFailureCacheMs: numberArg(args, "login-failure-cache-ms", 1_000),
@@ -77,7 +79,8 @@ for (const cap of caps) {
   });
   out(
     `Run: FTP_MAX_CONNECTIONS=${cap}, ${options.viewers} viewers (one FTP user each), FTP server cap ${options.serverUserCap}/user, ` +
-      `release lag ${options.releaseLagMs} ms, reply latency ${options.latencyMs} ms, FTP_TIMEOUT_MS=${options.ftpTimeoutMs}, FTP_POOL_IDLE_MS=${options.poolIdleMs}, plain FTP (no TLS)`,
+      `release lag ${options.releaseLagMs} ms, reply latency ${options.latencyMs} ms, FTP_TIMEOUT_MS=${options.ftpTimeoutMs}, FTP_POOL_IDLE_MS=${options.poolIdleMs}, ` +
+      `${options.rang ? "RANG" : "no RANG"}, plain FTP (no TLS)`,
   );
   const report = await runPlaybackStress(options);
   reports.push(report);
@@ -117,7 +120,8 @@ function printScenario(scenario: ScenarioReport) {
   out(
     `      ${scenario.requests} requests in ${(scenario.durationMs / 1000).toFixed(1)} s; ` +
       `GET TTFB p50 ${fmtMs(scenario.ttfb.p50)} p95 ${fmtMs(scenario.ttfb.p95)} max ${fmtMs(scenario.ttfb.max)} (${scenario.ttfb.samples}); ` +
-      `HEAD p50 ${fmtMs(scenario.head.p50)} p95 ${fmtMs(scenario.head.p95)} (${scenario.head.samples})`,
+      `HEAD p50 ${fmtMs(scenario.head.p50)} p95 ${fmtMs(scenario.head.p95)} (${scenario.head.samples}); ` +
+      `${scenario.loginsPerGet ?? "-"} FTP logins per GET`,
   );
   out(`      client outcomes: ${formatCounts(scenario.outcomes)}`);
   out(
@@ -128,7 +132,7 @@ function printScenario(scenario: ScenarioReport) {
   const server = scenario.server;
   out(
     `      FTP server: ${server.loginsAccepted} logins ok, ${server.loginsRejectedOverCap} refused over cap, ${server.loginsRejectedInjected} injected 530, ` +
-      `max ${server.maxSessionsPerUser} sessions/user, ${server.transfersStarted} transfers (${server.transfersCompleted} completed, ` +
+      `max ${server.maxSessionsPerUser} sessions/user, ${server.transfersStarted} transfers (${server.rangTransfers} by RANG, ${server.transfersCompleted} completed, ` +
       `${server.transfersClosedByClient} closed by client), faults: ${server.dataDrops} data drops, ${server.controlDrops} control drops, ` +
       `${server.stalls} stalls, ${server.delayedReplies} delayed replies; ${(server.bytesSent / 1024 / 1024).toFixed(0)} MB sent`,
   );

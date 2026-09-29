@@ -38,6 +38,8 @@ export type HarnessOptions = {
   serverUserCap: number;
   releaseLagMs: number;
   latencyMs: number;
+  // The fake FTP server advertises and honors RANG (like production); false leaves REST as the only way to seek.
+  rang: boolean;
   ftpTimeoutMs: number;
   // App FTP_POOL_IDLE_MS. Short by default so the "quiet" checks do not wait out the production idle time.
   poolIdleMs: number;
@@ -71,6 +73,7 @@ export function defaultHarnessOptions(overrides: Partial<HarnessOptions> = {}): 
     serverUserCap: 3,
     releaseLagMs: 0,
     latencyMs: 0,
+    rang: true,
     ftpTimeoutMs: 15_000,
     poolIdleMs: 2_000,
     loginFailureCacheMs: 1_000,
@@ -150,6 +153,8 @@ export type ScenarioReport = {
   playbackFailuresByLabel: Record<string, number>;
   ttfb: { p50: number | null; p95: number | null; max: number | null; samples: number };
   head: { p50: number | null; p95: number | null; samples: number };
+  // FTP logins the server accepted per GET request (1.0 means every request logged in; pooling brings it down).
+  loginsPerGet: number | null;
   // GETs sent while the viewer's FTP slots were all in use, so they had to queue in the limiter.
   queuedWaits: number;
   maxSlotsPerUser: number;
@@ -208,6 +213,7 @@ async function startEnvironment(options: HarnessOptions, logs: LogCollector): Pr
     perUserMaxConnections: options.serverUserCap,
     releaseLagMs: options.releaseLagMs,
     latencyMs: options.latencyMs,
+    rang: options.rang,
     random: seededRandom(options.seed ^ 0x5eed),
   }).listen();
 
@@ -391,7 +397,9 @@ class LogCollector {
       return;
     }
     if (label === "[proxy-ftp-timing]" && typeof payload === "string") {
-      increment(this.ftpEvents, (JSON.parse(payload) as { event: string }).event);
+      const parsed = JSON.parse(payload) as { event: string; source?: string };
+      // stream_opened is split by where its login came from: new, idle (pooled), warm or handoff.
+      increment(this.ftpEvents, parsed.source ? `${parsed.event} (${parsed.source})` : parsed.event);
       return;
     }
     const text = args
@@ -800,6 +808,7 @@ async function runScenario(env: Environment, name: ScenarioName, scenarioIndex: 
     playbackFailuresByLabel: {},
     ttfb: { p50: null, p95: null, max: null, samples: 0 },
     head: { p50: null, p95: null, samples: 0 },
+    loginsPerGet: null,
     queuedWaits: 0,
     maxSlotsPerUser: 0,
     maxServerSessionsPerUser: 0,
@@ -877,6 +886,8 @@ async function runScenario(env: Environment, name: ScenarioName, scenarioIndex: 
     }
   }
   report.ttfb = { ...percentiles(ttfb), max: ttfb.length ? Math.max(...ttfb) : null, samples: ttfb.length };
+  const gets = ctx.results.filter((result) => result.plan.method === "GET").length;
+  report.loginsPerGet = gets ? round2(env.ftp.stats.loginsAccepted / gets) : null;
   const headStats = percentiles(headMs);
   report.head = { p50: headStats.p50, p95: headStats.p95, samples: headMs.length };
   report.server = { ...env.ftp.stats };
@@ -1032,7 +1043,7 @@ export async function runPlaybackStress(options: HarnessOptions): Promise<Harnes
       scenarioReport.violations.push(...processViolations.splice(0));
       report.scenarios.push(scenarioReport);
       options.log(
-        `    ${scenarioReport.violations.length ? "FAIL" : "pass"} · ${scenarioReport.requests} requests · ${scenarioReport.playbackFailures} failed playback · TTFB p50/p95 ${fmtMs(scenarioReport.ttfb.p50)}/${fmtMs(scenarioReport.ttfb.p95)}`,
+        `    ${scenarioReport.violations.length ? "FAIL" : "pass"} · ${scenarioReport.requests} requests · ${scenarioReport.playbackFailures} failed playback · TTFB p50/p95 ${fmtMs(scenarioReport.ttfb.p50)}/${fmtMs(scenarioReport.ttfb.p95)} · ${scenarioReport.loginsPerGet ?? "-"} logins/GET`,
       );
     }
   } finally {
@@ -1081,6 +1092,10 @@ function percentiles(values: number[]) {
   const sorted = [...values].sort((a, b) => a - b);
   const at = (fraction: number) => sorted[Math.min(sorted.length - 1, Math.floor(fraction * sorted.length))];
   return { p50: at(0.5), p95: at(0.95) };
+}
+
+function round2(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function round1(value: number) {

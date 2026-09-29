@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import { patternBytes } from "./pattern";
 
 // A small in-process FTP server over plain TCP (no TLS) that is good enough for basic-ftp downloads:
-// USER/PASS, FEAT, TYPE, EPSV, REST, RETR, QUIT. File bodies are generated on the fly from a seed,
+// USER/PASS, FEAT, TYPE, EPSV, REST, RANG, RETR, QUIT. File bodies are generated on the fly from a seed,
 // so large files cost no memory. It can enforce a per-user session cap and inject faults.
 
 export type FakeFile = { size: number; seed: number };
@@ -39,6 +39,8 @@ export type FakeFtpServerOptions = {
   releaseLagMs?: number;
   // Added to every control reply, like network latency.
   latencyMs?: number;
+  // Advertise and honor RANG STREAM (byte ranges that end with 226, like the production server). Default true.
+  rang?: boolean;
   random?: () => number;
 };
 
@@ -48,6 +50,8 @@ export type FakeFtpStats = {
   loginsRejectedOverCap: number;
   loginsRejectedInjected: number;
   transfersStarted: number;
+  // Transfers limited by RANG rather than started with REST.
+  rangTransfers: number;
   transfersCompleted: number;
   transfersClosedByClient: number;
   dataDrops: number;
@@ -64,6 +68,7 @@ type Session = {
   user: string | null;
   loggedInAs: string | null;
   restOffset: number;
+  range: { start: number; end: number } | null;
   passive: { server: Server; socket: Promise<Socket | null>; timer: NodeJS.Timeout } | null;
   dataSocket: Socket | null;
   replyChain: Promise<void>;
@@ -82,6 +87,7 @@ export class FakeFtpServer {
     loginsRejectedOverCap: 0,
     loginsRejectedInjected: 0,
     transfersStarted: 0,
+    rangTransfers: 0,
     transfersCompleted: 0,
     transfersClosedByClient: 0,
     dataDrops: 0,
@@ -150,6 +156,7 @@ export class FakeFtpServer {
       user: null,
       loggedInAs: null,
       restOffset: 0,
+      range: null,
       passive: null,
       dataSocket: null,
       replyChain: Promise.resolve(),
@@ -251,7 +258,7 @@ export class FakeFtpServer {
         this.login(session);
         return;
       case "FEAT":
-        this.reply(session, "211 No features");
+        this.reply(session, this.options.rang === false ? "211-Features:\r\n EPSV\r\n REST STREAM\r\n211 End" : "211-Features:\r\n EPSV\r\n RANG STREAM\r\n REST STREAM\r\n211 End");
         return;
       case "TYPE":
         this.reply(session, "200 Type set");
@@ -267,7 +274,11 @@ export class FakeFtpServer {
         return;
       case "REST":
         session.restOffset = Number(arg) || 0;
+        session.range = null;
         this.reply(session, `350 Restarting at ${session.restOffset}`);
+        return;
+      case "RANG":
+        this.byteRange(session, arg);
         return;
       case "RETR":
         this.retrieve(session, arg);
@@ -305,6 +316,23 @@ export class FakeFtpServer {
     this.stats.maxSessionsPerUser = Math.max(this.stats.maxSessionsPerUser, current + 1);
     this.stats.loginsAccepted += 1;
     this.reply(session, "230 Logged in");
+  }
+
+  private byteRange(session: Session, arg: string) {
+    if (this.options.rang === false) {
+      this.reply(session, "500 RANG not understood");
+      return;
+    }
+    const match = arg.match(/^(\d+) (\d+)$/);
+    const start = Number(match?.[1]);
+    const end = Number(match?.[2]);
+    if (!match || end < start) {
+      this.reply(session, "501 Invalid byte range");
+      return;
+    }
+    session.range = { start, end };
+    session.restOffset = 0;
+    this.reply(session, `350 Transferring byte range of ${end - start + 1} bytes starting from ${start}`);
   }
 
   private openPassive(session: Session) {
@@ -356,10 +384,15 @@ export class FakeFtpServer {
       return;
     }
     session.passive = null;
-    const start = Math.min(session.restOffset, file.size);
+    const range = session.range;
+    const start = Math.min(range ? range.start : session.restOffset, file.size);
+    // RANG ends the transfer after its last byte (inclusive); REST runs to the end of the file.
+    const end = range ? Math.min(range.end + 1, file.size) : file.size;
     session.restOffset = 0;
+    session.range = null;
     this.reply(session, "150 Opening BINARY mode data connection");
     this.stats.transfersStarted += 1;
+    if (range) this.stats.rangTransfers += 1;
 
     void passive.socket.then((dataSocket) => {
       clearTimeout(passive.timer);
@@ -378,7 +411,7 @@ export class FakeFtpServer {
       const body = new Readable({
         highWaterMark: CHUNK_BYTES,
         read: () => {
-          if (position >= file.size) {
+          if (position >= end) {
             body.push(null);
             return;
           }
@@ -392,7 +425,7 @@ export class FakeFtpServer {
             this.reply(session, "426 Connection closed; transfer aborted");
             return;
           }
-          const length = Math.min(CHUNK_BYTES, file.size - position, dropAfter - sent);
+          const length = Math.min(CHUNK_BYTES, end - position, dropAfter - sent);
           const chunk = patternBytes(file.seed, position, length);
           position += length;
           sent += length;
