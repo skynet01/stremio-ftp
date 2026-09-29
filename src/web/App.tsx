@@ -102,6 +102,7 @@ const SERVER_LIBRARY_SETTING_KEYS = new Set<keyof ServerForm>([
   "streamDeliveryMode",
 ]);
 const SHARED_INDEX_UNLINK_REQUIRED_FRAGMENT = "will unlink it from the shared index group";
+const SCAN_STATUS_POLL_MS = 3000;
 
 function browserUid() {
   const cryptoApi = globalThis.crypto;
@@ -452,11 +453,38 @@ export function App() {
 
   useEffect(() => {
     if (!profileReady || !anyScanActive) return;
-    const timer = window.setInterval(() => {
-      void refreshScanStatus();
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [profileReady, anyScanActive]);
+    let cancelled = false;
+    let inFlight = false;
+    let timer: number | undefined;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void poll(), SCAN_STATUS_POLL_MS);
+    };
+    const poll = async () => {
+      if (cancelled || inFlight || document.hidden) return;
+      inFlight = true;
+      try {
+        await refreshScanStatus(() => cancelled);
+      } catch {
+        // Keep polling; the next tick retries.
+      } finally {
+        inFlight = false;
+      }
+      if (!cancelled) schedule();
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+      window.clearTimeout(timer);
+      void poll();
+    };
+    schedule();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [profileReady, anyScanActive, recoveryUid, passphrase]);
 
   useEffect(() => {
     if (!changelogOpen || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") return;
@@ -963,8 +991,9 @@ export function App() {
     }
   }
 
-  async function refreshScanStatus() {
+  async function refreshScanStatus(isStale: () => boolean = () => false) {
     const result = await loadScanStatus({ browserUid: recoveryUid, passphrase });
+    if (isStale()) return;
     const polledServers = result.servers?.map(serverFormFromPayload);
     if (polledServers) {
       setServers((current) => mergeServerStatus(current, polledServers));

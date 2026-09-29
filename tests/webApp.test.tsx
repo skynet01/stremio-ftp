@@ -229,6 +229,10 @@ function mockScanningServers() {
 }
 
 describe("App", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     window.history.pushState({}, "", "/");
@@ -928,6 +932,7 @@ describe("App", () => {
   });
 
   it("saves FTP settings and refreshes the index after profile creation", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     createProfileMock.mockResolvedValue({
       profileId: 1,
       recoveryUid: "browser-uid",
@@ -1040,9 +1045,10 @@ describe("App", () => {
     expect(await screen.findByText("Scanning FTP library.")).toBeTruthy();
     expect(screen.getByText("1 server indexing")).toBeTruthy();
     expect(screen.getByRole("progressbar", { name: "Global indexing progress" })).toHaveAttribute("aria-valuenow", "25");
-    await waitFor(() => expect(loadScanStatusMock).toHaveBeenCalledWith({ browserUid: recoveryUidValue, passphrase: "passphrase" }), {
-      timeout: 2000,
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
     });
+    await waitFor(() => expect(loadScanStatusMock).toHaveBeenCalledWith({ browserUid: recoveryUidValue, passphrase: "passphrase" }));
     expect(await screen.findByText("Indexed 3 media files.")).toBeTruthy();
     expect(screen.getAllByText("3").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Uncategorized").length).toBeGreaterThan(0);
@@ -2309,28 +2315,96 @@ describe("App", () => {
   });
 
   describe("scan status polling", () => {
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it("keeps unsaved edits on other servers while a scan is polled", async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
+    beforeEach(() => {
+      vi.useFakeTimers();
       rememberProfile();
       mockScanningServers();
+    });
 
-      render(<App />);
-      fireEvent.click(await screen.findByRole("button", { name: /^Beta/ }));
+    afterEach(() => {
+      delete (document as { hidden?: boolean }).hidden;
+    });
+
+    async function advance(ms: number) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    }
+
+    async function renderScanningApp() {
+      const view = render(<App />);
+      for (let attempt = 0; attempt < 20 && !screen.queryByRole("button", { name: /^Beta/ }); attempt += 1) await advance(0);
+      expect(screen.getByRole("button", { name: /^Beta/ })).toBeTruthy();
+      return view;
+    }
+
+    it("keeps unsaved edits on other servers while a scan is polled", async () => {
+      await renderScanningApp();
+      fireEvent.click(screen.getByRole("button", { name: /^Beta/ }));
       fireEvent.change(screen.getByLabelText("Host"), { target: { value: "edited.example.test" } });
       fireEvent.change(screen.getByLabelText("Root paths"), { target: { value: "/Edited" } });
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(3500);
-      });
+      await advance(3000);
 
-      expect(loadScanStatusMock).toHaveBeenCalled();
+      expect(loadScanStatusMock).toHaveBeenCalledTimes(1);
       expect(screen.getByRole("button", { name: /^Alpha/ })).toHaveTextContent("60%");
       expect(screen.getByLabelText("Host")).toHaveValue("edited.example.test");
       expect(screen.getByLabelText("Root paths")).toHaveValue("/Edited");
+    });
+
+    it("polls every three seconds and waits for the in-flight request before polling again", async () => {
+      let resolveFirst: () => void = () => undefined;
+      const polled = loadScanStatusMock.getMockImplementation()!({ browserUid: "browser-uid", passphrase: "passphrase" });
+      loadScanStatusMock.mockImplementationOnce(() => new Promise((resolve) => (resolveFirst = () => resolve(polled))));
+      await renderScanningApp();
+
+      await advance(2999);
+      expect(loadScanStatusMock).not.toHaveBeenCalled();
+      await advance(1);
+      expect(loadScanStatusMock).toHaveBeenCalledTimes(1);
+      await advance(10_000);
+      expect(loadScanStatusMock).toHaveBeenCalledTimes(1);
+
+      resolveFirst();
+      await advance(3000);
+      expect(loadScanStatusMock).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("button", { name: /^Alpha/ })).toHaveTextContent("60%");
+    });
+
+    it("keeps polling after a failed scan status request", async () => {
+      loadScanStatusMock.mockRejectedValueOnce(new Error("Request failed with 502"));
+      await renderScanningApp();
+
+      await advance(3000);
+      expect(loadScanStatusMock).toHaveBeenCalledTimes(1);
+      await advance(3000);
+      expect(loadScanStatusMock).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("button", { name: /^Alpha/ })).toHaveTextContent("60%");
+    });
+
+    it("pauses while the tab is hidden and refreshes as soon as it is visible again", async () => {
+      let hidden = true;
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      await renderScanningApp();
+
+      await advance(10_000);
+      expect(loadScanStatusMock).not.toHaveBeenCalled();
+
+      hidden = false;
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(loadScanStatusMock).toHaveBeenCalledTimes(1);
+      await advance(3000);
+      expect(loadScanStatusMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("stops polling after unmount", async () => {
+      const { unmount } = await renderScanningApp();
+      unmount();
+
+      await advance(10_000);
+      expect(loadScanStatusMock).not.toHaveBeenCalled();
     });
   });
 
