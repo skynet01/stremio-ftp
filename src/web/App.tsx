@@ -395,6 +395,7 @@ export function App() {
   const { confirm, confirmDialog } = useConfirmDialog();
   const requestedSetupStatusUid = useRef<string | null>(null);
   const latestRecoveryUid = useRef(recoveryUid);
+  const serverListVersion = useRef(0);
   const profileReady = profileState === "created" || profileState === "unlocked";
   const currentYear = new Date().getFullYear();
   const anyScanActive = useMemo(() => servers.some((server) => scanIsActive(server.scanStatus)), [servers]);
@@ -572,6 +573,7 @@ export function App() {
       applyCustomization(loaded.customization);
       const loadedForms = loaded.servers.map(serverFormFromPayload);
       const forms = [...loadedForms, ...servers.filter((server) => server.pendingCreate)];
+      serverListVersion.current += 1;
       setServers((current) => [...loadedForms, ...current.filter((server) => server.pendingCreate)]);
       setGlobalStats(loaded.globalStats);
       setExpandedServerId((current) => {
@@ -590,6 +592,7 @@ export function App() {
         ...DEFAULT_CUSTOMIZATION,
         ...legacyCustomization.customization,
       });
+      serverListVersion.current += 1;
       setServers([form]);
       setGlobalStats({
         ...EMPTY_GLOBAL_STATS,
@@ -837,6 +840,7 @@ export function App() {
   async function addServer() {
     const result = await createFtpServer({ browserUid: recoveryUid, passphrase });
     const form = serverFormFromPayload(result.server);
+    serverListVersion.current += 1;
     setServers((current) => [...current, form]);
     setGlobalStats(result.globalStats);
     setExpandedServerId(form.id);
@@ -850,6 +854,7 @@ export function App() {
       if (server.pendingCreate) {
         const created = await createFtpServer({ browserUid: recoveryUid, passphrase });
         targetServerId = created.server.id;
+        serverListVersion.current += 1;
         setServers((current) =>
           current
             .filter((candidate) => candidate.id !== targetServerId)
@@ -974,7 +979,10 @@ export function App() {
     try {
       const result = await rescanIndex({ browserUid: recoveryUid, passphrase, all: true, ...(force ? { force: true } : {}) });
       const rescannedServers = result.servers?.map(serverFormFromPayload);
-      if (rescannedServers) setServers((current) => mergeServerStatus(current, rescannedServers));
+      if (rescannedServers) {
+        serverListVersion.current += 1;
+        setServers((current) => mergeServerStatus(current, rescannedServers));
+      }
       if (result.globalStats) setGlobalStats(result.globalStats);
       if (!rescannedServers) await refreshScanStatus();
     } catch (error) {
@@ -995,6 +1003,7 @@ export function App() {
   async function removeServer(serverId: number) {
     const target = servers.find((server) => server.id === serverId);
     if (target?.pendingCreate) {
+      serverListVersion.current += 1;
       setServers((current) => current.filter((server) => server.id !== serverId));
       setExpandedServerId((current) => (current === serverId ? null : current));
       return;
@@ -1009,6 +1018,7 @@ export function App() {
     try {
       const result = await deleteFtpServer({ browserUid: recoveryUid, passphrase, serverId });
       const forms = result.servers.map(serverFormFromPayload);
+      serverListVersion.current += 1;
       setServers(forms);
       setGlobalStats(result.globalStats);
       setExpandedServerId(forms[0]?.id ?? null);
@@ -1018,24 +1028,27 @@ export function App() {
   }
 
   async function refreshScanStatus(isStale: () => boolean = () => false) {
+    const startedWithServerListVersion = serverListVersion.current;
     const result = await loadScanStatus({ browserUid: recoveryUid, passphrase });
-    if (isStale()) return;
+    if (isStale() || startedWithServerListVersion !== serverListVersion.current) return;
     const polledServers = result.servers?.map(serverFormFromPayload);
     if (polledServers) {
-      setServers((current) => mergeServerStatus(current, polledServers));
+      setServers((current) => startedWithServerListVersion === serverListVersion.current ? mergeServerStatus(current, polledServers) : current);
     } else {
       setServers((current) =>
-        current.map((server) =>
-          server.id === 0
-            ? {
-                ...server,
-                indexStatus: result.indexStatus,
-                scanStatus: result.scanStatus,
-                scanSchedule: result.scanSchedule,
-                message: scanStatusMessage(result.scanStatus) ?? server.message,
-              }
-            : server,
-        ),
+        startedWithServerListVersion === serverListVersion.current
+          ? current.map((server) =>
+              server.id === 0
+                ? {
+                    ...server,
+                    indexStatus: result.indexStatus,
+                    scanStatus: result.scanStatus,
+                    scanSchedule: result.scanSchedule,
+                    message: scanStatusMessage(result.scanStatus) ?? server.message,
+                  }
+                : server,
+            )
+          : current,
       );
     }
     if (result.globalStats) setGlobalStats(result.globalStats);
@@ -1095,6 +1108,7 @@ export function App() {
     const forms = summary.servers.length
       ? summary.servers.map((server, index) => portableServerToForm(server, index, index === 0 ? 0 : -1 - index))
       : [emptyServerForm()];
+    serverListVersion.current += 1;
     setServers(forms);
     setExpandedServerId(forms.length > 2 ? null : forms[0]?.id ?? null);
   }
@@ -1103,6 +1117,7 @@ export function App() {
   function clearImportedSettings() {
     setImportedSettings(null);
     setImportMessage(null);
+    serverListVersion.current += 1;
     setServers([emptyServerForm()]);
     setExpandedServerId(0);
     setAddonName(DEFAULT_CUSTOMIZATION.addonName);
@@ -1279,6 +1294,7 @@ export function App() {
       });
     }
 
+    serverListVersion.current += 1;
     setServers(finalForms);
     setExpandedServerId(finalForms.length > 2 ? null : finalForms[0]?.id ?? null);
   }
@@ -1290,6 +1306,7 @@ export function App() {
     setManifestUrl(null);
     setStremioInstallUrl(null);
     setPassphrase("");
+    serverListVersion.current += 1;
     setServers([emptyServerForm()]);
     setExpandedServerId(0);
     setGlobalStats(EMPTY_GLOBAL_STATS);

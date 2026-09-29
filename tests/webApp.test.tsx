@@ -10,6 +10,8 @@ import {
   createAdminSharedIndexGroup,
   cancelScan,
   createProfile,
+  createFtpServer,
+  deleteFtpServer,
   deleteAdminSharedIndexGroup,
   deleteAdminProfile,
   issueAdminManifestToken,
@@ -50,6 +52,8 @@ vi.mock("../src/web/api", () => ({
   createAdminSharedIndexGroup: vi.fn(),
   cancelScan: vi.fn(),
   createProfile: vi.fn(),
+  createFtpServer: vi.fn(),
+  deleteFtpServer: vi.fn(),
   deleteAdminSharedIndexGroup: vi.fn(),
   deleteAdminProfile: vi.fn(),
   issueAdminManifestToken: vi.fn(),
@@ -88,6 +92,8 @@ const cancelAdminSharedIndexScanMock = vi.mocked(cancelAdminSharedIndexScan);
 const createAdminSharedIndexGroupMock = vi.mocked(createAdminSharedIndexGroup);
 const cancelScanMock = vi.mocked(cancelScan);
 const createProfileMock = vi.mocked(createProfile);
+const createFtpServerMock = vi.mocked(createFtpServer);
+const deleteFtpServerMock = vi.mocked(deleteFtpServer);
 const deleteAdminSharedIndexGroupMock = vi.mocked(deleteAdminSharedIndexGroup);
 const deleteAdminProfileMock = vi.mocked(deleteAdminProfile);
 const issueAdminManifestTokenMock = vi.mocked(issueAdminManifestToken);
@@ -246,6 +252,8 @@ describe("App", () => {
     createAdminSharedIndexGroupMock.mockReset();
     cancelScanMock.mockReset();
     createProfileMock.mockReset();
+    createFtpServerMock.mockReset();
+    deleteFtpServerMock.mockReset();
     deleteAdminSharedIndexGroupMock.mockReset();
     deleteAdminProfileMock.mockReset();
     issueAdminManifestTokenMock.mockReset();
@@ -2509,6 +2517,39 @@ describe("App", () => {
       expect(screen.getByRole("button", { name: /^Alpha/ })).toHaveTextContent("60%");
       expect(screen.getByLabelText("Host")).toHaveValue("edited.example.test");
       expect(screen.getByLabelText("Root paths")).toHaveValue("/Edited");
+    });
+
+    it("does not remove a newly created server when an older status poll finishes", async () => {
+      const stale = await loadScanStatusMock.getMockImplementation()!({ browserUid: "browser-uid", passphrase: "passphrase" });
+      let resolvePoll!: (value: typeof stale) => void;
+      loadScanStatusMock.mockImplementationOnce(() => new Promise((resolve) => { resolvePoll = resolve; }));
+      createFtpServerMock.mockResolvedValue({ server: serverPayload(3, "Gamma"), globalStats: idleGlobalStats });
+      await renderScanningApp();
+
+      await advance(3000);
+      expect(loadScanStatusMock).toHaveBeenCalledTimes(1);
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Add server" })); });
+      expect(screen.getByRole("button", { name: /^Gamma/ })).toBeTruthy();
+      await act(async () => { resolvePoll(stale); });
+
+      expect(screen.getByRole("button", { name: /^Gamma/ })).toBeTruthy();
+    });
+
+    it("does not restore a deleted server when an older status poll finishes", async () => {
+      const stale = await loadScanStatusMock.getMockImplementation()!({ browserUid: "browser-uid", passphrase: "passphrase" });
+      let resolvePoll!: (value: typeof stale) => void;
+      loadScanStatusMock.mockImplementationOnce(() => new Promise((resolve) => { resolvePoll = resolve; }));
+      deleteFtpServerMock.mockResolvedValue({ servers: [serverPayload(1, "Alpha", { scanStatus: runningScanStatus })], globalStats: idleGlobalStats });
+      await renderScanningApp();
+      fireEvent.click(screen.getByRole("button", { name: /^Beta/ }));
+      await advance(3000);
+      fireEvent.click(screen.getByRole("button", { name: "Delete server" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete server" }));
+      await act(async () => { await Promise.resolve(); });
+      expect(screen.queryByRole("button", { name: /^Beta/ })).toBeNull();
+      await act(async () => { resolvePoll(stale); });
+
+      expect(screen.queryByRole("button", { name: /^Beta/ })).toBeNull();
     });
 
     it("polls every three seconds and waits for the in-flight request before polling again", async () => {
