@@ -30,6 +30,7 @@ type RememberedHost = {
 class FtpHostMemory {
   private readonly hosts = new Map<string, RememberedHost>();
   private readonly tlsSessions = new Map<string, Buffer>();
+  private readonly tlsResumptionOff = new Map<string, true>();
 
   constructor(private readonly maxEntries: number) {}
 
@@ -57,7 +58,13 @@ class FtpHostMemory {
   }
 
   rememberTlsSession(sessionKey: string, session: Buffer) {
+    if (this.tlsResumptionOff.has(sessionKey)) return;
     setBounded(this.tlsSessions, sessionKey, session, this.maxEntries);
+  }
+
+  stopResumingTls(sessionKey: string) {
+    this.tlsSessions.delete(sessionKey);
+    setBounded(this.tlsResumptionOff, sessionKey, true, this.maxEntries);
   }
 }
 
@@ -79,8 +86,9 @@ export function createBasicFtpClientFactory(
     signal?.addEventListener("abort", closeOnAbort, { once: true });
     const target = loginTarget(config);
     const hostKey = `${target.host.toLowerCase()}:${target.port}`;
+    const sessionKey = tlsSessionKey(config, target);
     try {
-      if (playback) await leanLogin(client, target, hosts, hostKey, tlsSessionKey(config, target));
+      if (playback) await leanLogin(client, target, hosts, hostKey, sessionKey);
       else await fullLogin(client, target, hosts, hostKey);
     } catch (error) {
       await closeBasicFtpClient(client);
@@ -89,6 +97,7 @@ export function createBasicFtpClientFactory(
       signal?.removeEventListener("abort", closeOnAbort);
     }
 
+    const tlsResumed = sessionKey !== null && controlSessionResumed(client);
     let idle = true;
     return {
       async list(path: string) {
@@ -105,18 +114,26 @@ export function createBasicFtpClientFactory(
         idle = false;
         const { start, end } = input;
         const bounded = !input.openEnded && end < Number.MAX_SAFE_INTEGER;
-        const byteRange = bounded && hosts.supportsByteRanges(hostKey)
-          ? await requestByteRange(client, start, end, () => hosts.rejectByteRanges(hostKey))
-          : false;
-        return openLimitedDownloadStream(client, path, {
-          start,
-          end,
-          byteRange,
-          onComplete: () => {
-            idle = true;
-          },
-          onRangeOverrun: () => hosts.rejectByteRanges(hostKey),
-        });
+        try {
+          const byteRange = bounded && hosts.supportsByteRanges(hostKey)
+            ? await requestByteRange(client, start, end, () => hosts.rejectByteRanges(hostKey))
+            : false;
+          return await openLimitedDownloadStream(client, path, {
+            start,
+            end,
+            byteRange,
+            onComplete: () => {
+              idle = true;
+            },
+            onRangeOverrun: () => hosts.rejectByteRanges(hostKey),
+          });
+        } catch (error) {
+          // Servers that require data connections to reuse the control connection's TLS session might not accept
+          // that session when it was itself resumed. Any transfer that cannot start on such a login turns resumption
+          // off for the host, so the next login does a full handshake.
+          if (sessionKey && tlsResumed) hosts.stopResumingTls(sessionKey);
+          throw error;
+        }
       },
       isReusable: () => idle && !client.closed,
       async close() {
@@ -192,6 +209,11 @@ function rememberTlsSessions(client: Client, hosts: FtpHostMemory, sessionKey: s
   if (current) hosts.rememberTlsSession(sessionKey, current);
   // TLS 1.3 hands out session tickets after the handshake.
   socket.on("session", (session: Buffer) => hosts.rememberTlsSession(sessionKey, session));
+}
+
+function controlSessionResumed(client: Client) {
+  const socket = client.ftp.socket;
+  return socket instanceof TLSSocket && socket.isSessionReused();
 }
 
 // RANG (draft-bryan-ftp-range) makes the server stop after `end`, so a bounded transfer ends with 226 and the login
