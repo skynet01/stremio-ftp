@@ -293,7 +293,7 @@ function evaluateCondition(tokens: string[], context: StreamFormatterContext) {
 }
 
 function evaluateClause(tokens: string[], start: number, context: StreamFormatterContext): { value: boolean; consumed: number } {
-  const path = tokens[start];
+  const path = tokens[start] ?? "";
   let value = valueAtPath(path, context);
   let consumed = 1;
   let conditionSeen = false;

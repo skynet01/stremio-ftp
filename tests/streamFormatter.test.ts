@@ -430,4 +430,11 @@ describe("stream formatter limits", () => {
     expect(renderStreamTemplate(`  ${atCap}\n`, movie, "description").endsWith(" The Matrix")).toBe(true);
     expect(renderBoth(overCap)).toEqual(DEFAULT_DESCRIPTIONS);
   });
+
+  it("treats a dangling conditional operator as a false clause instead of throwing", () => {
+    expect(renderBoth("{stream.title::and[\"a\"||\"b\"]}|{stream.title::or[\"c\"||\"d\"]}|{stream.missing::xor[\"e\"||\"f\"]}")).toEqual([
+      "b|c|f",
+      "b|c|f",
+    ]);
+  });
 });
