@@ -346,6 +346,33 @@ describe("shared index groups", () => {
     expect(localIndexRowCounts(db, serverId)).toEqual({ mediaFiles: 0, snapshots: 0, enrichment: 1 });
   });
 
+  it("preserves the shared catalog when a different linked server becomes master", async () => {
+    const { db, service, profileId, serverId } = await serviceWithServer();
+    insertLocalIndexRows(db, profileId, serverId);
+    const created = service.createSharedIndexGroupFromServer(profileId, serverId, { name: "Sputnik Main", keyHint: "sputnik-main" });
+    db.prepare(`
+      insert into shared_media_files (
+        shared_index_group_id, ftp_path, filename, normalized_filename, extension, size_bytes,
+        media_kind, catalog_kind, parsed_title, parsed_year, confidence, last_seen_at
+      ) values (?, '/media/Local.Movie.2020.mkv', 'Local.Movie.2020.mkv', 'local movie', 'mkv', 1024,
+        'movie', 'movie', 'local movie', 2020, 90, 'n')
+    `).run(created.group.id);
+    const replacement = await service.createProfile("replacement-master", "passphrase");
+    const replacementServerId = service.defaultFtpServerId(replacement.profileId);
+    service.saveFtpServerConfig(replacement.profileId, replacementServerId, service.getFtpServerConfig(profileId, serverId)!, false);
+    service.linkServerToSharedGroup(replacement.profileId, replacementServerId, created.group.id, created.sharedIndexKey);
+
+    const repository = new MediaRepository(db);
+    expect(repository.catalogMetas(replacement.profileId, "movie", 10, 0).map((meta) => meta.id)).toEqual(["tt7654321"]);
+    const schedule = service.sharedIndexGroupScanSchedule(created.group.id);
+    service.setSharedIndexGroupMaster(created.group.id, replacement.profileId, replacementServerId);
+    expect(repository.catalogMetas(replacement.profileId, "movie", 10, 0).map((meta) => meta.id)).toEqual(["tt7654321"]);
+    expect(service.getFtpServerScanSchedule(replacement.profileId, replacementServerId)).toEqual(schedule);
+    expect(service.getFtpServerScanSchedule(profileId, serverId).intervalMinutes).toBe(0);
+    expect(localIndexRowCounts(db, serverId).enrichment).toBe(1);
+    expect(localIndexRowCounts(db, replacementServerId).enrichment).toBe(1);
+  });
+
   it("schedules a prompt local rescan after unlinking a server", async () => {
     const { db, service, profileId, serverId } = await serviceWithServer();
     const created = service.createSharedIndexGroupFromServer(profileId, serverId, { name: "Sputnik Main", keyHint: "sputnik-main" });

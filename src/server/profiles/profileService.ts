@@ -1017,12 +1017,42 @@ export class ProfileService {
       throw new ProfileRequestError("FTP server does not match shared index group");
     }
     const existingSchedule = this.sharedIndexGroupScanSchedule(groupId);
-    const result = this.db
-      .prepare("update shared_index_groups set master_profile_ftp_server_id = ?, updated_at = ? where id = ?")
-      .run(serverId, new Date().toISOString(), groupId);
-    if (result.changes === 0) throw new ProfileNotFoundError();
-    this.linkServerToSharedGroup(profileId, serverId, groupId);
-    this.saveFtpServerScanSchedule(profileId, serverId, existingSchedule);
+    this.db.transaction(() => {
+      const result = this.db
+        .prepare("update shared_index_groups set master_profile_ftp_server_id = ?, updated_at = ? where id = ?")
+        .run(serverId, new Date().toISOString(), groupId);
+      if (result.changes === 0) throw new ProfileNotFoundError();
+      this.linkServerToSharedGroup(profileId, serverId, groupId);
+      if (group.masterProfileFtpServerId && group.masterProfileFtpServerId !== serverId) {
+        const oldMaster = this.db.prepare("select profile_id from profile_ftp_servers where id = ?").get(group.masterProfileFtpServerId) as { profile_id: number } | undefined;
+        if (oldMaster) {
+          const sharedKeySql = `
+            select distinct catalog_kind || '|' || coalesce(imdb_id, '') || '|' || lower(parsed_title) || '|' || coalesce(parsed_year, '')
+            from shared_media_files where shared_index_group_id = ? and parsed_title is not null
+          `;
+          this.db.prepare(`delete from catalog_enrichment where profile_id = ? and ftp_server_id = ? and item_key in (${sharedKeySql})`)
+            .run(profileId, serverId, groupId);
+          this.db.prepare(`
+            insert into catalog_enrichment (
+              profile_id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year,
+              source_imdb_id, status, meta_id, meta_type, meta_name, poster, background, description,
+              release_info, genres, algorithm_version, attempts, error, next_attempt_at,
+              last_seen_at, created_at, updated_at
+            )
+            select ?, ?, item_key, media_kind, catalog_kind, parsed_title, parsed_year,
+              source_imdb_id, status, meta_id, meta_type, meta_name, poster, background, description,
+              release_info, genres, algorithm_version, attempts, error, next_attempt_at,
+              last_seen_at, created_at, updated_at
+            from catalog_enrichment
+            where profile_id = ? and ftp_server_id = ? and item_key in (${sharedKeySql})
+          `).run(profileId, serverId, oldMaster.profile_id, group.masterProfileFtpServerId, groupId);
+          const stillMaster = this.db.prepare("select 1 from shared_index_groups where master_profile_ftp_server_id = ? limit 1")
+            .get(group.masterProfileFtpServerId);
+          if (!stillMaster) this.saveFtpServerScanSchedule(oldMaster.profile_id, group.masterProfileFtpServerId, { intervalMinutes: 0, nextScheduledScanAt: null });
+        }
+      }
+      this.saveFtpServerScanSchedule(profileId, serverId, existingSchedule);
+    })();
     return this.getSharedIndexGroup(groupId)!;
   }
 

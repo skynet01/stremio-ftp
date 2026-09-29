@@ -236,6 +236,27 @@ describe("ScanQueue", () => {
     });
   });
 
+  it("can start the next scan after a database error while starting a job", async () => {
+    const { db, profileService, queue } = createHarness(async () => ({
+      list: async () => [{ name: "Movie.2020.mkv", path: "/Movie.2020.mkv", type: "file", size: 1000 }],
+      openReadStream: async () => Readable.from("not used"),
+      close: async () => undefined,
+    }));
+    const profileId = await createProfileWithFtp(profileService);
+    db.exec(`
+      create temp trigger reject_scan_start before update of status on scan_jobs
+      when new.status = 'running'
+      begin select raise(abort, 'scan start failed'); end
+    `);
+
+    expect(() => queue.enqueueProfileScan(profileId, "manual")).toThrow("scan start failed");
+    db.exec("drop trigger reject_scan_start");
+
+    const restarted = queue.enqueueProfileScan(profileId, "manual");
+    expect(["queued", "running"]).toContain(restarted.status);
+    await waitForStatus(queue, profileId, "succeeded");
+  });
+
   it("cancels a running profile scan and closes the FTP client", async () => {
     let closeCalls = 0;
     const closeStarted = deferred<void>();

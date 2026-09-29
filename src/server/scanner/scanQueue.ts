@@ -125,7 +125,10 @@ export class ScanQueue {
       return Number(insert.lastInsertRowid);
     })();
 
-    if (typeof result !== "number") return result;
+    if (typeof result !== "number") {
+      if (result.status === "queued") this.pump();
+      return result.id === null ? result : this.getJobStatus(result.id);
+    }
     this.pump();
     return this.getJobStatus(result);
   }
@@ -162,7 +165,10 @@ export class ScanQueue {
       return Number(insert.lastInsertRowid);
     })();
 
-    if (typeof result !== "number") return result;
+    if (typeof result !== "number") {
+      if (result.status === "queued") this.pump();
+      return result.id === null ? result : this.getJobStatus(result.id);
+    }
     this.pump();
     return this.getJobStatus(result);
   }
@@ -346,8 +352,6 @@ export class ScanQueue {
 
   private startJob(row: ScanJobRow) {
     const startedAt = new Date().toISOString();
-    this.running.add(targetKey(row));
-    this.activeCount += 1;
     this.db
       .prepare(
         `
@@ -359,6 +363,8 @@ export class ScanQueue {
       `,
       )
       .run(startedAt, `${scanModeLabel(row.scan_mode ?? "full")} starting.`, row.id);
+    this.running.add(targetKey(row));
+    this.activeCount += 1;
 
     const abortController = new AbortController();
     this.activeControllers.set(row.id, abortController);
