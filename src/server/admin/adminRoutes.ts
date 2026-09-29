@@ -1,12 +1,12 @@
-import { Router, type Request } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import { countryCodeFromRequest } from "../http/requestMetadata.js";
 import type { ProfileScanStatus } from "../scanner/scanQueue.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
 import { nextAlignedScanAt } from "../scanner/schedule.js";
+import { createFailedUnlockLimiter, unlockWithFailureLimit, type FailedUnlockLimiter } from "../profiles/profileRoutes.js";
 import {
-  InvalidPassphraseError,
   ProfileNotFoundError,
   ProfileRequestError,
   ProfileService,
@@ -63,28 +63,32 @@ function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: stri
   return !ftpConfig.username?.trim() || !ftpConfig.password;
 }
 
-export function adminRoutes(config: AppConfig, service: ProfileService, scanQueue: ScanQueue, streamTracker?: ProxyStreamTracker) {
+export function adminRoutes(
+  config: AppConfig,
+  service: ProfileService,
+  scanQueue: ScanQueue,
+  streamTracker?: ProxyStreamTracker,
+  failedUnlocks: FailedUnlockLimiter = createFailedUnlockLimiter(config),
+) {
   const router = Router();
 
-  async function authorize(req: Request) {
+  async function authorize(req: Request, res: Response) {
     const parsed = adminAuthSchema.safeParse(req.body);
-    if (!parsed.success) return { ok: false as const, status: 400, error: "Invalid admin request" };
-    let unlocked: { profileId: number };
-    try {
-      unlocked = await service.unlockProfile(parsed.data.browserUid, parsed.data.passphrase, countryCodeFromRequest(req));
-    } catch (error) {
-      if (!(error instanceof InvalidPassphraseError)) throw error;
-      return { ok: false as const, status: 401, error: "Invalid passphrase" };
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid admin request" });
+      return false;
     }
+    const profileId = await unlockWithFailureLimit(service, failedUnlocks, req, res, parsed.data, countryCodeFromRequest(req));
+    if (profileId === null) return false;
     if (!config.superAdminBrowserUids.has(parsed.data.browserUid)) {
-      return { ok: false as const, status: 403, error: "Admin access required" };
+      res.status(403).json({ error: "Admin access required" });
+      return false;
     }
-    return { ok: true as const, profileId: unlocked.profileId, browserUid: parsed.data.browserUid };
+    return true;
   }
 
   router.post("/profiles", async (req, res) => {
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     const list = service.listAdminProfileSummaries(config.adminBrowserUids);
     const profiles = list.profiles.map((profile) => {
@@ -123,15 +127,13 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   });
 
   router.post("/streams", async (req, res) => {
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     res.json(streamTracker?.snapshot() ?? { activeStreams: [], summary: { active: 0, profile: 0, shared: 0 } });
   });
 
   router.post("/shared-index-groups", async (req, res) => {
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     res.json({ groups: service.listSharedIndexGroups().map((group) => sharedIndexGroupView(service, scanQueue, group)) });
   });
@@ -139,8 +141,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   router.post("/shared-index-groups/create", async (req, res) => {
     const parsed = sharedIndexCreateSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid shared index group request" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       const created = service.createSharedIndexGroupFromServer(parsed.data.profileId, parsed.data.serverId, {
@@ -161,8 +162,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
     const parsed = sharedIndexUpdateSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid shared index group request" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       const group = service.updateSharedIndexGroup(groupId.data, {
@@ -180,8 +180,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   router.post("/shared-index-groups/:groupId/rotate-key", async (req, res) => {
     const groupId = groupIdSchema.safeParse(req.params.groupId);
     if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       const rotated = service.rotateSharedIndexGroupKey(groupId.data);
@@ -196,8 +195,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
     const parsed = sharedIndexServerTargetSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid shared index server request" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       if (parsed.data.force) service.forceLinkServerToSharedGroup(parsed.data.profileId, parsed.data.serverId, groupId.data);
@@ -216,8 +214,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
     const parsed = sharedIndexServerTargetSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid shared index server request" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       const server = service.getFtpServer(parsed.data.profileId, parsed.data.serverId);
@@ -236,8 +233,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
     const parsed = sharedIndexScheduleSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid shared index schedule request" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
     if (parsed.data.intervalMinutes > 0 && parsed.data.intervalMinutes < config.scanMinRescanIntervalMinutes) {
       return res.status(400).json({ error: `Rescan frequency must be at least ${config.scanMinRescanIntervalMinutes} minutes.` });
     }
@@ -260,8 +256,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
     const parsed = sharedIndexServerTargetSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid shared index server request" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       const group = service.setSharedIndexGroupMaster(groupId.data, parsed.data.profileId, parsed.data.serverId);
@@ -275,8 +270,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   router.post("/shared-index-groups/:groupId/rescan", async (req, res) => {
     const groupId = groupIdSchema.safeParse(req.params.groupId);
     if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       const group = service.getSharedIndexGroup(groupId.data);
@@ -290,8 +284,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   router.post("/shared-index-groups/:groupId/cancel-scan", async (req, res) => {
     const groupId = groupIdSchema.safeParse(req.params.groupId);
     if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       const group = service.getSharedIndexGroup(groupId.data);
@@ -305,8 +298,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   router.post("/shared-index-groups/:groupId/delete", async (req, res) => {
     const groupId = groupIdSchema.safeParse(req.params.groupId);
     if (!groupId.success) return res.status(400).json({ error: "Invalid shared index group id" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       const group = service.getSharedIndexGroupIdentity(groupId.data);
@@ -326,8 +318,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   router.post("/profiles/:profileId/manifest-token", async (req, res) => {
     const profileId = profileIdSchema.safeParse(req.params.profileId);
     if (!profileId.success) return res.status(400).json({ error: "Invalid profile id" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       const issued = service.issueInstallToken(profileId.data);
@@ -341,8 +332,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   router.post("/profiles/:profileId/rescan", async (req, res) => {
     const profileId = profileIdSchema.safeParse(req.params.profileId);
     if (!profileId.success) return res.status(400).json({ error: "Invalid profile id" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       const serverId = service.defaultFtpServerId(profileId.data);
@@ -361,8 +351,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   router.post("/profiles/bulk", async (req, res) => {
     const parsed = bulkAdminSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid bulk admin request" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     const profileIds = [...new Set(parsed.data.profileIds)];
     try {
@@ -406,8 +395,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
   router.post("/profiles/:profileId/delete", async (req, res) => {
     const profileId = profileIdSchema.safeParse(req.params.profileId);
     if (!profileId.success) return res.status(400).json({ error: "Invalid profile id" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     const deleted = service.deleteProfile(profileId.data);
     if (!deleted) return res.status(404).json({ error: "Profile not found" });
@@ -419,8 +407,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     if (!profileId.success) return res.status(400).json({ error: "Invalid profile id" });
     const parsed = setAdminSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid admin request" });
-    const auth = await authorize(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!(await authorize(req, res))) return;
 
     try {
       res.json(service.setProfileAdminEnabled(profileId.data, parsed.data.adminEnabled, config.adminBrowserUids));

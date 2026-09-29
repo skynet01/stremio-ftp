@@ -6,6 +6,7 @@ import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
 import { MediaRepository } from "../src/server/media/mediaRepository";
+import { AttemptWindow } from "../src/server/profiles/profileRoutes";
 import { ProfileService } from "../src/server/profiles/profileService";
 
 function config(): AppConfig {
@@ -381,6 +382,49 @@ describe("profile routes", () => {
         })
         .expect(catalogEnabled ? 200 : 429);
     }
+  });
+
+  it("rate limits failed passphrase attempts per client and browser uid", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), profileRateLimitMax: 3 }, db);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .set("cf-connecting-ip", "203.0.113.1")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const statusAttempt = (passphrase: string, ip = "203.0.113.50", browserUid = "browser-uid") =>
+      request(app)
+        .post("/api/profile/index/status")
+        .set("x-setup-token", "setup-secret-123")
+        .set("cf-connecting-ip", ip)
+        .send({ browserUid, passphrase });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) await statusAttempt("wrong-passphrase").expect(401);
+    const blocked = await statusAttempt("passphrase").expect(429);
+    expect(blocked.body).toEqual({ error: "Too many profile attempts" });
+    expect(Number(blocked.header["retry-after"])).toBeGreaterThan(0);
+    await request(app)
+      .post("/api/profile/servers/load")
+      .set("x-setup-token", "setup-secret-123")
+      .set("cf-connecting-ip", "203.0.113.50")
+      .send({ browserUid: "browser-uid", passphrase: "wrong-passphrase" })
+      .expect(429);
+
+    await statusAttempt("wrong-passphrase", "203.0.113.50", "other-browser-uid").expect(401);
+    await statusAttempt("passphrase", "203.0.113.51").expect(200);
+    for (let attempt = 0; attempt < 5; attempt += 1) await statusAttempt("passphrase", "203.0.113.52").expect(200);
+  });
+
+  it("sweeps expired rate-limit buckets", () => {
+    const attempts = new AttemptWindow(1000);
+    for (let index = 0; index < 50; index += 1) attempts.add(`ip:203.0.113.${index}`, 0);
+    expect(attempts.size).toBe(50);
+
+    expect(attempts.add("ip:198.51.100.1", 1500).count).toBe(1);
+    expect(attempts.size).toBe(1);
+    expect(attempts.current("ip:203.0.113.1", 1500)).toBeNull();
   });
 
   it("does not rate limit scan status polling during active scans", async () => {

@@ -159,6 +159,31 @@ describe("admin routes", () => {
     errorSpy.mockRestore();
   });
 
+  it("rate limits failed admin passphrase attempts", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config({ profileRateLimitMax: 2 }), db);
+    await createProfile(app, "admin-uid");
+    const adminAttempt = (passphrase: string) =>
+      request(app)
+        .post("/api/admin/profiles")
+        .set("x-setup-token", "setup-secret-123")
+        .set("cf-connecting-ip", "203.0.113.60")
+        .send({ browserUid: "admin-uid", passphrase });
+
+    await adminAttempt("wrong-passphrase").expect(401);
+    await adminAttempt("wrong-passphrase").expect(401);
+    const blocked = await adminAttempt("passphrase").expect(429);
+    expect(blocked.body).toEqual({ error: "Too many profile attempts" });
+    expect(Number(blocked.header["retry-after"])).toBeGreaterThan(0);
+    await request(app)
+      .post("/api/profile/index/status")
+      .set("x-setup-token", "setup-secret-123")
+      .set("cf-connecting-ip", "203.0.113.60")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(429);
+  });
+
   it("requires super admin env access instead of admin-enabled access for admin APIs", async () => {
     const db = new Database(":memory:");
     migrate(db);

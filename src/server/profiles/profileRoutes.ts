@@ -101,6 +101,7 @@ export function profileRoutes(
   service: ProfileService,
   ftpClientFactory: FtpClientFactory,
   scanQueue: ScanQueue,
+  failedUnlocks: FailedUnlockLimiter = createFailedUnlockLimiter(config),
 ) {
   const router = Router();
   const rateLimitProfiles = profileRateLimiter(config.profileRateLimitWindowMs, config.profileRateLimitMax);
@@ -116,17 +117,15 @@ export function profileRoutes(
     async (req, res) => {
       const parsed = schema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: invalidMessage });
-      let profileId: number;
-      try {
-        ({ profileId } = await service.unlockProfile(
-          parsed.data.browserUid,
-          parsed.data.passphrase,
-          options.recordCountry ? countryCodeFromRequest(req) : null,
-        ));
-      } catch (error) {
-        if (error instanceof InvalidPassphraseError) return res.status(401).json({ error: "Invalid passphrase" });
-        throw error;
-      }
+      const profileId = await unlockWithFailureLimit(
+        service,
+        failedUnlocks,
+        req,
+        res,
+        parsed.data,
+        options.recordCountry ? countryCodeFromRequest(req) : null,
+      );
+      if (profileId === null) return;
       try {
         await handler({ req, res, data: parsed.data, profileId });
       } catch (error) {
@@ -586,17 +585,99 @@ function ftpConfigWithStoredPassword(
   };
 }
 
+const MAX_FAILED_UNLOCK_ATTEMPTS = 10;
+
+type AttemptBucket = { count: number; resetAt: number };
+
+export class AttemptWindow {
+  private readonly buckets = new Map<string, AttemptBucket>();
+  private nextSweepAt = 0;
+
+  constructor(private readonly windowMs: number) {}
+
+  get size() {
+    return this.buckets.size;
+  }
+
+  current(key: string, now = Date.now()): AttemptBucket | null {
+    this.sweep(now);
+    const bucket = this.buckets.get(key);
+    return bucket && bucket.resetAt > now ? bucket : null;
+  }
+
+  add(key: string, now = Date.now()): AttemptBucket {
+    const bucket = this.current(key, now) ?? { count: 0, resetAt: now + this.windowMs };
+    bucket.count += 1;
+    this.buckets.set(key, bucket);
+    return bucket;
+  }
+
+  clear(key: string) {
+    this.buckets.delete(key);
+  }
+
+  private sweep(now: number) {
+    if (now < this.nextSweepAt) return;
+    this.nextSweepAt = now + this.windowMs;
+    for (const [key, bucket] of this.buckets) {
+      if (bucket.resetAt <= now) this.buckets.delete(key);
+    }
+  }
+}
+
+export type FailedUnlockLimiter = ReturnType<typeof createFailedUnlockLimiter>;
+
+export function createFailedUnlockLimiter(config: Pick<AppConfig, "profileRateLimitWindowMs" | "profileRateLimitMax">) {
+  const maxFailures = Math.min(config.profileRateLimitMax, MAX_FAILED_UNLOCK_ATTEMPTS);
+  const failures = new AttemptWindow(config.profileRateLimitWindowMs);
+  const keyFor = (req: Request, browserUid: string) => `${profileRateLimitKey(req)}|uid:${browserUid}`;
+
+  return {
+    retryAfterSeconds(req: Request, browserUid: string, now = Date.now()) {
+      const bucket = failures.current(keyFor(req, browserUid), now);
+      return bucket && bucket.count >= maxFailures ? Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)) : 0;
+    },
+    recordFailure(req: Request, browserUid: string) {
+      failures.add(keyFor(req, browserUid));
+    },
+    recordSuccess(req: Request, browserUid: string) {
+      failures.clear(keyFor(req, browserUid));
+    },
+  };
+}
+
+export async function unlockWithFailureLimit(
+  service: ProfileService,
+  failedUnlocks: FailedUnlockLimiter,
+  req: Request,
+  res: Response,
+  credentials: AuthenticatedBody,
+  countryCode: string | null = null,
+): Promise<number | null> {
+  const retryAfter = failedUnlocks.retryAfterSeconds(req, credentials.browserUid);
+  if (retryAfter > 0) {
+    res.setHeader("Retry-After", retryAfter);
+    res.status(429).json({ error: "Too many profile attempts" });
+    return null;
+  }
+  try {
+    const { profileId } = await service.unlockProfile(credentials.browserUid, credentials.passphrase, countryCode);
+    failedUnlocks.recordSuccess(req, credentials.browserUid);
+    return profileId;
+  } catch (error) {
+    if (!(error instanceof InvalidPassphraseError)) throw error;
+    failedUnlocks.recordFailure(req, credentials.browserUid);
+    res.status(401).json({ error: "Invalid passphrase" });
+    return null;
+  }
+}
+
 function profileRateLimiter(windowMs: number, maxAttempts: number): RequestHandler {
-  const attempts = new Map<string, { count: number; resetAt: number }>();
+  const attempts = new AttemptWindow(windowMs);
 
   return (req, res, next) => {
     const now = Date.now();
-    const key = profileRateLimitKey(req);
-    const current = attempts.get(key);
-    const bucket = current && current.resetAt > now ? current : { count: 0, resetAt: now + windowMs };
-    bucket.count += 1;
-    attempts.set(key, bucket);
-
+    const bucket = attempts.add(profileRateLimitKey(req), now);
     if (bucket.count > maxAttempts) {
       res.setHeader("Retry-After", Math.ceil((bucket.resetAt - now) / 1000));
       return res.status(429).json({ error: "Too many profile attempts" });

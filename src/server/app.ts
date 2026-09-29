@@ -14,7 +14,7 @@ import type { FtpClientFactory } from "./ftp/ftpTypes.js";
 import { redactSecrets } from "./logging/redact.js";
 import { MediaRepository } from "./media/mediaRepository.js";
 import { ProfileService } from "./profiles/profileService.js";
-import { profileRoutes } from "./profiles/profileRoutes.js";
+import { createFailedUnlockLimiter, profileRoutes } from "./profiles/profileRoutes.js";
 import { createFtpProxyResolver } from "./proxy/ftpProxyResolver.js";
 import { createProxyRouter } from "./proxy/proxyRoutes.js";
 import { ProxyStreamTracker } from "./proxy/streamTracker.js";
@@ -90,8 +90,9 @@ export function createApp(
   app.get("/api/setup/validate", requireSetupToken(config), (_req, res) => {
     res.json({ ok: true });
   });
-  app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue));
-  app.use("/api/admin", adminRoutes(config, profileService, scanQueue, streamTracker));
+  const failedUnlocks = createFailedUnlockLimiter(config);
+  app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue, failedUnlocks));
+  app.use("/api/admin", adminRoutes(config, profileService, scanQueue, streamTracker, failedUnlocks));
   app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory), streamTracker }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 
