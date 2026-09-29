@@ -130,6 +130,21 @@ describe("createFtpConnectionPool", () => {
     expect(ftp.opened).toEqual(["1:/a.mkv", "2:/b.mkv"]);
   });
 
+  it("does not log in again after a pooled login stalled instead of failing at once", async () => {
+    const ftp = fakeFtp({ maxConnections: 1 });
+    const pool = createPool(ftp);
+
+    await drain((await pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 })).stream);
+    let now = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    ftp.failNextOpen("Timeout (control socket)", () => {
+      now += 15_000;
+    });
+
+    await expect(pool.openReadStream(config(), "/b.mkv", { start: 0, end: 9 })).rejects.toThrow("Timeout");
+    expect(ftp.logins).toBe(1);
+  });
+
   it("does not retry a fresh login that fails before the first byte", async () => {
     const ftp = fakeFtp({ maxConnections: 1 });
     const pool = createPool(ftp);
@@ -311,7 +326,7 @@ function fakeFtp(options: {
     closed: [] as number[],
     openClients: new Set<number>(),
     pendingStreams: [] as Readable[],
-    nextOpenFailure: null as string | null,
+    nextOpenFailure: null as { message: string; beforeFailing?: () => void } | null,
   };
   const login = async (ftpConfig: FtpConfig, requestOptions?: FtpClientRequestOptions): Promise<FtpClient> => {
     state.loginAttempts += 1;
@@ -336,9 +351,10 @@ function fakeFtp(options: {
       openReadStream: async (path: string, range: FtpReadStreamOptions) => {
         if (closed) throw new Error("Client is closed");
         if (state.nextOpenFailure) {
-          const message = state.nextOpenFailure;
+          const failure = state.nextOpenFailure;
           state.nextOpenFailure = null;
-          throw new Error(message);
+          failure.beforeFailing?.();
+          throw new Error(failure.message);
         }
         idle = false;
         state.opened.push(`${id}:${path}`);
@@ -366,8 +382,8 @@ function fakeFtp(options: {
   return Object.assign(state, {
     factory,
     active: () => state.openClients.size,
-    failNextOpen: (message: string) => {
-      state.nextOpenFailure = message;
+    failNextOpen: (message: string, beforeFailing?: () => void) => {
+      state.nextOpenFailure = { message, beforeFailing };
     },
     finishStream: (index: number) => {
       (state.pendingStreams[index] as Readable & { finish(): void }).finish();

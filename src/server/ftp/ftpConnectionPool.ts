@@ -11,6 +11,9 @@ import type { FtpReadStreamOptions } from "./ftpTypes.js";
 // transfer completed cleanly, in which case it hands the client back here through onReusable.
 
 const MAX_REMEMBERED_LOGIN_FAILURES = 1_000;
+// A login the server dropped while it sat idle fails on its first command within a round trip or two. A slower
+// failure is a real stall; trying another login after it would only double how long the player waits.
+const QUICK_FAILURE_MS = 3_000;
 // ProFTPD and others also answer 530 when an account is over its session limit; that is not a bad password.
 const SESSION_LIMIT_REPLY = /too many|maximum|limit|already connected/i;
 
@@ -196,7 +199,8 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
       (error: unknown) => {
         clearWarming();
         rememberLoginFailure(key, error);
-        logFtpTiming(isFtpSlotUnavailableError(error) ? "warm_skipped" : "warm_failed", { warmMs: elapsedMs(startedAt), ...target(config) });
+        const event = isFtpSlotUnavailableError(error) ? "warm_skipped" : error instanceof Error && error.name === "AbortError" ? "warm_cancelled" : "warm_failed";
+        logFtpTiming(event, { warmMs: elapsedMs(startedAt), ...target(config) });
         forgetIfUnused(key);
       },
     );
@@ -269,12 +273,14 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
     const warmLogin = takeWarm(key);
     if (warmLogin) {
       replenish(config);
-      const client = await awaitWarmLogin(warmLogin, signal).catch(() => {
+      const waitStartedAt = performance.now();
+      const client = await awaitWarmLogin(warmLogin, signal).catch((error: unknown) => {
         if (signal?.aborted) throw abortError();
+        if (!isFtpSlotUnavailableError(error) && elapsedMs(waitStartedAt) > QUICK_FAILURE_MS) throw error;
         return null;
       });
       if (client && client.claim?.() !== false) return { client, source: "warm" as const };
-      // The warm-up failed or gave its slot away; log in for this request instead.
+      // The warm-up gave its slot away or failed quickly; log in for this request instead.
     }
     return loginForRequest(config, key, signal);
   }
@@ -315,7 +321,7 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
         const stream = await openOn(acquired.client, key, path, range, signal);
         return { stream, source: acquired.source, clientReadyMs, streamOpenMs: elapsedMs(streamStartedAt), retriedFresh: false };
       } catch (error) {
-        if (signal?.aborted || acquired.source === "new") throw error;
+        if (signal?.aborted || acquired.source === "new" || elapsedMs(streamStartedAt) > QUICK_FAILURE_MS) throw error;
         // An idle login can have been dropped by the server; that costs one fresh login, not the request.
         logFtpTiming("reused_login_failed", { source: acquired.source, ...target(config) });
       }
