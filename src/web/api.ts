@@ -419,6 +419,16 @@ export type AdminSharedIndexScheduleResponse = AdminSharedIndexGroupResponse & {
   scanSchedule: ScanSchedule;
 };
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
 async function readJson<T extends object>(response: Response): Promise<T> {
   const text = await response.text();
   let body: T | ApiError | undefined;
@@ -427,13 +437,14 @@ async function readJson<T extends object>(response: Response): Promise<T> {
     try {
       body = JSON.parse(text) as T | ApiError;
     } catch {
-      throw new Error(response.ok ? "Expected a JSON response" : `Request failed with ${response.status}`);
+      if (!response.ok) throw new ApiRequestError(`Request failed with ${response.status}`, response.status);
+      throw new Error("Expected a JSON response");
     }
   }
 
   if (!response.ok) {
     const message = body && "error" in body ? body.error : `Request failed with ${response.status}`;
-    throw new Error(message);
+    throw new ApiRequestError(message, response.status);
   }
   if (!body) throw new Error("Expected a JSON response");
   return body as T;

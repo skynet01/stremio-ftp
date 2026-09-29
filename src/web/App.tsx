@@ -608,10 +608,17 @@ export function App() {
       setProfileState("unlocked");
       await loadServerState(rememberedPassphrase);
       setProfileMessage("Profile loaded. Saved FTP settings loaded.");
-    } catch {
-      window.localStorage.removeItem(STORAGE_KEYS.passphrase);
-      setProfileState("new");
-      setProfileMessage("Enter your passphrase to unlock this browser profile.");
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        window.localStorage.removeItem(STORAGE_KEYS.passphrase);
+        setProfileState("new");
+        setProfileMessage("Enter your passphrase to unlock this browser profile.");
+        return;
+      }
+      setProfileState("error");
+      setProfileMessage(
+        `Could not load your saved profile: ${error instanceof Error ? error.message : "request failed"}. Unlock again to retry.`,
+      );
     }
   }
 
@@ -1449,6 +1456,10 @@ export function App() {
       {confirmDialog}
     </main>
   );
+}
+
+function isUnauthorizedError(error: unknown) {
+  return typeof error === "object" && error !== null && "status" in error && error.status === 401;
 }
 
 function saveAllSummary(saved: number, failed: number) {

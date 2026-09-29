@@ -787,6 +787,41 @@ describe("App", () => {
     expect(screen.getByText(/Passed May 02, 2026, 3:40 PM/)).toBeTruthy();
   });
 
+  it("keeps the remembered passphrase when restoring the profile fails for a non-auth reason", async () => {
+    window.localStorage.setItem("stremio-ftp-recovery-uid", "remembered-browser");
+    window.localStorage.setItem("stremio-ftp-passphrase", "passphrase");
+    unlockProfileMock.mockRejectedValue(Object.assign(new Error("Service unavailable"), { status: 503 }));
+
+    render(<App />);
+
+    expect(await screen.findByText(/Could not load your saved profile: Service unavailable/)).toBeTruthy();
+    expect(window.localStorage.getItem("stremio-ftp-passphrase")).toBe("passphrase");
+    expect(screen.getByLabelText("Passphrase")).toHaveValue("passphrase");
+  });
+
+  it("keeps the remembered passphrase when the network drops during restore", async () => {
+    rememberProfile();
+    loadServersMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    loadFtpSettingsMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    loadCustomizationMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    render(<App />);
+
+    expect(await screen.findByText(/Could not load your saved profile: Failed to fetch/)).toBeTruthy();
+    expect(window.localStorage.getItem("stremio-ftp-passphrase")).toBe("passphrase");
+  });
+
+  it("forgets the remembered passphrase when the server rejects it", async () => {
+    window.localStorage.setItem("stremio-ftp-recovery-uid", "remembered-browser");
+    window.localStorage.setItem("stremio-ftp-passphrase", "stale-passphrase");
+    unlockProfileMock.mockRejectedValue(Object.assign(new Error("Invalid passphrase"), { status: 401 }));
+
+    render(<App />);
+
+    expect(await screen.findByText("Enter your passphrase to unlock this browser profile.")).toBeTruthy();
+    expect(window.localStorage.getItem("stremio-ftp-passphrase")).toBeNull();
+  });
+
   it("shows only the setup token message on /configure without a token when setup is locked", async () => {
     setupTokenAvailableMock.mockReturnValue(false);
     window.history.pushState({}, "", "/configure");
