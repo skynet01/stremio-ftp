@@ -1,11 +1,12 @@
 import Database from "better-sqlite3";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
+import { openDatabase } from "../src/server/db/database";
 import { migrate } from "../src/server/db/schema";
 import { ProfileService } from "../src/server/profiles/profileService";
 
@@ -179,6 +180,18 @@ describe("app health", () => {
     const response = await request(app).get("/api/setup/validate").set("x-setup-token", "setup-secret-123").expect(200);
 
     expect(response.body).toEqual({ ok: true });
+  });
+
+  it("opens file databases in WAL mode with normal synchronous writes", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "stremio-ftp-db-"));
+    const db = openDatabase(path.join(directory, "app.sqlite"));
+    try {
+      expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
+      expect(db.pragma("synchronous", { simple: true })).toBe(1);
+    } finally {
+      db.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("returns JSON errors for malformed request bodies", async () => {

@@ -1554,6 +1554,21 @@ describe("stremio routes", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("marks manifest access without touching the profile update time", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    db.prepare("update profiles set updated_at = '2026-01-01T00:00:00.000Z' where id = ?").run(created.profileId);
+
+    await request(createApp(config, db)).get(`/u/${created.installUrlToken}/manifest.json`).expect(200);
+
+    expect(db.prepare("select updated_at, last_manifest_accessed_at from profiles where id = ?").get(created.profileId)).toEqual({
+      updated_at: "2026-01-01T00:00:00.000Z",
+      last_manifest_accessed_at: expect.any(String),
+    });
+  });
+
   it("logs unexpected stream resolution errors without exposing secrets", async () => {
     const db = new Database(":memory:");
     migrate(db);

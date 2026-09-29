@@ -1574,7 +1574,7 @@ export class ProfileService {
   }
 
   markManifestAccess(profileId: number, accessedAt = new Date().toISOString()) {
-    this.db.prepare("update profiles set last_manifest_accessed_at = ?, updated_at = ? where id = ?").run(accessedAt, accessedAt, profileId);
+    this.db.prepare("update profiles set last_manifest_accessed_at = ? where id = ?").run(accessedAt, profileId);
   }
 
   private insertDefaultServer(profileId: number, now: string) {

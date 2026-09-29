@@ -7,6 +7,7 @@ export function openDatabase(sqlitePath: string) {
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
   const db = new Database(sqlitePath);
   db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
   migrate(db);
   return db;
