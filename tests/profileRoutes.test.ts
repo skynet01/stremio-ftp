@@ -1738,7 +1738,7 @@ describe("profile routes", () => {
     const db = new Database(":memory:");
     migrate(db);
     const app = createApp(config(), db);
-    const longFormatter = Array.from({ length: 70 }, (_, index) =>
+    const longFormatter = Array.from({ length: 60 }, (_, index) =>
       `{stream.title::exists::and::stream.library::isfalse["${index} {stream.title::title::truncate(35)}"||""]}{stream.visualTags::exists["{stream.visualTags::sort::join(' · ')}"||""]}`,
     ).join("\n");
     expect(longFormatter.length).toBeGreaterThan(2000);

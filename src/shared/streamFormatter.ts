@@ -391,7 +391,10 @@ function applyModifier(value: unknown, modifier: string): unknown {
   if (trimmed === "binary") return Number(value).toString(2);
 
   const call = parseCall(trimmed);
-  if (call?.name === "replace") return stringifyValue(value).split(call.args[0] ?? "").join(call.args[1] ?? "");
+  if (call?.name === "replace") {
+    const search = call.args[0] ?? "";
+    return search ? stringifyValue(value).split(search).join(call.args[1] ?? "") : stringifyValue(value);
+  }
   if (call?.name === "truncate") return truncate(stringifyValue(value), Number(call.args[0]));
   if (call?.name === "join") return Array.isArray(value) ? value.map(stringifyValue).filter(Boolean).join(call.args[0] ?? ", ") : stringifyValue(value);
   if (call?.name === "slice" && Array.isArray(value)) return value.slice(Number(call.args[0] ?? 0), call.args[1] === undefined ? undefined : Number(call.args[1]));

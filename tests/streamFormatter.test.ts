@@ -454,6 +454,10 @@ describe("stream formatter limits", () => {
     expect(renderBoth(overCap)).toEqual(DEFAULT_DESCRIPTIONS);
   });
 
+  it("leaves values unchanged when replace has an empty search string", () => {
+    expect(renderStreamTemplate("{stream.title::replace('','XXXXXXXX')}", movie, "description")).toBe("The Matrix");
+  });
+
   it("treats a dangling conditional operator as a false clause instead of throwing", () => {
     expect(renderBoth("{stream.title::and[\"a\"||\"b\"]}|{stream.title::or[\"c\"||\"d\"]}|{stream.missing::xor[\"e\"||\"f\"]}")).toEqual([
       "b|c|f",
