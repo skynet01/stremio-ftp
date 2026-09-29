@@ -72,6 +72,33 @@ describe("ServerAccordion", () => {
     expect(screen.getByText(":21")).toHaveClass("server-port");
   });
 
+  it("warns when the FTP host is a private network address", () => {
+    const renderHost = (host: string) =>
+      render(
+        <ServerAccordion
+          servers={[{ ...failedServer, host }]}
+          expandedServerId={failedServer.id}
+          profileReady={true}
+          onToggle={vi.fn()}
+          onAddServer={vi.fn()}
+          onDeleteServer={vi.fn()}
+          onServerChange={vi.fn()}
+          onSaveServer={vi.fn()}
+          onTestServer={vi.fn()}
+          onRefreshServer={vi.fn()}
+          onCancelServer={vi.fn()}
+          onUpdateScanSchedule={vi.fn()}
+        />,
+      );
+
+    const privateHost = renderHost("ftp://192.168.68.72:13017");
+    expect(screen.getByLabelText("Host")).toHaveAccessibleDescription(/private network address/i);
+    privateHost.unmount();
+
+    renderHost("ftp.example.test");
+    expect(screen.queryByText(/private network address/i)).not.toBeInTheDocument();
+  });
+
   it("clears uncategorized when Stremio catalogs are turned off", () => {
     const onServerChange = vi.fn();
     render(

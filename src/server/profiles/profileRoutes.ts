@@ -1,6 +1,7 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { isIP } from "node:net";
 import { z } from "zod";
+import { splitFtpHost } from "../../shared/ftpHost.js";
 import { MAX_STREAM_FORMATTER_TEMPLATE_LENGTH } from "../../shared/streamFormatter.js";
 import type { AppConfig } from "../config.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
@@ -24,15 +25,20 @@ const createSchema = z.object({
   passphrase: z.string().min(8),
 });
 
-const ftpConfigSchema = z.object({
-  host: z.string().trim().min(1),
-  port: z.number().int().min(1).max(65535),
-  username: z.string(),
-  password: z.string(),
-  tlsMode: z.enum(["none", "explicit", "implicit"]),
-  allowInvalidCertificate: z.boolean(),
-  roots: z.array(z.string().trim().min(1)).min(1),
-});
+const ftpConfigSchema = z
+  .object({
+    host: z.string().trim().refine((host) => splitFtpHost(host).host.length > 0, "Host is required"),
+    port: z.number().int().min(1).max(65535),
+    username: z.string(),
+    password: z.string(),
+    tlsMode: z.enum(["none", "explicit", "implicit"]),
+    allowInvalidCertificate: z.boolean(),
+    roots: z.array(z.string().trim().min(1)).min(1),
+  })
+  .transform((ftpConfig) => {
+    const { host, port } = splitFtpHost(ftpConfig.host);
+    return { ...ftpConfig, host, port: port ?? ftpConfig.port };
+  });
 
 function isDraftFtpConfig(ftpConfig: { username?: string | null; password?: string | null }) {
   return !ftpConfig.username?.trim() || !ftpConfig.password;

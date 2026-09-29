@@ -1,3 +1,4 @@
+import { splitFtpHost } from "../../shared/ftpHost.js";
 import type { FtpClient } from "./ftpTypes.js";
 import type { FtpConfig } from "../profiles/profileService.js";
 
@@ -143,9 +144,10 @@ function slotUnavailableError() {
 }
 
 function ftpConfigConnectionKey(config: FtpConfig) {
+  const target = splitFtpHost(config.host);
   return [
-    config.host.trim().toLowerCase(),
-    config.port,
+    target.host.toLowerCase(),
+    target.port ?? config.port,
     config.username,
   ].join("\0");
 }

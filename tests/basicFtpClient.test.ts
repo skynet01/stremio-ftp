@@ -20,6 +20,17 @@ describe("createBasicFtpClientFactory", () => {
     expect(server.closedControlConnections).toBe(1);
   });
 
+  it("connects to hosts saved as FTP URLs before hosts were normalized", async () => {
+    const file = patternedBuffer(1024);
+    const server = await startFakeFtpServer({ files: { "/video.mkv": file } });
+    const client = await createBasicFtpClientFactory(5000)({ ...ftpConfig(1), host: `ftp://127.0.0.1:${server.port}/` });
+
+    const received = await readSlowly(await client.openReadStream("/video.mkv", { start: 0, end: 1023 }));
+
+    expect(received.equals(file)).toBe(true);
+    await client.close();
+  });
+
   it("delivers every byte of a range to a slow consumer", async () => {
     const file = patternedBuffer(256 * 1024);
     const server = await startFakeFtpServer({ files: { "/video.mkv": file } });

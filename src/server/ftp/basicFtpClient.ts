@@ -1,5 +1,6 @@
 import { Client, FileType } from "basic-ftp";
 import { PassThrough, Writable } from "node:stream";
+import { splitFtpHost } from "../../shared/ftpHost.js";
 import type { FtpConfig } from "../profiles/profileService.js";
 import type { FtpClient, FtpClientFactory } from "./ftpTypes.js";
 
@@ -17,9 +18,10 @@ export function createBasicFtpClientFactory(
     const closeOnAbort = () => client.close();
     signal?.addEventListener("abort", closeOnAbort, { once: true });
     try {
+      const target = splitFtpHost(config.host);
       await client.access({
-        host: config.host,
-        port: config.port,
+        host: target.host,
+        port: target.port ?? config.port,
         user: config.username,
         password: config.password,
         secure: config.tlsMode === "implicit" ? "implicit" : config.tlsMode === "explicit",

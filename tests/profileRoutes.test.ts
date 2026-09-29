@@ -223,6 +223,29 @@ describe("profile routes", () => {
     errorSpy.mockRestore();
   });
 
+  it("saves pasted FTP URLs as a bare host with the typed port", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    const auth = { browserUid: "browser-uid", passphrase: "passphrase" };
+    await request(app).post("/api/profile").set("x-setup-token", "setup-secret-123").send(auth).expect(201);
+    const created = await request(app).post("/api/profile/servers").set("x-setup-token", "setup-secret-123").send(auth).expect(201);
+
+    const saved = await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        ...auth,
+        serverId: created.body.server.id,
+        name: "Pasted",
+        ftpConfig: { host: " ftp://ftp.example.test:2121/Movies ", port: 21, username: "user", password: "secret", tlsMode: "none", allowInvalidCertificate: false, roots: ["/"] },
+        customization: { catalogEnabled: false, catalogContentTypes: { movies: true, series: true, anime: false }, libraryLayout: "auto", streamDeliveryMode: "proxy" },
+      })
+      .expect(200);
+
+    expect(saved.body.server.ftpConfig).toMatchObject({ host: "ftp.example.test", port: 2121 });
+  });
+
   it("separates auth failures from missing servers and scan errors", async () => {
     const db = new Database(":memory:");
     migrate(db);

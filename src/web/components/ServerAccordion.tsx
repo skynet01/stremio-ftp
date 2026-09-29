@@ -1,5 +1,6 @@
 import { ChevronRight, CircleStop, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type { AddonCustomization, CatalogSort, ConnectionStatus, IndexStatus, ScanSchedule, ScanStatus } from "../api.js";
+import { isPrivateNetworkHost } from "../../shared/ftpHost.js";
 import { CONTENT_TYPE_TOOLTIPS } from "./contentTypeTooltips.js";
 import {
   field,
@@ -358,13 +359,21 @@ export function ServerAccordion({
                         {field(
                           "Host",
                           `host-${server.id}`,
-                          <input
-                            id={`host-${server.id}`}
-                            className={filledClass(server.host)}
-                            value={server.host}
-                            placeholder="ftp.example.com"
-                            onChange={(event) => onServerChange(server.id, { host: event.currentTarget.value })}
-                          />,
+                          <>
+                            <input
+                              id={`host-${server.id}`}
+                              className={filledClass(server.host)}
+                              value={server.host}
+                              placeholder="ftp.example.com"
+                              aria-describedby={isPrivateNetworkHost(server.host) ? `host-hint-${server.id}` : undefined}
+                              onChange={(event) => onServerChange(server.id, { host: event.currentTarget.value })}
+                            />
+                            {isPrivateNetworkHost(server.host) ? (
+                              <p className="field-hint" id={`host-hint-${server.id}`}>
+                                This is a private network address. It only works when this addon runs on the same network as the FTP server.
+                              </p>
+                            ) : null}
+                          </>,
                           "field-stack host-field",
                         )}
                         {field(
