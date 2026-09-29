@@ -54,6 +54,7 @@ export async function resolveStreams(input: {
   addonName?: string;
   streamNameTemplate?: string | null;
   streamDescriptionTemplate?: string | null;
+  onProxyMatch?: (match: MediaMatch) => void;
 }) {
   const matches = input.type === "series" ? episodeMatches(input) : movieMatches(input);
   const ftpConfigForServer = input.ftpConfigForServer && memoizeFtpConfigForServer(input.ftpConfigForServer);
@@ -67,6 +68,7 @@ export async function resolveStreams(input: {
     addonName: input.addonName,
     streamNameTemplate: input.streamNameTemplate,
     streamDescriptionTemplate: input.streamDescriptionTemplate,
+    onProxyMatch: input.onProxyMatch,
   }));
 }
 
@@ -79,10 +81,13 @@ export function streamForMatch(input: {
   addonName?: string;
   streamNameTemplate?: string | null;
   streamDescriptionTemplate?: string | null;
+  // Called for each match served through the proxy rather than as a direct FTP URL.
+  onProxyMatch?: (match: MediaMatch) => void;
 }) {
   const { match } = input;
   const deliveryMode = match.streamDeliveryMode ?? input.streamDeliveryMode;
   const ftpConfig = deliveryMode === "direct" ? input.ftpConfigForServer?.(match.ftpServerId) : null;
+  if (!(deliveryMode === "direct" && ftpConfig)) input.onProxyMatch?.(match);
   const formatterContext = streamFormatterContext({
     addonName: input.addonName,
     match,

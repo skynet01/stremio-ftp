@@ -3,7 +3,7 @@ import type { AppConfig } from "../config.js";
 import type { MediaRepository, OtherCatalogFileRef } from "../media/mediaRepository.js";
 import { fetchCinemetaMeta } from "../metadata/cinemetaClient.js";
 import { tmdbCatalogMeta, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
-import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization, type ProfileService } from "../profiles/profileService.js";
+import { DEFAULT_ADDON_CUSTOMIZATION, type AddonCustomization, type FtpConfig, type ProfileService } from "../profiles/profileService.js";
 import { redactSecrets } from "../logging/redact.js";
 import { publicManifest, tokenManifest } from "./manifest.js";
 import { resolveStreams, streamForMatch } from "./streamResolver.js";
@@ -11,8 +11,28 @@ import { resolveStreams, streamForMatch } from "./streamResolver.js";
 type StremioType = "movie" | "series";
 type ManifestCustomization = AddonCustomization & { otherCatalogs?: Array<{ id: string; name: string }> };
 
-export function stremioRoutes(config: AppConfig, profiles: ProfileService, mediaRepository: MediaRepository) {
+// A stream list usually leads to playing one of its first results, so the first few FTP accounts behind proxied
+// streams are logged in ahead of time.
+const PRELOGIN_ACCOUNT_LIMIT = 3;
+
+type StremioRouteOptions = {
+  // Fire-and-forget: logs in to up to maxAccounts distinct accounts among configs, in order.
+  prewarmFtpLogins?: (configs: FtpConfig[], maxAccounts: number) => void;
+};
+
+export function stremioRoutes(config: AppConfig, profiles: ProfileService, mediaRepository: MediaRepository, options: StremioRouteOptions = {}) {
   const router = Router();
+
+  // Runs after the response has been sent and never throws, so it cannot delay or fail the stream list.
+  const prewarmProxyServers = (serverIds: Set<number | null>, ftpConfigForServer: (serverId: number | null) => FtpConfig | null) => {
+    if (!options.prewarmFtpLogins || serverIds.size === 0) return;
+    try {
+      const configs = [...serverIds].map(ftpConfigForServer).filter((ftpConfig): ftpConfig is FtpConfig => ftpConfig !== null);
+      options.prewarmFtpLogins(configs, PRELOGIN_ACCOUNT_LIMIT);
+    } catch (error) {
+      console.error("FTP pre-login error:", loggableError(error));
+    }
+  };
 
   router.get("/manifest.json", (_req, res) => {
     res.json(publicManifest());
@@ -37,13 +57,15 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
     const customization = manifestCustomization(profiles, profileId, config.proxyStreamsDisabled, config.adminBrowserUids);
     const ftpConfigForServer = (serverId: number | null | undefined) =>
       serverId ? profiles.getFtpServerConfig(profileId, serverId) : profiles.getFtpConfig(profileId);
+    const proxyServerIds = new Set<number | null>();
+    const onProxyMatch = (match: { ftpServerId?: number | null }) => proxyServerIds.add(match.ftpServerId ?? null);
     const otherCatalogRef = internalFolderRef(id) ?? internalFileId(id);
     if (otherCatalogRef) {
       const files = mediaRepository.otherCatalogStreams(profileId, otherCatalogRef, {
         ...catalogServerScope(profiles, profileId),
         scopeToRepresentativeServer: splitOtherCatalogsEnabled(profiles, profileId, customization),
       });
-      return res.json({
+      res.json({
         streams: files.map((file) =>
           streamForMatch({
             baseUrl: config.baseUrl,
@@ -54,9 +76,12 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
             addonName: customization.addonName,
             streamNameTemplate: customization.streamNameTemplate,
             streamDescriptionTemplate: customization.streamDescriptionTemplate,
+            onProxyMatch,
           }),
         ),
       });
+      prewarmProxyServers(proxyServerIds, ftpConfigForServer);
+      return;
     }
 
     try {
@@ -75,8 +100,10 @@ export function stremioRoutes(config: AppConfig, profiles: ProfileService, media
         addonName: customization.addonName,
         streamNameTemplate: customization.streamNameTemplate,
         streamDescriptionTemplate: customization.streamDescriptionTemplate,
+        onProxyMatch,
       });
       res.json({ streams });
+      prewarmProxyServers(proxyServerIds, ftpConfigForServer);
     } catch (error) {
       console.error("Stream resolution error:", loggableError(error));
       res.json({ streams: [] });

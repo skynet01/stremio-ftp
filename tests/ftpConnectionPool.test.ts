@@ -202,11 +202,26 @@ describe("createFtpConnectionPool warm-ups", () => {
 
     pool.warm(config());
     pool.warm(config());
+    pool.prewarm([config(), config(), config()], 3);
     await waitFor(() => ftp.logins === 1);
     pool.warm(config());
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(ftp.logins).toBe(1);
+  });
+
+  it("warms up to the requested number of distinct accounts", async () => {
+    const ftp = fakeFtp({ maxConnections: 3 });
+    const pool = createPool(ftp);
+
+    pool.prewarm(
+      [config({ username: "a" }), config({ username: "a" }), config({ username: "b" }), config({ username: "c" }), config({ username: "d" })],
+      3,
+    );
+    await waitFor(() => ftp.logins === 3);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(ftp.loginUsers.sort()).toEqual(["a", "b", "c"]);
   });
 
   it("gives a warming login's slot to a real request", async () => {

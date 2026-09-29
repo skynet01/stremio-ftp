@@ -89,7 +89,7 @@ export function createApp(
   });
   app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue, mediaRepository));
   app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpPool) }));
-  app.use(stremioRoutes(config, profileService, mediaRepository));
+  app.use(stremioRoutes(config, profileService, mediaRepository, { prewarmFtpLogins: (configs, maxAccounts) => ftpPool.prewarm(configs, maxAccounts) }));
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "stremio-ftp", baseUrl: config.baseUrl });

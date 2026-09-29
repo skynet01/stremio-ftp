@@ -1508,6 +1508,75 @@ describe("stremio routes", () => {
     );
   });
 
+  it("pre-logs in to the FTP accounts behind returned proxy streams after answering", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const service = new ProfileService(db, config.encryptionKey);
+    const created = await service.createProfile("uid-12345678", "passphrase");
+    const serverFor = (name: string, streamDeliveryMode: "proxy" | "direct") => ({
+      name,
+      ftpConfig: {
+        host: `${name.toLowerCase()}.example.test`,
+        port: 21,
+        username: name.toLowerCase(),
+        password: "secret",
+        tlsMode: "explicit" as const,
+        allowInvalidCertificate: false,
+        roots: ["/movies"],
+      },
+      customization: { catalogEnabled: false, streamDeliveryMode },
+    });
+    const proxyId = service.defaultFtpServerId(created.profileId);
+    service.saveFtpServer(created.profileId, proxyId, serverFor("Alpha", "proxy"));
+    const directId = service.createFtpServer(created.profileId, serverFor("Direct", "direct")).id;
+    const otherProxyId = service.createFtpServer(created.profileId, serverFor("Beta", "proxy")).id;
+    const repository = new MediaRepository(db);
+    for (const [ftpServerId, filename] of [
+      [proxyId, "The.Matrix.1999.1080p.mkv"],
+      [proxyId, "The.Matrix.1999.2160p.mkv"],
+      [directId, "The.Matrix.1999.720p.mkv"],
+      [otherProxyId, "The.Matrix.1999.1080p.BluRay.mkv"],
+    ] as const) {
+      repository.upsertParsedFile(created.profileId, {
+        ftpServerId,
+        mediaKind: "movie",
+        ftpPath: `/movies/${filename}`,
+        filename,
+        normalizedFilename: filename.toLowerCase(),
+        extension: "mkv",
+        parsedTitle: "matrix",
+        parsedYear: 1999,
+        season: null,
+        episode: null,
+        imdbId: "tt0133093",
+        quality: "1080p",
+        confidence: 95,
+        sizeBytes: 1024,
+      });
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ meta: { id: "tt0133093", name: "The Matrix", releaseInfo: "1999" } }),
+      })),
+    );
+    const loggedError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const prewarmFtpLogins = vi.fn(() => {
+      throw new Error("pre-login must never break the stream list");
+    });
+    const app = express().use(stremioRoutes(config, service, repository, { prewarmFtpLogins }));
+
+    const response = await request(app).get(`/u/${created.installUrlToken}/stream/movie/tt0133093.json`).expect(200);
+
+    expect(response.body.streams).toHaveLength(4);
+    expect(prewarmFtpLogins).toHaveBeenCalledTimes(1);
+    const [configs, maxAccounts] = prewarmFtpLogins.mock.calls[0] as unknown as [Array<{ username: string }>, number];
+    expect(configs.map((ftpConfig) => ftpConfig.username).sort()).toEqual(["alpha", "beta"]);
+    expect(maxAccounts).toBe(3);
+    expect(loggedError).toHaveBeenCalledWith("FTP pre-login error:", expect.stringContaining("pre-login must never break"));
+  });
+
   it("uses saved custom stream formatter templates in Stremio stream results", async () => {
     const db = new Database(":memory:");
     migrate(db);

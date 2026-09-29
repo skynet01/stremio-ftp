@@ -34,6 +34,8 @@ export type FtpConnectionPool = {
   openReadStream(config: FtpConfig, path: string, range: FtpReadRange, signal?: AbortSignal): Promise<PooledReadStream>;
   // Logs in ahead of a likely request unless the account already has an idle or warming login.
   warm(config: FtpConfig): void;
+  // Warms the first `maxAccounts` distinct accounts among `configs`.
+  prewarm(configs: FtpConfig[], maxAccounts: number): void;
   close(): Promise<void>;
 };
 
@@ -295,6 +297,16 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
       };
     },
     warm,
+    prewarm(configs, maxAccounts) {
+      const seen = new Set<string>();
+      for (const config of configs) {
+        if (seen.size >= maxAccounts) break;
+        const key = ftpAccountKey(config);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        warm(config);
+      }
+    },
     async close() {
       stopped = true;
       const closing: Array<Promise<void>> = [];
