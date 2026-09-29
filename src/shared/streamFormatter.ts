@@ -180,13 +180,10 @@ export function formatStreamBytes(bytes: number | null | undefined, concise = fa
 }
 
 function renderTemplate(template: string, context: StreamFormatterContext): string {
+  const ends = expressionEnds(template);
   let output = "";
   for (let index = 0; index < template.length; index += 1) {
-    if (template[index] !== "{") {
-      output += template[index];
-      continue;
-    }
-    const end = findFormatterEnd(template, index + 1);
+    const end = template[index] === "{" ? ends[index + 1] : -1;
     if (end === -1) {
       output += template[index];
       continue;
@@ -364,28 +361,44 @@ function evaluateConditionalModifier(value: unknown, modifier: string): boolean 
   return null;
 }
 
-function findFormatterEnd(template: string, start: number) {
-  let quote: string | null = null;
-  let bracketDepth = 0;
-  let parenDepth = 0;
-  for (let index = start; index < template.length; index += 1) {
+// ends[start] is where an expression opened just before `start` closes: the first "}" outside quotes
+// with no open "[" or "(" (a stray "]" or ")" never goes below zero), or -1. Scanning forward once per
+// unclosed "{" is quadratic, so every start is resolved in one right-to-left pass instead:
+// - resume is the next index where a scan that is balanced at i is balanced again, jumping over quoted
+//   text and whole "[...]" / "(...)" groups; `length` means the scan runs off the end.
+// - bracketLevel/parenLevel count openers minus closers from i to the end along those jumps, so they
+//   never decrease from one resume point to the next. bracketExit[i] is the first later resume point
+//   whose bracketLevel exceeds bracketLevel[i], which is where a "[" just before i closes (parenExit alike).
+function expressionEnds(template: string): Int32Array {
+  const length = template.length;
+  const singleQuoteEnd = new Int32Array(length + 1).fill(-1);
+  const doubleQuoteEnd = new Int32Array(length + 1).fill(-1);
+  const bracketLevel = new Int32Array(length + 1);
+  const parenLevel = new Int32Array(length + 1);
+  const bracketExit = new Int32Array(length + 1).fill(length);
+  const parenExit = new Int32Array(length + 1).fill(length);
+  const ends = new Int32Array(length + 1).fill(-1);
+
+  for (let index = length - 1; index >= 0; index -= 1) {
     const char = template[index];
-    if (quote) {
-      if (char === "\\" && index + 1 < template.length) index += 1;
-      else if (char === quote) quote = null;
-      continue;
-    }
+    const escape = char === "\\" && index + 1 < length;
+    singleQuoteEnd[index] = escape ? singleQuoteEnd[index + 2] : char === "'" ? index : singleQuoteEnd[index + 1];
+    doubleQuoteEnd[index] = escape ? doubleQuoteEnd[index + 2] : char === "\"" ? index : doubleQuoteEnd[index + 1];
+
+    let next = index + 1;
     if (char === "'" || char === "\"") {
-      quote = char;
-      continue;
+      const close = (char === "'" ? singleQuoteEnd : doubleQuoteEnd)[index + 1];
+      next = close === -1 ? length : close + 1;
     }
-    if (char === "[") bracketDepth += 1;
-    if (char === "]") bracketDepth = Math.max(0, bracketDepth - 1);
-    if (char === "(") parenDepth += 1;
-    if (char === ")") parenDepth = Math.max(0, parenDepth - 1);
-    if (char === "}" && bracketDepth === 0 && parenDepth === 0) return index;
+    bracketLevel[index] = bracketLevel[next] + (char === "[" ? 1 : char === "]" ? -1 : 0);
+    parenLevel[index] = parenLevel[next] + (char === "(" ? 1 : char === ")" ? -1 : 0);
+
+    const resume = char === "[" ? bracketExit[next] : char === "(" ? parenExit[next] : next;
+    bracketExit[index] = resume === length || bracketLevel[resume] > bracketLevel[index] ? resume : bracketExit[resume];
+    parenExit[index] = resume === length || parenLevel[resume] > parenLevel[index] ? resume : parenExit[resume];
+    ends[index] = char === "}" ? index : ends[resume];
   }
-  return -1;
+  return ends;
 }
 
 function findTopLevelChar(value: string, needle: string) {

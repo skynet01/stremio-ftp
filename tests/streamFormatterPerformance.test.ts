@@ -1,0 +1,52 @@
+import { describe, expect, it } from "vitest";
+import { renderStreamTemplate } from "../src/shared/streamFormatter";
+
+const TEMPLATE_CAP = 12_000;
+
+const context = {
+  addon: { name: "Archive 3D" },
+  stream: {
+    mediaId: 42,
+    serverId: 2,
+    serverName: "Server 2",
+    serverPrefix: "Server 2 - ",
+    filename: "The.Matrix.1999.2160p.HDR.mkv",
+    path: "/Movies/The.Matrix.1999.2160p.HDR.mkv",
+    extension: ".mkv",
+    quality: "2160p",
+    size: 5368709120,
+    deliveryMode: "proxy",
+    videoTags: "HDR HEVC",
+    visualTags: ["HDR"],
+    "3dtype": "",
+    threeDType: "",
+    encode: "HEVC",
+    audioTags: ["TrueHD", "Atmos"],
+    audioChannels: ["7.1"],
+    title: "The Matrix",
+    library: false,
+  },
+};
+
+function fill(pattern: string, length: number) {
+  return pattern.repeat(Math.ceil(length / pattern.length)).slice(0, length);
+}
+
+function elapsed(run: () => void) {
+  const start = performance.now();
+  run();
+  return performance.now() - start;
+}
+
+describe("stream formatter performance", () => {
+  it("parses unclosed-brace templates at the length cap in linear time", () => {
+    const templates = ["{", "{[", "{(", "{'", "{\"", "{[(", "{\\\"", "{'{\"", "{[{(]{)"].map((pattern) => fill(pattern, TEMPLATE_CAP));
+
+    const duration = elapsed(() => {
+      for (const template of templates) renderStreamTemplate(template, context, "description");
+    });
+
+    expect(renderStreamTemplate(templates[0], context, "description")).toBe(templates[0]);
+    expect(duration).toBeLessThan(250);
+  });
+});
