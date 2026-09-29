@@ -40,3 +40,13 @@ describe("admin dashboard table layout", () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*860px\)\s*{[\s\S]*\.admin-shared-card-header,\s*[\s\S]*\.admin-shared-stats\s*{[^}]*grid-template-columns:\s*1fr;/);
   });
 });
+
+describe("admin dashboard bundle", () => {
+  it("lazy-loads the admin dashboard so regular users do not download it", () => {
+    const app = readFileSync("src/web/App.tsx", "utf8");
+
+    expect(app).not.toMatch(/^import\s*{[^}]*\bAdminDashboard\b[^}]*}\s*from/m);
+    expect(app).toMatch(/lazy\(\s*\(\)\s*=>\s*import\("\.\/components\/AdminDashboard\.js"\)/);
+    expect(app).toMatch(/<Suspense\b/);
+  });
+});

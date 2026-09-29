@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   cancelScan,
   createAdminSharedIndexGroup,
@@ -27,7 +27,6 @@ import {
   validateSetupToken,
 } from "./api.js";
 import { APP_CHANGELOG } from "./changelog.js";
-import { AdminDashboard } from "./components/AdminDashboard.js";
 import { ChangelogDrawer } from "./components/ChangelogDrawer.js";
 import { useConfirmDialog } from "./components/ConfirmDialog.js";
 import { Footer } from "./components/Footer.js";
@@ -103,6 +102,7 @@ const SERVER_LIBRARY_SETTING_KEYS = new Set<keyof ServerForm>([
 ]);
 const SHARED_INDEX_UNLINK_REQUIRED_FRAGMENT = "will unlink it from the shared index group";
 const SCAN_STATUS_POLL_MS = 3000;
+const AdminDashboard = lazy(() => import("./components/AdminDashboard.js").then((module) => ({ default: module.AdminDashboard })));
 
 function browserUid() {
   const cryptoApi = globalThis.crypto;
@@ -1446,7 +1446,11 @@ export function App() {
                   </button>
                 </div>
               )}
-              {isSuperAdmin ? <AdminDashboard browserUid={recoveryUid} passphrase={passphrase} /> : null}
+              {isSuperAdmin ? (
+                <Suspense fallback={null}>
+                  <AdminDashboard browserUid={recoveryUid} passphrase={passphrase} />
+                </Suspense>
+              ) : null}
             </>
           ) : null}
         </div>

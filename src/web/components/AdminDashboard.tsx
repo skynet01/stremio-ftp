@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { CircleStop, Copy, Crown, createLucideIcon, KeyRound, Link2, RefreshCw, Search, ShieldCheck, Trash2, User, X } from "lucide-react";
 import {
@@ -558,37 +558,27 @@ export function AdminDashboard({ browserUid, passphrase }: AdminDashboardProps) 
 
   const summary = data?.summary;
   const normalizedSearch = searchQuery.trim().toLowerCase();
-  const profiles = data?.profiles ?? [];
-  const filteredProfiles = normalizedSearch
-    ? profiles.filter((profile) =>
-        [
-          profile.browserUid,
-          profile.lastCountryCode ?? "unknown",
-          profile.adminEnabled ? "admin" : "user",
-          profile.adminSource ?? "",
-          String(profile.id),
-          ...(profile.ftpServerDetails?.flatMap((server) => [
-            String(server.id),
-            server.name,
-            server.host ?? "",
-            server.sharedIndex?.name ?? "",
-            server.sharedIndex?.keyHint ?? "",
-          ]) ?? []),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedSearch),
-      )
-    : profiles;
-  const visibleProfiles = sort ? [...filteredProfiles].sort((left, right) => compareProfiles(left, right, sort)) : filteredProfiles;
-  const selectedProfiles = profiles.filter((profile) => selectedProfileIds.has(profile.id));
-  const visibleSelectedCount = visibleProfiles.filter((profile) => selectedProfileIds.has(profile.id)).length;
+  const profiles = useMemo(() => data?.profiles ?? [], [data]);
+  const profileSearchText = useMemo(() => new Map(profiles.map((profile) => [profile.id, profileSearchValue(profile)])), [profiles]);
+  const filteredProfiles = useMemo(
+    () => (normalizedSearch ? profiles.filter((profile) => profileSearchText.get(profile.id)?.includes(normalizedSearch)) : profiles),
+    [profiles, profileSearchText, normalizedSearch],
+  );
+  const visibleProfiles = useMemo(
+    () => (sort ? [...filteredProfiles].sort((left, right) => compareProfiles(left, right, sort)) : filteredProfiles),
+    [filteredProfiles, sort],
+  );
+  const selectedProfiles = useMemo(() => profiles.filter((profile) => selectedProfileIds.has(profile.id)), [profiles, selectedProfileIds]);
+  const visibleSelectedCount = useMemo(
+    () => visibleProfiles.filter((profile) => selectedProfileIds.has(profile.id)).length,
+    [visibleProfiles, selectedProfileIds],
+  );
   const selectedCount = selectedProfiles.length;
   const selectedHasScanActivity = selectedProfiles.some((profile) => profile.activeScans > 0 || profile.pendingScans > 0);
   const allVisibleSelected = visibleProfiles.length > 0 && visibleSelectedCount === visibleProfiles.length;
   const serverModalProfile = profiles.find((profile) => profile.id === serverModalProfileId) ?? null;
   const linkedServersGroup = sharedGroups.find((group) => group.id === linkedServersGroupId) ?? null;
-  const displayStats = adminDisplayStats(profiles, sharedGroups, summary);
+  const displayStats = useMemo(() => adminDisplayStats(profiles, sharedGroups, summary), [profiles, sharedGroups, summary]);
 
   return (
     <section className="panel admin-dashboard-panel" aria-labelledby="admin-dashboard-heading">
@@ -852,6 +842,25 @@ function upsertSharedGroup(groups: AdminSharedIndexGroup[], group: AdminSharedIn
     ? groups.map((candidate) => (candidate.id === group.id ? group : candidate))
     : [...groups, group];
   return next.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+}
+
+function profileSearchValue(profile: AdminProfileSummary) {
+  return [
+    profile.browserUid,
+    profile.lastCountryCode ?? "unknown",
+    profile.adminEnabled ? "admin" : "user",
+    profile.adminSource ?? "",
+    String(profile.id),
+    ...(profile.ftpServerDetails?.flatMap((server) => [
+      String(server.id),
+      server.name,
+      server.host ?? "",
+      server.sharedIndex?.name ?? "",
+      server.sharedIndex?.keyHint ?? "",
+    ]) ?? []),
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 function profilesWithUnlinkedServers(profiles: AdminProfileSummary[]) {
