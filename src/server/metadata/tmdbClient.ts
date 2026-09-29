@@ -173,8 +173,8 @@ export function clearTmdbCatalogCache() {
 
 export function catalogMetaMatchesItem(item: CatalogItem, meta: PersistedCatalogMeta, catalogKind: TmdbCatalogKind): boolean {
   if (meta.type !== (catalogKind === "movie" ? "movie" : "series")) return false;
-  if (titleRelationshipScore(item.parsedTitle, meta.name) <= 0 &&
-    (!item.alternateTitle || titleRelationshipScore(item.alternateTitle, meta.name) <= 0)) return false;
+  if (titleRelationshipScore(titleWithoutEditionSuffix(item.parsedTitle), meta.name) <= 0 &&
+    (!item.alternateTitle || titleRelationshipScore(titleWithoutEditionSuffix(item.alternateTitle), meta.name) <= 0)) return false;
   const year = searchYear(item, catalogKind);
   const alternateYear = item.alternateTitle ? item.alternateYear : null;
   const metaYear = Number(meta.releaseInfo?.slice(0, 4));

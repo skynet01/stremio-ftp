@@ -95,6 +95,14 @@ describe("media parser", () => {
     });
   });
 
+  it("strips 3D from a movie folder title while keeping its year", () => {
+    expect(parseMediaPath("/Movies/North Star 3D (2000)/North.Star.3D.FSBS.mkv", { libraryLayout: "folders" })).toMatchObject({
+      mediaKind: "movie",
+      parsedTitle: "north star",
+      parsedYear: 2000,
+    });
+  });
+
   it("parses anime absolute episode numbers when anime content is enabled", () => {
     expect(
       parseMediaPath("/Anime/Afro Samurai/Afro.Samurai.01.1080p.mkv", {

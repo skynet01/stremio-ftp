@@ -1,11 +1,38 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearTmdbCatalogCache, tmdbCatalogEnrichment, tmdbCatalogMeta } from "../src/server/metadata/tmdbClient";
+import { catalogMetaMatchesItem, clearTmdbCatalogCache, tmdbCatalogEnrichment, tmdbCatalogMeta } from "../src/server/metadata/tmdbClient";
 
 describe("tmdbCatalogMeta", () => {
   afterEach(() => {
     clearTmdbCatalogCache();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("keeps a stored 3D edition match with one year of drift, but rejects two", () => {
+    const item = { mediaKind: "movie" as const, catalogKind: "movie" as const, parsedTitle: "north star 3d edition", parsedYear: 2000, imdbId: null };
+    expect(catalogMetaMatchesItem(item, { id: "tt0000001", type: "movie", name: "North Star", releaseInfo: "2001" }, "movie")).toBe(true);
+    expect(catalogMetaMatchesItem(item, { id: "tt0000002", type: "movie", name: "North Star", releaseInfo: "2002" }, "movie")).toBe(false);
+  });
+
+  it("searches without a year when a 3D release is one year off", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({
+        results: url.searchParams.has("year") ? [] : [{ id: 1, title: "North Star", release_date: "2001-01-01" }],
+      }) };
+      if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0000001" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle: "north star 3d edition", parsedYear: 2000, imdbId: null }, "tmdb-key")).resolves.toMatchObject({
+      status: "matched", meta: { id: "tt0000001", releaseInfo: "2001" },
+    });
+    const searches = fetchMock.mock.calls.map(([input]) => new URL(String(input))).filter((url) => url.pathname === "/3/search/movie");
+    expect(searches.map((url) => [url.searchParams.get("query"), url.searchParams.get("year")])).toEqual([
+      ["north star", "2000"],
+      ["north star", null],
+    ]);
   });
 
   it("aborts TMDB requests after ten seconds", async () => {
