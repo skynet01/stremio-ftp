@@ -4,6 +4,8 @@ import type { FtpConfig } from "../profiles/profileService.js";
 import type { FtpClient, FtpClientFactory } from "./ftpTypes.js";
 
 const SOCKET_CLOSE_TIMEOUT_MS = 3_000;
+// A paused player stops reading, which idles the FTP data socket; only a real stall should time it out.
+const PAUSED_DATA_SOCKET_TIMEOUT_MS = 30 * 60_000;
 
 export function createBasicFtpClientFactory(
   timeoutMs = 30000,
@@ -109,7 +111,11 @@ function openLimitedDownloadStream(client: Client, remotePath: string, start: nu
       };
 
       if (!output.write(slice)) {
-        output.once("drain", afterWrite);
+        client.ftp.dataSocket?.setTimeout(PAUSED_DATA_SOCKET_TIMEOUT_MS);
+        output.once("drain", () => {
+          client.ftp.dataSocket?.setTimeout(client.ftp.timeout);
+          afterWrite();
+        });
       } else {
         afterWrite();
       }

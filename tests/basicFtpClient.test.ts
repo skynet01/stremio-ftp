@@ -32,6 +32,32 @@ describe("createBasicFtpClientFactory", () => {
     expect(received.equals(file.subarray(1000, 200_001))).toBe(true);
   });
 
+  it("keeps a range open while the player is paused longer than the FTP timeout", async () => {
+    const file = patternedBuffer(48 * 1024 * 1024);
+    const server = await startFakeFtpServer({ files: { "/video.mkv": file } });
+    const client = await createBasicFtpClientFactory(300)(ftpConfig(server.port));
+
+    const stream = await client.openReadStream("/video.mkv", { start: 0, end: file.length - 1 });
+    const chunks: Buffer[] = [];
+    let failure: unknown = null;
+    let settled = false;
+    stream.on("error", (error) => {
+      failure = error;
+    });
+    stream.once("close", () => {
+      settled = true;
+    });
+    stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+    await waitFor(() => chunks.length > 0);
+    stream.pause();
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    stream.resume();
+    await waitFor(() => settled);
+
+    expect(String(failure ?? "")).toBe("");
+    expect(Buffer.concat(chunks).equals(file)).toBe(true);
+  });
+
   it("delivers every byte to a slow consumer when the range runs to end of file", async () => {
     const file = patternedBuffer(256 * 1024);
     const server = await startFakeFtpServer({ files: { "/video.mkv": file } });
