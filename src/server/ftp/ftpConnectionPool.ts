@@ -10,9 +10,16 @@ import type { FtpReadStreamOptions } from "./ftpTypes.js";
 // The factory is the connection limiter (limitFtpClientFactoryByKey): it closes each client after its stream unless the
 // transfer completed cleanly, in which case it hands the client back here through onReusable.
 
+const MAX_REMEMBERED_LOGIN_FAILURES = 1_000;
+// ProFTPD and others also answer 530 when an account is over its session limit; that is not a bad password.
+const SESSION_LIMIT_REPLY = /too many|maximum|limit|already connected/i;
+
 export type FtpConnectionPoolOptions = {
   // How long a logged-in client may wait for its next transfer. 0 turns pooling and warm-ups off.
   idleMs: number;
+  // How long a login refused with 530 makes further playback logins and warm-ups for that account fail without
+  // contacting the server. 0 turns it off.
+  loginFailureMs: number;
 };
 
 // Where a stream's login came from: a new login, an idle pooled one, a warm-up, or one handed over by a transfer that
@@ -68,6 +75,8 @@ export function ftpAccountKey(config: FtpConfig) {
 export function createFtpConnectionPool(factory: AbortableFtpClientFactory, options: FtpConnectionPoolOptions): FtpConnectionPool {
   const pooling = options.idleMs > 0;
   const accounts = new Map<string, Account>();
+  // Players of a dead account retry over and over; a burst of failed logins from one IP can upset the provider.
+  const loginFailures = new Map<string, { until: number; message: string }>();
   let stopped = false;
 
   function accountFor(key: string) {
@@ -138,9 +147,29 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
     account.idle.push(entry);
   }
 
+  function rememberLoginFailure(key: string, error: unknown) {
+    if (options.loginFailureMs <= 0 || !isRefusedLogin(error)) return;
+    loginFailures.delete(key);
+    loginFailures.set(key, { until: Date.now() + options.loginFailureMs, message: (error as Error).message.slice(0, 200) });
+    if (loginFailures.size > MAX_REMEMBERED_LOGIN_FAILURES) loginFailures.delete(loginFailures.keys().next().value!);
+  }
+
+  function recentLoginFailure(key: string) {
+    const failure = loginFailures.get(key);
+    if (!failure) return null;
+    if (failure.until <= Date.now()) {
+      loginFailures.delete(key);
+      return null;
+    }
+    const error = new Error(`${failure.message} (refused within the last ${Math.round(options.loginFailureMs / 1000)} s; not retried yet)`);
+    error.name = "FtpLoginRefusedError";
+    return error;
+  }
+
   function warm(config: FtpConfig) {
     if (!pooling || stopped) return;
     const key = ftpAccountKey(config);
+    if (recentLoginFailure(key)) return;
     const account = accountFor(key);
     if (account.idle.length || account.warming) return;
 
@@ -166,6 +195,7 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
       },
       (error: unknown) => {
         clearWarming();
+        rememberLoginFailure(key, error);
         logFtpTiming(isFtpSlotUnavailableError(error) ? "warm_skipped" : "warm_failed", { warmMs: elapsedMs(startedAt), ...target(config) });
         forgetIfUnused(key);
       },
@@ -179,6 +209,11 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
   }
 
   function loginForRequest(config: FtpConfig, key: string, signal: AbortSignal | undefined) {
+    const failure = recentLoginFailure(key);
+    if (failure) {
+      logFtpTiming("login_refused_recently", target(config));
+      return Promise.reject(failure);
+    }
     return new Promise<{ client: ClaimableFtpClient; source: FtpClientSource }>((resolve, reject) => {
       const handoff = new AbortController();
       let settled = false;
@@ -216,6 +251,7 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
         },
         (error: unknown) => {
           stopWaiting();
+          rememberLoginFailure(key, error);
           if (settled) return;
           settled = true;
           reject(error);
@@ -350,6 +386,12 @@ function awaitWarmLogin(warmLogin: WarmLogin, signal: AbortSignal | undefined): 
       },
     );
   });
+}
+
+// A 530 reply to the login means bad credentials or a disabled account, unless it is about a session limit.
+function isRefusedLogin(error: unknown) {
+  if (!(error instanceof Error) || (error as { code?: unknown }).code !== 530) return false;
+  return !SESSION_LIMIT_REPLY.test(error.message);
 }
 
 function target(config: FtpConfig) {

@@ -33,7 +33,7 @@ export const NO_FAULTS: FtpFaults = {
 
 export type FakeFtpServerOptions = {
   files: Record<string, FakeFile>;
-  // Maximum logged-in sessions per username; extra logins get "530 Login incorrect". 0 disables the cap.
+  // Maximum logged-in sessions per username; extra logins get a session-limit 530. 0 disables the cap.
   perUserMaxConnections?: number;
   // A closed session keeps counting against the user's cap for this long (server-side cleanup lag).
   releaseLagMs?: number;
@@ -291,7 +291,8 @@ export class FakeFtpServer {
     const current = this.userSessions.get(user) ?? 0;
     if (cap > 0 && current >= cap) {
       this.stats.loginsRejectedOverCap += 1;
-      this.reply(session, "530 Login incorrect");
+      // ProFTPD's MaxClientsPerUser reply: a 530 that is about the session limit, not the password.
+      this.reply(session, `530 Sorry, the maximum number of clients (${cap}) for this user are already connected.`);
       return;
     }
     if (this.faults.loginRejectRate > 0 && this.random() < this.faults.loginRejectRate) {

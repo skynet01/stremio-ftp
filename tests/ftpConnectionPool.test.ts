@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFtpConnectionPool, type FtpConnectionPool } from "../src/server/ftp/ftpConnectionPool";
 import { limitFtpClientFactoryByKey, type FtpClientRequestOptions } from "../src/server/ftp/ftpConnectionLimiter";
 import type { FtpClient, FtpReadStreamOptions } from "../src/server/ftp/ftpTypes";
@@ -8,6 +8,7 @@ import type { FtpConfig } from "../src/server/profiles/profileService";
 const pools: FtpConnectionPool[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(pools.splice(0).map((pool) => pool.close()));
 });
 
@@ -238,8 +239,54 @@ describe("createFtpConnectionPool warm-ups", () => {
   });
 });
 
-function createPool(ftp: ReturnType<typeof fakeFtp>, options: { idleMs?: number } = {}) {
-  const pool = createFtpConnectionPool(ftp.factory, { idleMs: options.idleMs ?? 45_000 });
+describe("createFtpConnectionPool rejected logins", () => {
+  it("fails fast for a while after the server rejects the login", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const ftp = fakeFtp({ maxConnections: 3, loginReply: { code: 530, message: "530 Login incorrect." } });
+    const pool = createPool(ftp, { loginFailureMs: 60_000 });
+
+    await expect(pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 })).rejects.toThrow("530");
+    await expect(pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 })).rejects.toThrow("530");
+    pool.warm(config());
+    pool.prewarm([config()], 3);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(ftp.loginAttempts).toBe(1);
+
+    await expect(pool.openReadStream(config({ password: "fixed" }), "/a.mkv", { start: 0, end: 9 })).rejects.toThrow("530");
+    expect(ftp.loginAttempts).toBe(2);
+
+    now += 60_001;
+    await expect(pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 })).rejects.toThrow("530");
+    expect(ftp.loginAttempts).toBe(3);
+  });
+
+  it("keeps retrying logins that failed for other reasons", async () => {
+    const ftp = fakeFtp({ maxConnections: 3, loginReply: { message: "Timeout (control socket)" } });
+    const pool = createPool(ftp);
+
+    await expect(pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 })).rejects.toThrow("Timeout");
+    await expect(pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 })).rejects.toThrow("Timeout");
+
+    expect(ftp.loginAttempts).toBe(2);
+  });
+
+  it("does not treat a session-limit 530 as a bad password", async () => {
+    const ftp = fakeFtp({
+      maxConnections: 3,
+      loginReply: { code: 530, message: "530 Sorry, the maximum number of clients (3) for this user are already connected." },
+    });
+    const pool = createPool(ftp);
+
+    await expect(pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 })).rejects.toThrow("530");
+    await expect(pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 })).rejects.toThrow("530");
+
+    expect(ftp.loginAttempts).toBe(2);
+  });
+});
+
+function createPool(ftp: ReturnType<typeof fakeFtp>, options: { idleMs?: number; loginFailureMs?: number } = {}) {
+  const pool = createFtpConnectionPool(ftp.factory, { idleMs: options.idleMs ?? 45_000, loginFailureMs: options.loginFailureMs ?? 60_000 });
   pools.push(pool);
   return pool;
 }
@@ -251,6 +298,7 @@ function fakeFtp(options: {
   reusableAfterTransfer?: boolean;
   manualStreams?: boolean;
   stallLogins?: boolean;
+  loginReply?: { code?: number; message: string };
 }) {
   const state = {
     logins: 0,
@@ -275,6 +323,7 @@ function fakeFtp(options: {
         }, { once: true });
       });
     }
+    if (options.loginReply) throw Object.assign(new Error(options.loginReply.message), { code: options.loginReply.code });
     state.logins += 1;
     state.loginPasswords.push(ftpConfig.password);
     state.loginUsers.push(ftpConfig.username);

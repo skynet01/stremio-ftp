@@ -21,6 +21,7 @@ describe("loadConfig", () => {
     expect(config.maxOnDemandSearchMs).toBe(4500);
     expect(config.ftpMaxConnections).toBe(3);
     expect(config.ftpPoolIdleMs).toBe(45000);
+    expect(config.ftpLoginFailureCacheMs).toBe(60000);
     expect(config.scanGlobalConcurrency).toBe(2);
     expect(config.scanQueueMax).toBe(50);
     expect(config.scanCooldownMs).toBe(900000);
@@ -68,9 +69,11 @@ describe("loadConfig", () => {
       CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
       SETUP_TOKEN: "setup-secret-123",
       FTP_POOL_IDLE_MS: "0",
+      FTP_LOGIN_FAILURE_CACHE_MS: "15000",
     });
 
     expect(config.ftpPoolIdleMs).toBe(0);
+    expect(config.ftpLoginFailureCacheMs).toBe(15000);
     expect(() =>
       loadConfig({
         BASE_URL: "https://example.test",

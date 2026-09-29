@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 function pooled(factory: AbortableFtpClientFactory) {
-  const pool = createFtpConnectionPool(factory, { idleMs: 45_000 });
+  const pool = createFtpConnectionPool(factory, { idleMs: 45_000, loginFailureMs: 60_000 });
   pools.push(pool);
   return pool;
 }

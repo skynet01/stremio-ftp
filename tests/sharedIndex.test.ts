@@ -454,7 +454,7 @@ describe("shared index groups", () => {
     const counts = vi.spyOn(ProfileService.prototype as unknown as { sharedIndexGroupCatalogItemCounts: () => unknown }, "sharedIndexGroupCatalogItemCounts");
     const unusedPool = createFtpConnectionPool(async () => {
       throw new Error("not used");
-    }, { idleMs: 0 });
+    }, { idleMs: 0, loginFailureMs: 0 });
     const resolve = createFtpProxyResolver(service, new MediaRepository(db), unusedPool);
 
     const resolved = await resolve({ installToken: linked.installUrlToken, serverId: linkedServerId, sharedMediaId });

@@ -14,6 +14,7 @@
 //   --latency-ms=0            fake FTP server: delay added to every control reply
 //   --ftp-timeout-ms=15000    app FTP_TIMEOUT_MS
 //   --pool-idle-ms=2000       app FTP_POOL_IDLE_MS (0 turns pooling off); the "quiet" checks wait this out
+//   --login-failure-cache-ms=1000  app FTP_LOGIN_FAILURE_CACHE_MS (how long a 530 fails fast)
 //   --file-mb=256             size of the generated files
 //   --seed=1                  PRNG seed for request plans and faults
 //   --no-long-pause           skip the paused-reader check in scenario C
@@ -67,6 +68,7 @@ for (const cap of caps) {
     latencyMs: numberArg(args, "latency-ms", 0),
     ftpTimeoutMs: numberArg(args, "ftp-timeout-ms", 15_000),
     poolIdleMs: numberArg(args, "pool-idle-ms", 2_000),
+    loginFailureCacheMs: numberArg(args, "login-failure-cache-ms", 1_000),
     fileSizeBytes: numberArg(args, "file-mb", 256) * 1024 * 1024,
     seed: numberArg(args, "seed", 1),
     scenarios,

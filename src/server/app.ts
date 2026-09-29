@@ -54,8 +54,11 @@ export function createApp(
   const mediaRepository = new MediaRepository(db);
   const baseFtpClientFactory = options.ftpClientFactory ?? createBasicFtpClientFactory(config.ftpTimeoutMs);
   const ftpClientFactory = limitFtpClientFactoryByKey(baseFtpClientFactory, config.ftpMaxConnections);
-  // Configs built without loadConfig (tests) leave pooling off.
-  const ftpPool = createFtpConnectionPool(ftpClientFactory, { idleMs: config.ftpPoolIdleMs ?? 0 });
+  // Configs built without loadConfig (tests) leave pooling and the refused-login cache off.
+  const ftpPool = createFtpConnectionPool(ftpClientFactory, {
+    idleMs: config.ftpPoolIdleMs ?? 0,
+    loginFailureMs: config.ftpLoginFailureCacheMs ?? 0,
+  });
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
   const scanScheduler = setInterval(
     guardedTimerTask("[scan-scheduler] Failed to enqueue scheduled scans:", () => scanQueue.enqueueDueScheduledScans()),

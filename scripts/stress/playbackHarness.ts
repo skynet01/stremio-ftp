@@ -41,6 +41,8 @@ export type HarnessOptions = {
   ftpTimeoutMs: number;
   // App FTP_POOL_IDLE_MS. Short by default so the "quiet" checks do not wait out the production idle time.
   poolIdleMs: number;
+  // App FTP_LOGIN_FAILURE_CACHE_MS. Short by default so an injected 530 in D does not fail the next scenario's probe.
+  loginFailureCacheMs: number;
   hangTimeoutMs: number;
   quiesceTimeoutMs: number;
   fileSizeBytes: number;
@@ -71,6 +73,7 @@ export function defaultHarnessOptions(overrides: Partial<HarnessOptions> = {}): 
     latencyMs: 0,
     ftpTimeoutMs: 15_000,
     poolIdleMs: 2_000,
+    loginFailureCacheMs: 1_000,
     hangTimeoutMs: 30_000,
     quiesceTimeoutMs: 15_000,
     fileSizeBytes: 256 * 1024 * 1024,
@@ -216,6 +219,7 @@ async function startEnvironment(options: HarnessOptions, logs: LogCollector): Pr
     FTP_MAX_CONNECTIONS: String(options.ftpMaxConnections),
     FTP_TIMEOUT_MS: String(options.ftpTimeoutMs),
     FTP_POOL_IDLE_MS: String(options.poolIdleMs),
+    FTP_LOGIN_FAILURE_CACHE_MS: String(options.loginFailureCacheMs),
     EMPTY_PROFILE_CLEANUP_DAYS: "0",
     SCAN_SCHEDULER_INTERVAL_MS: "3600000",
   });
