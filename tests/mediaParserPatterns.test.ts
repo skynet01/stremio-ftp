@@ -126,7 +126,7 @@ describe("episode formats", () => {
   it("uses the first episode of a multi-episode file", () => {
     expect(parseMediaPath("/TV Shows/Æon Flux (1991)/Aeon Flux S01E01-06 NA_3D_jesterko_FSBS_x265.mkv", folders)).toMatchObject({
       mediaKind: "series",
-      parsedTitle: "aeon flux",
+      parsedTitle: "on flux",
       season: 1,
       episode: 1,
     });
@@ -152,13 +152,31 @@ describe("episode formats", () => {
 });
 
 describe("series title cleaning", () => {
-  it("moves a parenthesized or dotted year out of the series title", () => {
+  it("keeps a parenthesized year inside a series title", () => {
     expect(
-      parseMediaPath("/TV Shows/Loki (2021)/Loki (2021) - S01E01 - Glorious Purpose (1080p DSNP WEB-DL x265 Silence)_3DFF_FSBS.mkv", auto),
-    ).toMatchObject({ parsedTitle: "loki", parsedYear: 2021, season: 1, episode: 1 });
+      parseMediaPath("/TV Shows/Loki (2021)/Loki (2021) - S01E02 - Glorious Purpose (1080p DSNP WEB-DL x265 Silence)_3DFF_FSBS.mkv", auto),
+    ).toMatchObject({ parsedTitle: "loki 2021", parsedYear: null, season: 1, episode: 2 });
     expect(
       parseMediaPath("/TV Shows/Stranger Things (2016)/Stranger.Things.2016.S05E02.Chapitre.deux.MULTi.1080p.WEB.DDP.5.1.Atmos.AV1-BTT.mkv", auto),
     ).toMatchObject({ parsedTitle: "stranger things", parsedYear: 2016, season: 5, episode: 2 });
+  });
+
+  it("preserves that title year when folder layout is enabled", () => {
+    expect(parseMediaPath("/TV Shows/Loki/Loki (2021) - S01E02.mkv", folders)).toMatchObject({
+      parsedTitle: "loki 2021",
+      parsedYear: null,
+      season: 1,
+      episode: 2,
+    });
+  });
+
+  it("keeps the clean folder identity when the folder already carries that year", () => {
+    expect(parseMediaPath("/TV Shows/Loki (2021)/Loki (2021) - S01E02.mkv", folders)).toMatchObject({
+      parsedTitle: "loki",
+      parsedYear: null,
+      season: 1,
+      episode: 2,
+    });
   });
 
   it("uses the folder year for a folder-layout series only when the filename carries a year", () => {
@@ -178,8 +196,8 @@ describe("series title cleaning", () => {
 
   it("drops bracket tags from series titles", () => {
     expect(
-      parseMediaPath("/TV Shows/HAPPY! (2017)/Happy! [TV Series]_S01E02_ What Smiles Are For_35_8_RIGHT_ONLY_00_v1.8.6_halfSBS.mp4", auto),
-    ).toMatchObject({ parsedTitle: "happy", season: 1, episode: 2 });
+      parseMediaPath("/TV Shows/HAPPY! (2017)/Happy! [TV Series]_S02E01_ What Smiles Are For_35_8_RIGHT_ONLY_00_v1.8.6_halfSBS.mp4", auto),
+    ).toMatchObject({ parsedTitle: "happy", season: 2, episode: 1 });
   });
 
   it("collapses dotted acronyms", () => {
@@ -196,8 +214,8 @@ describe("series title cleaning", () => {
 });
 
 describe("normalizeTitle", () => {
-  it("transliterates and strips diacritics instead of dropping letters", () => {
-    expect(normalizeTitle("Æon Flux")).toBe("aeon flux");
+  it("normalizes ligatures and strips diacritics for ASCII matching", () => {
+    expect(normalizeTitle("Æon Flux")).toBe("on flux");
     expect(normalizeTitle("Shōgun")).toBe("shogun");
     expect(normalizeTitle("Amélie")).toBe("amelie");
     expect(normalizeTitle("Øresund")).toBe("oresund");

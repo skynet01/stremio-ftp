@@ -174,9 +174,12 @@ function seriesFolderTitleOf(ftpPath: string): string | null {
   return seriesFolderOf(ftpPath)?.title || null;
 }
 
-/** Cleans a filename series title and moves a trailing release year ("Loki (2021)", "Invincible.2021") out of it. */
+/** Cleans series titles, retaining parenthesized title years and extracting dotted release years. */
 function filenameSeriesTitle(rawTitle: string): TitleYear {
   const withoutSortIndex = rawTitle.replace(/^\s*e\d{2,4}[\s._]+(?=\S)/i, "");
+  if (/\(\s*(?:19|20)\d{2}\s*\)\s*$/.test(withoutSortIndex)) {
+    return { title: normalizeTitle(stripKnownTokens(withoutSortIndex)), year: null };
+  }
   const trailingYear = withoutSortIndex.match(/^(?<title>.*?[^\s._-])[\s._-]*[([]?(?<year>(?:19|20)\d{2})[)\]]?[\s._-]*$/);
   const year = trailingYear?.groups ? Number(trailingYear.groups.year) : null;
   if (trailingYear?.groups && year !== null && year <= MAX_RELEASE_YEAR) {
@@ -196,6 +199,9 @@ function seriesIdentity(ftpPath: string, rawTitle: string, options: ParseMediaOp
   const fromFile = filenameSeriesTitle(rawTitle);
   const folder = seriesFolderOf(ftpPath);
   if (options.libraryLayout === "folders" && folder?.title) {
+    if (folder.year === null && fromFile.title.startsWith(`${folder.title} `) && /\b(?:19|20)\d{2}$/.test(fromFile.title)) {
+      return { title: fromFile.title, year: null, alternateTitle: null };
+    }
     const year = fromFile.year === null ? null : (folder.year ?? (folderTitleHasNumber(folder.title, fromFile.year) ? null : fromFile.year));
     return { title: folder.title, year, alternateTitle: alternateTitleFor(folder.title, fromFile.title) };
   }

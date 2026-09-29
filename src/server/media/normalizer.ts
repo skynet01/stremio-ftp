@@ -2,8 +2,8 @@ const STOP_WORDS = new Set(["the"]);
 
 // Letters that Unicode decomposition does not reduce to ASCII.
 const TRANSLITERATIONS: Record<string, string> = {
-  æ: "ae",
-  Æ: "AE",
+  æ: "",
+  Æ: "", // Keep the established catalog spelling for "Æon Flux" ("on flux").
   œ: "oe",
   Œ: "OE",
   ø: "o",
