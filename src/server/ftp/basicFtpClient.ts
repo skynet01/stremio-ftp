@@ -99,6 +99,7 @@ export function createBasicFtpClientFactory(
 
     const tlsResumed = sessionKey !== null && controlSessionResumed(client);
     let idle = true;
+    let transferDone = Promise.resolve(true);
     return {
       async list(path: string) {
         const entries = await client.list(path);
@@ -112,21 +113,24 @@ export function createBasicFtpClientFactory(
       },
       async openReadStream(path: string, input: FtpReadStreamOptions) {
         idle = false;
+        transferDone = Promise.resolve(false);
         const { start, end } = input;
         const bounded = !input.openEnded && end < Number.MAX_SAFE_INTEGER;
         try {
           const byteRange = bounded && hosts.supportsByteRanges(hostKey)
             ? await requestByteRange(client, start, end, () => hosts.rejectByteRanges(hostKey))
             : false;
-          return await openLimitedDownloadStream(client, path, {
+          const download = openLimitedDownloadStream(client, path, {
             start,
             end,
             byteRange,
-            onComplete: () => {
-              idle = true;
-            },
             onRangeOverrun: () => hosts.rejectByteRanges(hostKey),
           });
+          transferDone = download.done.then((clean) => {
+            idle = clean && !client.closed;
+            return idle;
+          });
+          return await download.opened;
         } catch (error) {
           // Servers that require data connections to reuse the control connection's TLS session might not accept
           // that session when it was itself resumed. Any transfer that cannot start on such a login turns resumption
@@ -136,6 +140,7 @@ export function createBasicFtpClientFactory(
         }
       },
       isReusable: () => idle && !client.closed,
+      whenTransferDone: () => transferDone,
       async close() {
         await closeBasicFtpClient(client);
       },
@@ -254,27 +259,31 @@ type LimitedDownload = {
   end: number;
   // RANG already limits the transfer to [start, end], so it starts without REST.
   byteRange: boolean;
-  // The transfer finished with 226 and the login is idle again.
-  onComplete: () => void;
   onRangeOverrun: () => void;
 };
 
-// Resolves once the first byte arrives (or the transfer ends without data), so a transfer that cannot start rejects
-// instead of surfacing later as a broken stream. The output only ends once the transfer is settled: confirmed by the
-// server (the login stays open for reuse) or cut off because the server kept sending past the range.
+// `opened` resolves once the first byte arrives (or the transfer ends without data), so a transfer that cannot start
+// rejects instead of surfacing later as a broken stream. The output ends as soon as the last requested byte is out, so
+// the HTTP response completes right away. `done` settles once the FTP side is over: true when the server confirmed the
+// transfer (226) and the login can serve another one, false when the client was closed (aborted, failed, or cut off
+// because the server kept sending past the range).
 function openLimitedDownloadStream(client: Client, remotePath: string, download: LimitedDownload) {
-  return new Promise<PassThrough>((resolve, reject) => {
-    const output = new PassThrough();
+  const output = new PassThrough();
+  let settleDone!: (clean: boolean) => void;
+  const done = new Promise<boolean>((resolve) => {
+    settleDone = resolve;
+  });
+  const opened = new Promise<PassThrough>((resolve, reject) => {
     let remaining = Math.max(0, download.end - download.start + 1);
-    let opened = false;
+    let isOpen = false;
     let closeRequested = false;
     let completed = false;
     let outputEnded = false;
     let confirmTimer: NodeJS.Timeout | null = null;
 
     const markOpened = () => {
-      if (opened) return;
-      opened = true;
+      if (isOpen) return;
+      isOpen = true;
       resolve(output);
     };
 
@@ -304,8 +313,8 @@ function openLimitedDownloadStream(client: Client, remotePath: string, download:
         endOutput();
         return;
       }
-      if (!opened) {
-        opened = true;
+      if (!isOpen) {
+        isOpen = true;
         output.destroy();
         reject(error);
         return;
@@ -313,6 +322,7 @@ function openLimitedDownloadStream(client: Client, remotePath: string, download:
       if (!outputEnded) output.destroy(error);
     };
 
+    // More bytes than requested: a REST transfer still running mid-file, or a server that did not honor RANG.
     const stopAtRangeEnd = () => {
       if (download.byteRange) download.onRangeOverrun();
       endOutput();
@@ -320,10 +330,7 @@ function openLimitedDownloadStream(client: Client, remotePath: string, download:
     };
 
     const awaitConfirmation = () => {
-      confirmTimer = setTimeout(() => {
-        endOutput();
-        closeClient();
-      }, TRANSFER_CONFIRM_GRACE_MS);
+      confirmTimer = setTimeout(closeClient, TRANSFER_CONFIRM_GRACE_MS);
       confirmTimer.unref?.();
     };
 
@@ -338,24 +345,26 @@ function openLimitedDownloadStream(client: Client, remotePath: string, download:
         const overrun = chunk.length > remaining;
         const slice = overrun ? chunk.subarray(0, remaining) : chunk;
         remaining -= slice.length;
-
-        const afterWrite = () => {
-          if (overrun) stopAtRangeEnd();
-          else if (remaining <= 0) awaitConfirmation();
-          callback();
-        };
-
         const flowing = output.write(slice);
         markOpened();
-        if (!flowing) {
-          client.ftp.dataSocket?.setTimeout(PAUSED_DATA_SOCKET_TIMEOUT_MS);
-          output.once("drain", () => {
-            client.ftp.dataSocket?.setTimeout(client.ftp.timeout);
-            afterWrite();
-          });
-        } else {
-          afterWrite();
+
+        if (remaining <= 0) {
+          // The response is complete; the FTP side only has to confirm the transfer, so stop applying backpressure.
+          endOutput();
+          if (overrun) stopAtRangeEnd();
+          else awaitConfirmation();
+          callback();
+          return;
         }
+        if (flowing) {
+          callback();
+          return;
+        }
+        client.ftp.dataSocket?.setTimeout(PAUSED_DATA_SOCKET_TIMEOUT_MS);
+        output.once("drain", () => {
+          client.ftp.dataSocket?.setTimeout(client.ftp.timeout);
+          callback();
+        });
       },
       destroy(error, callback) {
         if (error) {
@@ -366,23 +375,25 @@ function openLimitedDownloadStream(client: Client, remotePath: string, download:
       },
     });
 
+    // A consumer that goes away before the range is complete (a seek) ends the transfer; once every byte is out, the
+    // transfer is left to confirm so the login can be reused.
     output.once("close", () => {
-      if (!completed) closeClient();
+      if (remaining > 0) closeClient();
     });
     client.downloadTo(sink, remotePath, download.byteRange ? 0 : download.start).then(
       () => {
         stopConfirmTimer();
-        if (!closeRequested) {
-          completed = true;
-          download.onComplete();
-        }
+        if (!closeRequested) completed = true;
         endOutput();
+        settleDone(completed);
       },
       (error: unknown) => {
         stopConfirmTimer();
         closeClient();
         finishOutput(error instanceof Error ? error : new Error("FTP download failed"));
+        settleDone(false);
       },
     );
   });
+  return { opened, done };
 }

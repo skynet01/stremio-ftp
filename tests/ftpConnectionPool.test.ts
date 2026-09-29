@@ -346,6 +346,7 @@ function fakeFtp(options: {
     state.openClients.add(id);
     let idle = true;
     let closed = false;
+    let transferDone = Promise.resolve(true);
     return {
       list: async () => [],
       openReadStream: async (path: string, range: FtpReadStreamOptions) => {
@@ -360,8 +361,15 @@ function fakeFtp(options: {
         state.opened.push(`${id}:${path}`);
         const body = Buffer.alloc(range.end - range.start + 1, id);
         const stream = new Readable({ read() {} });
+        let settle!: (clean: boolean) => void;
+        transferDone = new Promise((resolve) => {
+          settle = resolve;
+        });
+        // A consumer that goes away first cuts the transfer off, like the basic-ftp client.
+        stream.once("close", () => settle(false));
         const finish = () => {
           if (options.reusableAfterTransfer !== false) idle = true;
+          settle(idle);
           stream.push(body);
           stream.push(null);
         };
@@ -370,6 +378,7 @@ function fakeFtp(options: {
         return stream;
       },
       isReusable: () => idle && !closed,
+      whenTransferDone: () => transferDone,
       close: async () => {
         if (closed) return;
         closed = true;

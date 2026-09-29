@@ -197,8 +197,9 @@ describe("createBasicFtpClientFactory byte ranges", () => {
     const client = await createBasicFtpClientFactory(5000)(ftpConfig(server.port), { playback: true });
 
     const first = await readSlowly(await client.openReadStream("/movie.mkv", { start: 1000, end: 99_999 }));
-    expect(client.isReusable?.()).toBe(true);
+    expect(await client.whenTransferDone?.()).toBe(true);
     const second = await readSlowly(await client.openReadStream("/trailer.mkv", { start: 0, end: 4095 }));
+    expect(await client.whenTransferDone?.()).toBe(true);
 
     expect(first.equals(movie.subarray(1000, 100_000))).toBe(true);
     expect(second.equals(trailer.subarray(0, 4096))).toBe(true);
@@ -206,6 +207,23 @@ describe("createBasicFtpClientFactory byte ranges", () => {
     expect(server.sessions[0].slice(4)).toEqual(["RANG 1000 99999", "EPSV", "RETR /movie.mkv", "RANG 0 4095", "EPSV", "RETR /trailer.mkv"]);
     expect(client.isReusable?.()).toBe(true);
     await client.close();
+  });
+
+  it("ends the stream as soon as the range is delivered, before the server confirms the transfer", async () => {
+    const file = patternedBuffer(64 * 1024);
+    const server = await startFakeFtpServer({ files: { "/video.mkv": file }, features: ["RANG STREAM"], confirmDelayMs: 400 });
+    const client = await createBasicFtpClientFactory(5000)(ftpConfig(server.port), { playback: true });
+
+    const startedAt = Date.now();
+    const chunks: Buffer[] = [];
+    for await (const chunk of await client.openReadStream("/video.mkv", { start: 0, end: 1023 })) chunks.push(chunk as Buffer);
+    const streamMs = Date.now() - startedAt;
+
+    expect(Buffer.concat(chunks).equals(file.subarray(0, 1024))).toBe(true);
+    // An HTTP response left open after its last byte makes keep-alive players queue their next request behind it.
+    expect(streamMs).toBeLessThan(300);
+    expect(await client.whenTransferDone?.()).toBe(true);
+    expect(client.isReusable?.()).toBe(true);
   });
 
   it("uses REST for open-ended ranges even when the server supports RANG", async () => {
@@ -218,7 +236,7 @@ describe("createBasicFtpClientFactory byte ranges", () => {
     expect(received.equals(file.subarray(5000))).toBe(true);
     expect(server.sessions[0]).not.toContain("RANG 5000 262143");
     expect(server.sessions[0]).toContain("REST 5000");
-    expect(client.isReusable?.()).toBe(true);
+    expect(await client.whenTransferDone?.()).toBe(true);
   });
 
   it("falls back to REST when the server rejects RANG and stops asking that host", async () => {
@@ -247,6 +265,7 @@ describe("createBasicFtpClientFactory byte ranges", () => {
     await readSlowly(await next.openReadStream("/video.mkv", { start: 0, end: 99 }));
 
     expect(received.equals(file.subarray(100, 4196))).toBe(true);
+    expect(await client.whenTransferDone?.()).toBe(false);
     expect(client.isReusable?.()).toBe(false);
     expect(server.sessions[1]).not.toContain("RANG 0 99");
   });
@@ -259,6 +278,7 @@ describe("createBasicFtpClientFactory byte ranges", () => {
     const received = await readSlowly(await client.openReadStream("/video.mkv", { start: 1024, end: file.length - 1 }));
 
     expect(received.equals(file.subarray(1024))).toBe(true);
+    expect(await client.whenTransferDone?.()).toBe(true);
     expect(client.isReusable?.()).toBe(true);
     expect(server.closedControlConnections).toBe(0);
   });
@@ -271,6 +291,7 @@ describe("createBasicFtpClientFactory byte ranges", () => {
     const received = await readSlowly(await client.openReadStream("/video.mkv", { start: 0, end: 9999 }));
 
     expect(received.equals(file.subarray(0, 10_000))).toBe(true);
+    expect(await client.whenTransferDone?.()).toBe(false);
     expect(client.isReusable?.()).toBe(false);
     await waitFor(() => server.closedControlConnections === 1);
   });
@@ -347,6 +368,8 @@ async function startFakeFtpServer(options: {
   tls?: boolean;
   // Refuse transfers (425) on control connections whose TLS session was resumed.
   refuseDataOnResumedTls?: boolean;
+  // Hold back the 226 after a transfer's data, like a slow control connection.
+  confirmDelayMs?: number;
 }): Promise<FakeFtpServer> {
   const sockets = new Set<Socket>();
   const passiveServers = new Set<Server>();
@@ -514,7 +537,7 @@ async function startFakeFtpServer(options: {
               socket.end(file.subarray(start, start + options.abortAfterBytes), () => reply("426 Transfer aborted"));
               return;
             }
-            socket.end(file.subarray(start, end), () => reply("226 Transfer complete"));
+            socket.end(file.subarray(start, end), () => setTimeout(() => reply("226 Transfer complete"), options.confirmDelayMs ?? 0));
           });
           return;
         }

@@ -24,6 +24,9 @@ export type FtpClient = {
   close(): Promise<void>;
   // True while the login is open and idle: no transfer is running and the last one completed cleanly.
   isReusable?(): boolean;
+  // Settles once the transfer behind the last read stream is over on the FTP side (which can be after the stream
+  // ended): true when it completed cleanly and the login is idle again, false when the client was closed.
+  whenTransferDone?(): Promise<boolean>;
 };
 
 export type FtpClientFactory = (config: FtpConfig) => Promise<FtpClient>;

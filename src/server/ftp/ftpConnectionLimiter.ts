@@ -215,21 +215,21 @@ function releaseClientSlotOnClose(client: ClaimableFtpClient, release: () => voi
         throw error;
       }
 
-      // The first of end/close/error decides: a login whose transfer completed cleanly goes back to its owner,
-      // anything else is closed so its slot is released.
-      let settled = false;
-      const afterStream = () => {
-        if (settled) return;
-        settled = true;
-        if (onReusable && !closing && client.isReusable?.()) {
-          onReusable();
-          return;
-        }
+      if (onReusable && client.whenTransferDone) {
+        // The FTP side decides, even while the player still reads buffered bytes: a login whose transfer completed
+        // cleanly goes back to its owner, anything else is closed so its slot is released.
+        void client.whenTransferDone().then((clean) => {
+          if (clean && !closing) onReusable();
+          else void closeAndRelease().catch(() => undefined);
+        });
+        return stream;
+      }
+      const releaseAfterStream = () => {
         void closeAndRelease().catch(() => undefined);
       };
-      stream.once("close", afterStream);
-      stream.once("end", afterStream);
-      stream.once("error", afterStream);
+      stream.once("close", releaseAfterStream);
+      stream.once("end", releaseAfterStream);
+      stream.once("error", releaseAfterStream);
       return stream;
     },
     close: closeAndRelease,

@@ -328,22 +328,33 @@ function limitedConnections(maxConnections: number, options: { finishStreams?: b
     const id = state.created;
     let closed = false;
     let idle = true;
+    let transferDone = Promise.resolve(true);
     return {
       list: async () => [],
       openReadStream: async (path: string) => {
         if (closed) throw new Error("Client is closed");
         state.opened.push(`${id}:${path}`);
         idle = false;
-        if (!options.finishStreams) return new Readable({ read() {} });
-        return new Readable({
-          read() {
-            idle = true;
-            this.push("0123456789");
-            this.push(null);
-          },
+        let settle!: (clean: boolean) => void;
+        transferDone = new Promise((resolve) => {
+          settle = resolve;
         });
+        const stream = options.finishStreams
+          ? new Readable({
+              read() {
+                idle = true;
+                settle(true);
+                this.push("0123456789");
+                this.push(null);
+              },
+            })
+          : new Readable({ read() {} });
+        // A consumer that goes away first cuts the transfer off, like the basic-ftp client.
+        stream.once("close", () => settle(false));
+        return stream;
       },
       isReusable: () => idle && !closed,
+      whenTransferDone: () => transferDone,
       close: async () => {
         if (closed) return;
         closed = true;

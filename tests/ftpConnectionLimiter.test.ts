@@ -461,6 +461,7 @@ function reusableClient(options: { onClose?: () => void; reusable?: boolean } = 
   return {
     ...fakeClient(options),
     isReusable: () => options.reusable ?? true,
+    whenTransferDone: async () => options.reusable ?? true,
   };
 }
 
