@@ -998,6 +998,151 @@ describe("MediaRepository scan writes", () => {
   });
 });
 
+describe("MediaRepository scan predicates", () => {
+  function captureQueryPlans(db: Database.Database) {
+    const prepare = db.prepare.bind(db);
+    const prepared: string[] = [];
+    vi.spyOn(db, "prepare").mockImplementation(((sql: string) => {
+      prepared.push(sql);
+      return prepare(sql);
+    }) as typeof db.prepare);
+    return (call: () => unknown) => {
+      prepared.length = 0;
+      call();
+      return prepared.map((sql) => {
+        const params = Array.from({ length: sql.match(/\?/g)?.length ?? 0 }, () => 1);
+        const rows = prepare(`explain query plan ${sql}`).all(...params) as Array<{ detail: string }>;
+        return rows.map((row) => row.detail).join(" | ");
+      });
+    };
+  }
+
+  it("uses the server and path indexes for scan write predicates", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const groupId = createSharedGroup(db, serverId, "plans");
+    const repo = new MediaRepository(db);
+    const plansFor = captureQueryPlans(db);
+    const seenAt = "2026-05-02T00:00:00.000Z";
+    const serverPathIndex = /\(profile_id=\? AND ftp_server_id=\? AND ftp_path(=\?|>\? AND ftp_path<\?)\)/;
+    const serverIndex = /\(profile_id=\? AND ftp_server_id=\?/;
+    const sharedPathIndex = /\(shared_index_group_id=\? AND ftp_path(=\?|>\? AND ftp_path<\?)\)/;
+
+    for (const plans of [
+      plansFor(() => repo.markSeenUnderRoot(profileId, "/Movies", seenAt, serverId)),
+      plansFor(() => repo.deleteStaleUnderRoot(profileId, "/Movies", seenAt, serverId)),
+    ]) {
+      expect(plans.length).toBeGreaterThan(0);
+      for (const plan of plans) expect(plan).toMatch(serverPathIndex);
+      expect(plans.join("\n")).toContain("ftp_path>? AND ftp_path<?");
+    }
+    for (const plans of [
+      plansFor(() => repo.markSharedSeenUnderRoot(groupId, "/Movies", seenAt)),
+      plansFor(() => repo.deleteSharedStaleUnderRoot(groupId, "/Movies", seenAt)),
+    ]) {
+      expect(plans.length).toBeGreaterThan(0);
+      for (const plan of plans) expect(plan).toMatch(sharedPathIndex);
+      expect(plans.join("\n")).toContain("ftp_path>? AND ftp_path<?");
+    }
+    for (const plans of [
+      plansFor(() => repo.markSeenUnderRoot(profileId, "/", seenAt, serverId)),
+      plansFor(() => repo.deleteStaleUnderRoot(profileId, "/", seenAt, serverId)),
+      plansFor(() => repo.countDirectorySnapshots(profileId, serverId)),
+      plansFor(() => repo.clearDirectorySnapshots(profileId, serverId)),
+    ]) {
+      expect(plans.length).toBeGreaterThan(0);
+      for (const plan of plans) expect(plan).toMatch(serverIndex);
+    }
+    const snapshotPlans = plansFor(() => repo.directorySnapshotMatchesFingerprint(profileId, serverId, "/Movies", 1, "f"));
+    expect(snapshotPlans).toEqual([expect.stringMatching(/\(profile_id=\? AND ftp_server_id=\? AND dir_path=\?\)/)]);
+  });
+
+  it("matches only the root itself and paths below it, per server or across the profile", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const otherServerId = createServer(db, profileId);
+    const groupId = createSharedGroup(db, serverId, "prefix");
+    const repo = new MediaRepository(db);
+    const oldSeen = "2026-05-01T00:00:00.000Z";
+    const newSeen = "2026-05-02T00:00:00.000Z";
+    const paths = [
+      "/Movies",
+      "/Movies/a.mkv",
+      "/Movies/Sub/b.mkv",
+      "/Movies/é.mkv",
+      "/Movies 4K/c.mkv",
+      "/Movies-Old/d.mkv",
+      "/Movies.Extra/e.mkv",
+      "/Movies0/f.mkv",
+      "/MoviesZ/g.mkv",
+      "/Moviesé/h.mkv",
+      "/Movie/i.mkv",
+      "/Other/j.mkv",
+    ];
+    const reset = () => {
+      for (const path of paths) {
+        repo.upsertParsedFile(profileId, { ...scanFile(path, oldSeen), ftpServerId: serverId });
+        repo.upsertSharedParsedFile(groupId, scanFile(path, oldSeen));
+      }
+      repo.upsertParsedFile(profileId, { ...scanFile("/Movies/other-server.mkv", oldSeen), ftpServerId: otherServerId });
+    };
+    const seenPaths = (table: "media_files" | "shared_media_files") =>
+      (db.prepare(`select ftp_path from ${table} where last_seen_at = ? order by ftp_path`).all(newSeen) as Array<{ ftp_path: string }>).map(
+        (row) => row.ftp_path,
+      );
+    const underMovies = ["/Movies", "/Movies/Sub/b.mkv", "/Movies/a.mkv", "/Movies/é.mkv"];
+
+    reset();
+    expect(repo.markSeenUnderRoot(profileId, "/Movies/", newSeen, serverId)).toBe(4);
+    expect(seenPaths("media_files")).toEqual(underMovies);
+    expect(repo.deleteStaleUnderRoot(profileId, "/Movies", newSeen, serverId)).toBe(0);
+    expect(repo.deleteStaleUnderRoot(profileId, "/Movies", newSeen)).toBe(1);
+    expect(repo.countForServer(profileId, otherServerId)).toBe(0);
+
+    db.prepare("delete from media_files").run();
+    reset();
+    expect(repo.markSeenUnderRoot(profileId, "Movies", newSeen)).toBe(5);
+    expect(repo.deleteStaleUnderRoot(profileId, "/", newSeen, serverId)).toBe(paths.length - 4);
+    expect(repo.countForServer(profileId, serverId)).toBe(4);
+    expect(repo.countForServer(profileId, otherServerId)).toBe(1);
+    expect(repo.markSeenUnderRoot(profileId, "/", "2026-05-03T00:00:00.000Z", serverId)).toBe(4);
+    expect(repo.markSeenUnderRoot(profileId, "/", "2026-05-03T00:00:00.000Z")).toBe(5);
+
+    expect(repo.markSharedSeenUnderRoot(groupId, "/Movies", newSeen)).toBe(4);
+    expect(seenPaths("shared_media_files")).toEqual(underMovies);
+    expect(repo.deleteSharedStaleUnderRoot(groupId, "/Movies", newSeen)).toBe(0);
+    expect(repo.deleteSharedStaleUnderRoot(groupId, "/", newSeen)).toBe(paths.length - 4);
+    expect(repo.countForSharedIndexGroup(groupId)).toBe(4);
+  });
+
+  it("scopes directory snapshots to a server or the whole profile", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const otherServerId = createServer(db, profileId);
+    const repo = new MediaRepository(db);
+    const snapshot = { dirPath: "/Movies/", entryCount: 2, fingerprint: "f", lastSeenAt: "2026-05-02T00:00:00.000Z" };
+    repo.saveDirectorySnapshot(profileId, { ...snapshot, ftpServerId: serverId });
+    repo.saveDirectorySnapshot(profileId, { ...snapshot, dirPath: "/TV", ftpServerId: otherServerId });
+
+    expect(repo.directorySnapshotMatchesFingerprint(profileId, serverId, "/Movies", 2, "f")).toBe(true);
+    expect(repo.directorySnapshotMatchesFingerprint(profileId, serverId, "/Movies", 3, "f")).toBe(false);
+    expect(repo.directorySnapshotMatchesFingerprint(profileId, otherServerId, "/Movies", 2, "f")).toBe(false);
+    expect(repo.directorySnapshotMatchesFingerprint(profileId, null, "/Movies", 2, "f")).toBe(true);
+    expect(repo.countDirectorySnapshots(profileId, serverId)).toBe(1);
+    expect(repo.countDirectorySnapshots(profileId)).toBe(2);
+    expect(repo.clearDirectorySnapshots(profileId, otherServerId)).toBe(1);
+    expect(repo.countDirectorySnapshots(profileId)).toBe(1);
+    expect(repo.clearDirectorySnapshots(profileId)).toBe(1);
+    expect(repo.countDirectorySnapshots(profileId)).toBe(0);
+  });
+});
+
 describe("MediaRepository shared index count queries", () => {
   function sharedMovie(title: string, year: number) {
     const filename = `${titleCase(title).replace(/ /g, ".")}.${year}.mkv`;

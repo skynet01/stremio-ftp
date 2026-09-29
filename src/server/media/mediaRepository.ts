@@ -281,46 +281,16 @@ export class MediaRepository {
   }
 
   deleteStaleUnderRoot(profileId: number, rootPath: string, seenSince: string, ftpServerId?: number | null) {
-    const root = normalizeRootPath(rootPath);
-    if (root === "/") {
-      return this.db
-        .prepare("delete from media_files where profile_id = ? and (? is null or ftp_server_id = ?) and last_seen_at < ?")
-        .run(profileId, ftpServerId ?? null, ftpServerId ?? null, seenSince).changes;
-    }
-
-    const rootWithSlash = `${root}/`;
-    return this.db
-      .prepare(
-        `
-        delete from media_files
-        where profile_id = ?
-          and (? is null or ftp_server_id = ?)
-          and last_seen_at < ?
-          and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
-      `,
-      )
-      .run(profileId, ftpServerId ?? null, ftpServerId ?? null, seenSince, root, rootWithSlash.length, rootWithSlash).changes;
+    const scope = scanServerScope(profileId, ftpServerId);
+    return this.runUnderRoot(`delete from media_files where ${scope.sql} and last_seen_at < ?`, [...scope.params, seenSince], rootPath);
   }
 
   deleteSharedStaleUnderRoot(sharedIndexGroupId: number, rootPath: string, seenSince: string) {
-    const root = normalizeRootPath(rootPath);
-    if (root === "/") {
-      return this.db
-        .prepare("delete from shared_media_files where shared_index_group_id = ? and last_seen_at < ?")
-        .run(sharedIndexGroupId, seenSince).changes;
-    }
-
-    const rootWithSlash = `${root}/`;
-    return this.db
-      .prepare(
-        `
-        delete from shared_media_files
-        where shared_index_group_id = ?
-          and last_seen_at < ?
-          and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
-      `,
-      )
-      .run(sharedIndexGroupId, seenSince, root, rootWithSlash.length, rootWithSlash).changes;
+    return this.runUnderRoot(
+      "delete from shared_media_files where shared_index_group_id = ? and last_seen_at < ?",
+      [sharedIndexGroupId, seenSince],
+      rootPath,
+    );
   }
 
   findEpisode(profileId: number, normalizedTitle: string, season: number, episode: number): MediaMatch[] {
@@ -824,20 +794,18 @@ export class MediaRepository {
     entryCount: number,
     fingerprint: string,
   ) {
+    const scope = scanServerScope(profileId, ftpServerId);
     const row = this.scanStatement(
       `
       select id
       from scan_directory_snapshots
-      where profile_id = ?
-        and (? is null or ftp_server_id = ?)
+      where ${scope.sql}
         and dir_path = ?
         and entry_count = ?
         and fingerprint = ?
       limit 1
     `,
-    ).get(profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath), entryCount, fingerprint) as
-      | { id: number }
-      | undefined;
+    ).get(...scope.params, normalizeRootPath(dirPath), entryCount, fingerprint) as { id: number } | undefined;
     return Boolean(row);
   }
 
@@ -940,9 +908,8 @@ export class MediaRepository {
   }
 
   clearDirectorySnapshots(profileId: number, ftpServerId?: number | null) {
-    return this.db
-      .prepare("delete from scan_directory_snapshots where profile_id = ? and (? is null or ftp_server_id = ?)")
-      .run(profileId, ftpServerId ?? null, ftpServerId ?? null).changes;
+    const scope = scanServerScope(profileId, ftpServerId);
+    return this.scanStatement(`delete from scan_directory_snapshots where ${scope.sql}`).run(...scope.params).changes;
   }
 
   clearSharedDirectorySnapshots(sharedIndexGroupId: number) {
@@ -950,9 +917,10 @@ export class MediaRepository {
   }
 
   countDirectorySnapshots(profileId: number, ftpServerId?: number | null) {
-    const row = this.db
-      .prepare("select count(*) as count from scan_directory_snapshots where profile_id = ? and (? is null or ftp_server_id = ?)")
-      .get(profileId, ftpServerId ?? null, ftpServerId ?? null) as { count: number };
+    const scope = scanServerScope(profileId, ftpServerId);
+    const row = this.scanStatement(`select count(*) as count from scan_directory_snapshots where ${scope.sql}`).get(...scope.params) as {
+      count: number;
+    };
     return row.count;
   }
 
@@ -964,40 +932,22 @@ export class MediaRepository {
   }
 
   markSeenUnderRoot(profileId: number, rootPath: string, seenAt: string, ftpServerId?: number | null) {
-    const root = normalizeRootPath(rootPath);
-    if (root === "/") {
-      return this.scanStatement("update media_files set last_seen_at = ? where profile_id = ? and (? is null or ftp_server_id = ?)")
-        .run(seenAt, profileId, ftpServerId ?? null, ftpServerId ?? null).changes;
-    }
-
-    const rootWithSlash = `${root}/`;
-    return this.scanStatement(
-      `
-      update media_files
-      set last_seen_at = ?
-      where profile_id = ?
-        and (? is null or ftp_server_id = ?)
-        and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
-    `,
-    ).run(seenAt, profileId, ftpServerId ?? null, ftpServerId ?? null, root, rootWithSlash.length, rootWithSlash).changes;
+    const scope = scanServerScope(profileId, ftpServerId);
+    return this.runUnderRoot(`update media_files set last_seen_at = ? where ${scope.sql}`, [seenAt, ...scope.params], rootPath);
   }
 
   markSharedSeenUnderRoot(sharedIndexGroupId: number, rootPath: string, seenAt: string) {
-    const root = normalizeRootPath(rootPath);
-    if (root === "/") {
-      return this.scanStatement("update shared_media_files set last_seen_at = ? where shared_index_group_id = ?")
-        .run(seenAt, sharedIndexGroupId).changes;
-    }
+    return this.runUnderRoot("update shared_media_files set last_seen_at = ? where shared_index_group_id = ?", [seenAt, sharedIndexGroupId], rootPath);
+  }
 
-    const rootWithSlash = `${root}/`;
-    return this.scanStatement(
-      `
-      update shared_media_files
-      set last_seen_at = ?
-      where shared_index_group_id = ?
-        and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
-    `,
-    ).run(seenAt, sharedIndexGroupId, root, rootWithSlash.length, rootWithSlash).changes;
+  private runUnderRoot(sql: string, params: unknown[], rootPath: string) {
+    const root = normalizeRootPath(rootPath);
+    if (root === "/") return this.scanStatement(sql).run(...params).changes;
+    return this.transaction(
+      () =>
+        this.scanStatement(`${sql} and ftp_path = ?`).run(...params, root).changes +
+        this.scanStatement(`${sql} and ftp_path >= ? and ftp_path < ?`).run(...params, `${root}/`, `${root}0`).changes,
+    );
   }
 
   catalogItems(
@@ -1932,4 +1882,10 @@ function normalizeRootPath(path: string) {
   const normalized = path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/+$/, "");
   if (!normalized) return "/";
   return normalized.startsWith("/") ? normalized : `/${normalized}`;
+}
+
+function scanServerScope(profileId: number, ftpServerId: number | null | undefined) {
+  return ftpServerId === undefined || ftpServerId === null
+    ? { sql: "profile_id = ?", params: [profileId] }
+    : { sql: "profile_id = ? and ftp_server_id = ?", params: [profileId, ftpServerId] };
 }
