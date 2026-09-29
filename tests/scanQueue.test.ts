@@ -687,6 +687,40 @@ describe("ScanQueue", () => {
     }
   });
 
+  it("throttles scan progress writes and flushes the final traversal state", async () => {
+    const files = Array.from({ length: 2000 }, (_, index) => ({
+      name: `Movie.${index}.2020.mkv`,
+      path: `/Movies/Movie.${index}.2020.mkv`,
+      type: "file" as const,
+      size: 1000,
+    }));
+    const { db, profileService, queue } = createHarness(async () => ({
+      list: async (path) => (path === "/" ? [{ name: "Movies", path: "/Movies", type: "directory" }] : files),
+      openReadStream: async () => Readable.from("not used"),
+      close: async () => undefined,
+    }));
+    db.exec(`
+      create temp table progress_writes (id integer primary key);
+      create temp trigger count_progress_writes after update of entries_seen on scan_jobs
+      begin
+        insert into progress_writes (id) values (null);
+      end;
+    `);
+    const profileId = await createProfileWithFtp(profileService);
+
+    queue.enqueueProfileScan(profileId, "manual");
+    const finished = await waitForStatus(queue, profileId, "succeeded");
+    const writes = (db.prepare("select count(*) as count from progress_writes").get() as { count: number }).count;
+
+    expect(writes).toBeGreaterThan(0);
+    expect(writes).toBeLessThan(20);
+    expect(finished.entriesSeen).toBe(2001);
+    expect(finished.directoriesSeen).toBe(2);
+    expect(finished.filesSeen).toBe(2000);
+    expect(finished.progressPercent).toBe(100);
+    expect(finished.message).toBe("Indexed 2000 media files.");
+  });
+
   it("persists scan progress and media count", async () => {
     const { profileService, queue } = createHarness(async () => ({
       list: async (path) =>

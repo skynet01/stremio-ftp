@@ -11,6 +11,7 @@ const MAX_ESTIMATED_SECONDS_REMAINING = 24 * 60 * 60;
 const SCAN_JOB_ROW_ERROR = "Invalid scan job row";
 const ENRICHMENT_RETRY_DELAY_MS = 5 * 60 * 1000;
 const ENRICHMENT_BATCH_LIMIT = 5000;
+const PROGRESS_WRITE_INTERVAL_MS = 250;
 
 export type ScanTrigger = "manual" | "scheduled";
 export type ScanJobStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
@@ -68,6 +69,7 @@ export class ScanQueue {
   private activeCount = 0;
   private readonly running = new Set<string>();
   private readonly activeControllers = new Map<number, AbortController>();
+  private readonly statements = new Map<string, Database.Statement>();
 
   constructor(
     private readonly config: AppConfig,
@@ -391,6 +393,7 @@ export class ScanQueue {
 
     let filesSeen = 0;
     const startedAt = Date.now();
+    const progressWriter = this.progressWriter(jobId, startedAt, progressBaselineItems, scanMode);
     const session = new FtpCrawlSession(this.ftpClientFactory, ftpConfig, signal);
     try {
       for (const rootPath of ftpConfig.roots) {
@@ -408,13 +411,14 @@ export class ScanQueue {
             contentTypes: scanConfig.customization.catalogContentTypes,
             libraryLayout: scanConfig.customization.libraryLayout,
           },
-          onProgress: (progress) => this.saveProgress(jobId, startedAt, progress, progressBaselineItems, scanMode),
+          onProgress: (progress) => progressWriter.report(progress),
           signal,
         });
         filesSeen += result.filesSeen;
       }
     } finally {
       await session.close();
+      progressWriter.flush();
     }
 
     throwIfScanCancelled(signal);
@@ -457,6 +461,7 @@ export class ScanQueue {
 
     let filesSeen = 0;
     const startedAt = Date.now();
+    const progressWriter = this.progressWriter(jobId, startedAt, progressBaselineItems, scanMode);
     const session = new FtpCrawlSession(this.ftpClientFactory, ftpConfig, signal);
     try {
       for (const rootPath of ftpConfig.roots) {
@@ -473,13 +478,14 @@ export class ScanQueue {
             contentTypes: customization.catalogContentTypes,
             libraryLayout: customization.libraryLayout,
           },
-          onProgress: (progress) => this.saveProgress(jobId, startedAt, progress, progressBaselineItems, scanMode),
+          onProgress: (progress) => progressWriter.report(progress),
           signal,
         });
         filesSeen += result.filesSeen;
       }
     } finally {
       await session.close();
+      progressWriter.flush();
     }
 
     throwIfScanCancelled(signal);
@@ -623,18 +629,23 @@ export class ScanQueue {
   private saveEnrichmentProgress(jobId: number, processed: number, total: number, candidate: CatalogEnrichmentCandidate | null) {
     const progressPercent = total > 0 ? Math.min(99, 95 + Math.floor((processed / total) * 4)) : 95;
     const title = candidate?.parsedTitle ? ` - ${candidate.parsedTitle}` : "";
-    this.db
-      .prepare(
-        `
-        update scan_jobs
-        set progress_percent = ?,
-            estimated_seconds_remaining = null,
-            current_path = null,
-            message = ?
-        where id = ?
-      `,
-      )
-      .run(progressPercent, `Enriching TMDB metadata: ${processed}/${total}${title}.`, jobId);
+    this.statement(
+      `
+      update scan_jobs
+      set progress_percent = ?,
+          estimated_seconds_remaining = null,
+          current_path = null,
+          message = ?
+      where id = ?
+    `,
+    ).run(progressPercent, `Enriching TMDB metadata: ${processed}/${total}${title}.`, jobId);
+  }
+
+  private progressWriter(jobId: number, startedAt: number, baselineItems: number | null, scanMode: ScanMode) {
+    return new ThrottledProgressWriter(
+      (progress) => this.saveProgress(jobId, startedAt, progress, baselineItems, scanMode),
+      (error) => logScanError(jobId, "Unable to save scan progress", error),
+    );
   }
 
   private saveProgress(jobId: number, startedAt: number, progress: CrawlProgress, baselineItems: number | null, scanMode: ScanMode) {
@@ -648,30 +659,37 @@ export class ScanQueue {
     const estimatedSecondsRemaining =
       entriesRemaining > 0 ? Math.max(1, Math.min(MAX_ESTIMATED_SECONDS_REMAINING, Math.round(entriesRemaining / entriesPerSecond))) : null;
 
-    this.db
-      .prepare(
-        `
-        update scan_jobs
-        set progress_percent = ?,
-            entries_seen = ?,
-            files_seen = ?,
-            directories_seen = ?,
-            current_path = ?,
-            estimated_seconds_remaining = ?,
-            message = ?
-        where id = ?
-      `,
-      )
-      .run(
-        progressPercent,
-        progress.entriesSeen,
-        progress.filesSeen,
-        progress.directoriesSeen,
-        progress.currentPath,
-        estimatedSecondsRemaining,
-        scanProgressMessage(progress, scanMode),
-        jobId,
-      );
+    this.statement(
+      `
+      update scan_jobs
+      set progress_percent = ?,
+          entries_seen = ?,
+          files_seen = ?,
+          directories_seen = ?,
+          current_path = ?,
+          estimated_seconds_remaining = ?,
+          message = ?
+      where id = ?
+    `,
+    ).run(
+      progressPercent,
+      progress.entriesSeen,
+      progress.filesSeen,
+      progress.directoriesSeen,
+      progress.currentPath,
+      estimatedSecondsRemaining,
+      scanProgressMessage(progress, scanMode),
+      jobId,
+    );
+  }
+
+  private statement(sql: string) {
+    let statement = this.statements.get(sql);
+    if (!statement) {
+      statement = this.db.prepare(sql);
+      this.statements.set(sql, statement);
+    }
+    return statement;
   }
 
   private failJob(jobId: number, profileId: number, ftpServerId: number, scanMode: ScanMode, error: string, label: "Scan" | "Shared scan") {
@@ -920,6 +938,47 @@ export class ScanQueue {
       `,
       )
       .run(now);
+  }
+}
+
+class ThrottledProgressWriter {
+  private pending: CrawlProgress | null = null;
+  private lastWriteAt = 0;
+  private timer: NodeJS.Timeout | null = null;
+
+  constructor(
+    private readonly write: (progress: CrawlProgress) => void,
+    private readonly onTimerError: (error: unknown) => void,
+  ) {}
+
+  report(progress: CrawlProgress) {
+    this.pending = progress;
+    const waitMs = this.lastWriteAt + PROGRESS_WRITE_INTERVAL_MS - Date.now();
+    if (waitMs <= 0) {
+      this.flush();
+      return;
+    }
+    if (this.timer) return;
+    this.timer = setTimeout(() => {
+      try {
+        this.flush();
+      } catch (error) {
+        this.onTimerError(error);
+      }
+    }, waitMs);
+    this.timer.unref();
+  }
+
+  flush() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    const progress = this.pending;
+    if (!progress) return;
+    this.pending = null;
+    this.lastWriteAt = Date.now();
+    this.write(progress);
   }
 }
 
