@@ -42,6 +42,7 @@ type ConditionalNode = { condition: string[]; whenTrue: TemplateNode[]; whenFals
 const REMOVE_LINE = "\u0000REMOVE_LINE\u0000";
 const CONDITIONALS = new Set(["istrue", "isfalse", "exists"]);
 const OPERATORS = new Set(["and", "or", "xor"]);
+const WHITESPACE = /\s/;
 const COMPILED_TEMPLATE_CACHE_LIMIT = 128;
 const compiledTemplates = new Map<string, TemplateNode[]>();
 
@@ -532,7 +533,17 @@ function looksLikePath(value: string) {
 }
 
 function normalizeName(value: string): string {
-  return removeMarkedLines(value).replace(/[ \t]+/g, " ").replace(/\s+-\s+$/g, "").trim();
+  return stripTrailingSeparator(removeMarkedLines(value).replace(/[ \t]+/g, " ")).trim();
+}
+
+// Same result as value.replace(/\s+-\s+$/, ""), which backtracks quadratically on long whitespace runs.
+function stripTrailingSeparator(value: string) {
+  let end = value.length;
+  while (end > 0 && WHITESPACE.test(value[end - 1])) end -= 1;
+  if (end === value.length || value[end - 1] !== "-") return value;
+  let start = end - 1;
+  while (start > 0 && WHITESPACE.test(value[start - 1])) start -= 1;
+  return start === end - 1 ? value : value.slice(0, start);
 }
 
 function normalizeDescription(value: string): string {

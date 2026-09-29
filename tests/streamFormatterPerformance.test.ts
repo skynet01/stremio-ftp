@@ -62,6 +62,18 @@ describe("stream formatter performance", () => {
     expect(duration).toBeLessThan(200);
   });
 
+  it("normalizes names with long whitespace runs in linear time", () => {
+    const template = `a${"\n".repeat(TEMPLATE_CAP - 2)}b`;
+    let rendered = "";
+
+    const duration = elapsed(() => {
+      for (let round = 0; round < 20; round += 1) rendered = renderStreamTemplate(template, context, "name");
+    });
+
+    expect(rendered).toBe(template);
+    expect(duration).toBeLessThan(300);
+  });
+
   it("renders a long realistic template repeatedly within budget", () => {
     const section =
       "{stream.title::exists::and::stream.library::isfalse[\"✎  {stream.title::title::truncate(35)}\"||\"\"]}{stream.visualTags::exists[\" {stream.visualTags::sort::join(' · ')}\"||\"\"]}{stream.size::>0[\" {stream.size::sbytes}\"||\"\"]}\n";

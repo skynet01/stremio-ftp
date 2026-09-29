@@ -366,6 +366,13 @@ describe("stream formatter characterization", () => {
       ),
     ).toEqual(["4K\nꜱᴇʀᴠᴇʀ 2 - FTP", "FHD ⧉ HALF SBS\nꜱᴇʀᴠᴇʀ 2 - FTP"]);
     expect(renderBoth("{stream.3dtype} / {stream.threeDType}", "name")).toEqual(["/", "Half SBS / Half SBS"]);
+    expect(renderBoth("{stream.title} -\n", "name")).toEqual(["The Matrix -", "the office us -"]);
+    expect(renderBoth("{stream.title}  -{tools.newLine}", "name")).toEqual(["The Matrix", "the office us"]);
+    expect(renderBoth("{stream.title} -{stream.year}", "name")).toEqual(["The Matrix -1999", "the office us -"]);
+    expect(renderBoth("{stream.title}- ", "name")).toEqual(["The Matrix-", "the office us-"]);
+    expect(renderBoth(" - x - \n - ", "name")).toEqual(["- x - \n -", "- x - \n -"]);
+    expect(renderBoth(" - x - \n - {tools.newLine}", "name")).toEqual(["- x -", "- x -"]);
+    expect(renderBoth("x\n-{tools.newLine}", "name")).toEqual(["x", "x"]);
   });
 
   it("tolerates whitespace, unknown paths, and unknown modifiers", () => {
