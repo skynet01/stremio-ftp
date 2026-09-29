@@ -1,10 +1,11 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { isIP } from "node:net";
 import { z } from "zod";
-import { splitFtpHost } from "../../shared/ftpHost.js";
+import { isPrivateNetworkHost, splitFtpHost } from "../../shared/ftpHost.js";
 import { MAX_STREAM_FORMATTER_TEMPLATE_LENGTH } from "../../shared/streamFormatter.js";
 import type { AppConfig } from "../config.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
+import { PRIVATE_FTP_HOST_MESSAGE } from "../ftp/privateHostGuard.js";
 import { countryCodeFromRequest } from "../http/requestMetadata.js";
 import type { MediaRepository } from "../media/mediaRepository.js";
 import type { ScanQueue } from "../scanner/scanQueue.js";
@@ -113,6 +114,7 @@ export function profileRoutes(
   const router = Router();
   const failedUnlocks = createFailedUnlockLimiter(config);
   const rateLimitProfiles = profileRateLimiter(config.profileRateLimitWindowMs, config.profileRateLimitMax);
+  const blocksHost = (host: string) => Boolean(config.blockPrivateFtpHosts) && isPrivateNetworkHost(host);
   const isAdminBrowserUid = (browserUid: string) => service.isAdminBrowserUid(browserUid, config.adminBrowserUids);
   const enforceDeliveryModeFor = <T extends { streamDeliveryMode?: "proxy" | "direct" }>(browserUid: string, value: T): T =>
     config.proxyStreamsDisabled && !isAdminBrowserUid(browserUid) ? { ...value, streamDeliveryMode: "direct" } : value;
@@ -208,6 +210,7 @@ export function profileRoutes(
     "/profile/ftp",
     rateLimitProfiles,
     withProfile(saveFtpSchema, "Invalid FTP settings request", ({ res, data, profileId }) => {
+      if (blocksHost(data.ftpConfig.host)) return res.status(400).json({ error: PRIVATE_FTP_HOST_MESSAGE });
       const existingConfig = service.getFtpConfig(profileId);
       const ftpConfig = ftpConfigWithStoredPassword(data.ftpConfig, existingConfig);
       service.saveFtpConfig(profileId, ftpConfig);
@@ -273,6 +276,7 @@ export function profileRoutes(
     "/profile/servers/save",
     rateLimitProfiles,
     withProfile(saveServerSchema, "Invalid server save request", ({ res, data, profileId }) => {
+      if (blocksHost(data.ftpConfig.host)) return res.status(400).json({ error: PRIVATE_FTP_HOST_MESSAGE });
       const existingConfig = service.getFtpServerConfig(profileId, data.serverId);
       const ftpConfig = ftpConfigWithStoredPassword(data.ftpConfig, existingConfig);
       let server: FtpServer;

@@ -18,13 +18,14 @@ export function isPrivateNetworkHost(value: string) {
   const host = splitFtpHost(value).host.toLowerCase();
   if (!host) return false;
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
-  const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host)?.slice(1).map(Number);
+  const octets = /^(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host)?.slice(1).map(Number);
   if (octets) {
     if (octets.some((octet) => octet > 255)) return false;
     const [a, b] = octets;
-    return a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
   }
-  if (/^[0-9a-f:]+$/.test(host) && host.includes(":")) return host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host);
+  if (/^[0-9a-f:]+$/.test(host) && host.includes(":")) return host === "::" || host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host);
   return false;
 }
 

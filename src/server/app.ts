@@ -9,6 +9,7 @@ import type { AppConfig } from "./config.js";
 import { openDatabase } from "./db/database.js";
 import { createBasicFtpClientFactory } from "./ftp/basicFtpClient.js";
 import { createFtpConnectionPool } from "./ftp/ftpConnectionPool.js";
+import { blockPrivateFtpHosts } from "./ftp/privateHostGuard.js";
 import { limitFtpClientFactoryByKey } from "./ftp/ftpConnectionLimiter.js";
 import type { FtpClientFactory } from "./ftp/ftpTypes.js";
 import { redactSecrets } from "./logging/redact.js";
@@ -53,7 +54,8 @@ export function createApp(
 
   const profileService = new ProfileService(db, config.encryptionKey);
   const mediaRepository = new MediaRepository(db);
-  const baseFtpClientFactory = options.ftpClientFactory ?? createBasicFtpClientFactory(config.ftpTimeoutMs);
+  const loginFtpClientFactory = options.ftpClientFactory ?? createBasicFtpClientFactory(config.ftpTimeoutMs);
+  const baseFtpClientFactory = config.blockPrivateFtpHosts ? blockPrivateFtpHosts(loginFtpClientFactory) : loginFtpClientFactory;
   const ftpClientFactory = limitFtpClientFactoryByKey(baseFtpClientFactory, config.ftpMaxConnections);
   // Configs built without loadConfig (tests) leave pooling and the refused-login cache off.
   const ftpPool = createFtpConnectionPool(ftpClientFactory, {

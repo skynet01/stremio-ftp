@@ -541,6 +541,45 @@ describe("profile routes", () => {
       .expect(200);
   });
 
+  it("refuses private FTP hosts when the server blocks them", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const ftpClientFactory = vi.fn(async () => ({
+      list: async () => [],
+      openReadStream: async () => Readable.from("not used"),
+      close: async () => undefined,
+    }));
+    const app = createApp({ ...config(), blockPrivateFtpHosts: true }, db, { ftpClientFactory });
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+    const ftpConfig = {
+      host: "ftp://192.168.68.72:13017",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/Movies"],
+    };
+
+    const saved = await request(app)
+      .post("/api/profile/ftp")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", ftpConfig })
+      .expect(400);
+    expect(saved.body.error).toMatch(/Private network addresses are not allowed/);
+    const tested = await request(app)
+      .post("/api/profile/ftp/test")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase", ftpConfig })
+      .expect(400);
+    expect(tested.body.error).toMatch(/Private network addresses are not allowed/);
+    expect(ftpClientFactory).not.toHaveBeenCalled();
+  });
+
   it("saves FTP settings and enqueues a background media index refresh", async () => {
     const db = new Database(":memory:");
     migrate(db);

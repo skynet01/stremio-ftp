@@ -28,6 +28,8 @@ export type AppConfig = {
   scanTransientRetryDelayMs: number;
   maxFtpServersPerProfile: number;
   proxyStreamsDisabled: boolean;
+  // Hosted instances refuse FTP servers on private networks; self-hosted ones usually need them.
+  blockPrivateFtpHosts?: boolean;
   adminBrowserUids: ReadonlySet<string>;
   emptyProfileCleanupDays: number;
   emptyProfileCleanupIntervalMs: number;
@@ -120,6 +122,7 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     scanTransientRetryDelayMs: numberValue(env, "SCAN_TRANSIENT_RETRY_DELAY_MS", 300000),
     maxFtpServersPerProfile: nonNegativeNumberValue(env, "MAX_FTP_SERVERS_PER_PROFILE", 0),
     proxyStreamsDisabled: booleanValue(env, "DISABLE_PROXY_STREAMS", false),
+    blockPrivateFtpHosts: booleanValue(env, "BLOCK_PRIVATE_FTP_HOSTS", false),
     adminBrowserUids: uidSetValue(env, "ADMIN_BROWSER_UIDS"),
     emptyProfileCleanupDays: nonNegativeNumberValue(env, "EMPTY_PROFILE_CLEANUP_DAYS", 7),
     emptyProfileCleanupIntervalMs: numberValue(env, "EMPTY_PROFILE_CLEANUP_INTERVAL_MS", 7 * 24 * 60 * 60 * 1000),
