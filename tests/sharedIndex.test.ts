@@ -1,7 +1,9 @@
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { migrate } from "../src/server/db/schema";
+import { MediaRepository } from "../src/server/media/mediaRepository";
 import { ProfileService } from "../src/server/profiles/profileService";
+import { createFtpProxyResolver } from "../src/server/proxy/ftpProxyResolver";
 import { canonicalRootPaths, hashSharedIndexKey, serverMatchesSharedIndexGroup } from "../src/server/shared/sharedIndex";
 
 const key = "0123456789abcdef0123456789abcdef";
@@ -294,5 +296,62 @@ describe("shared index groups", () => {
     expect(() => service.deleteFtpServer(profileId, serverId)).toThrow(/master source/);
 
     expect(service.getSharedIndexGroup(created.group.id)?.masterProfileFtpServerId).toBe(serverId);
+  });
+
+  it("reads shared group identity without computing catalog counts", async () => {
+    const { service, profileId, serverId } = await serviceWithServer();
+    const created = service.createSharedIndexGroupFromServer(profileId, serverId, { name: "Sputnik Main", keyHint: "sputnik-main" });
+    const counts = vi.spyOn(ProfileService.prototype as unknown as { sharedIndexGroupCatalogItemCounts: () => unknown }, "sharedIndexGroupCatalogItemCounts");
+
+    const identity = service.getSharedIndexGroupIdentity(created.group.id);
+
+    expect(identity).toMatchObject({
+      id: created.group.id,
+      name: "Sputnik Main",
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      tlsMode: "explicit",
+      allowInvalidCertificate: false,
+      rootPaths: ["/media", "/TV"],
+      enabled: true,
+      masterProfileFtpServerId: serverId,
+      indexedMediaCount: 0,
+      lastIndexedAt: null,
+    });
+    expect(identity).not.toHaveProperty("catalogItemCounts");
+    expect(service.getSharedIndexGroupIdentity(9999)).toBeNull();
+    expect(counts).not.toHaveBeenCalled();
+    counts.mockRestore();
+  });
+
+  it("resolves shared proxy files without computing shared group catalog counts", async () => {
+    const { db, service, profileId, serverId } = await serviceWithServer();
+    const created = service.createSharedIndexGroupFromServer(profileId, serverId, { name: "Sputnik Main", keyHint: "sputnik-main" });
+    const linked = await service.createProfile("proxy-linked-browser", "passphrase");
+    const linkedServerId = service.defaultFtpServerId(linked.profileId);
+    service.saveFtpServerConfig(linked.profileId, linkedServerId, service.getFtpServerConfig(profileId, serverId)!, false);
+    service.linkServerToSharedGroup(linked.profileId, linkedServerId, created.group.id, created.sharedIndexKey);
+    const sharedMediaId = Number(
+      db
+        .prepare(
+          `
+            insert into shared_media_files (
+              shared_index_group_id, ftp_path, filename, normalized_filename, extension, size_bytes,
+              media_kind, catalog_kind, parsed_title, parsed_year, imdb_id, confidence, last_seen_at
+            ) values (?, '/media/Movie.2020.mkv', 'Movie.2020.mkv', 'movie 2020', 'mkv', 1024, 'movie', 'movie', 'movie', 2020, null, 90, 'n')
+          `,
+        )
+        .run(created.group.id).lastInsertRowid,
+    );
+    const counts = vi.spyOn(ProfileService.prototype as unknown as { sharedIndexGroupCatalogItemCounts: () => unknown }, "sharedIndexGroupCatalogItemCounts");
+    const resolve = createFtpProxyResolver(service, new MediaRepository(db), async () => {
+      throw new Error("not used");
+    });
+
+    const resolved = await resolve({ installToken: linked.installUrlToken, serverId: linkedServerId, sharedMediaId });
+
+    expect(resolved).toMatchObject({ filename: "Movie.2020.mkv", sharedIndexGroupId: created.group.id, ftpServerId: linkedServerId });
+    expect(counts).not.toHaveBeenCalled();
+    counts.mockRestore();
   });
 });

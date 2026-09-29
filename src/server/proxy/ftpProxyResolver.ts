@@ -41,7 +41,7 @@ export function createFtpProxyResolver(
     if ("sharedMediaId" in input) {
       if (!file.sharedIndexGroupId || file.ftpServerId !== input.serverId) return null;
       const server = profiles.getFtpServer(profileId, input.serverId);
-      const group = profiles.getSharedIndexGroup(file.sharedIndexGroupId);
+      const group = profiles.getSharedIndexGroupIdentity(file.sharedIndexGroupId);
       if (!server.sharedIndex || server.sharedIndex.id !== file.sharedIndexGroupId || !group || !server.ftpConfig) return null;
       if (!serverMatchesSharedIndexGroup(server.ftpConfig, group)) return null;
     }

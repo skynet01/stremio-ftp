@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { Readable } from "node:stream";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/server/app";
 import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
@@ -975,6 +975,53 @@ describe("profile routes", () => {
       .send({ browserUid: "browser-uid", passphrase: "passphrase" })
       .expect(200);
     expect(reloaded.body.servers[0].scanSchedule.intervalMinutes).toBe(360);
+  });
+
+  it("reports linked server status without computing shared group catalog counts", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config(), db);
+    const service = new ProfileService(db, config().encryptionKey);
+    const ftpConfig = {
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "explicit" as const,
+      allowInvalidCertificate: false,
+      roots: ["/media"],
+    };
+    const master = await service.createProfile("master-browser-uid", "passphrase");
+    const masterServerId = service.defaultFtpServerId(master.profileId);
+    service.saveFtpServerConfig(master.profileId, masterServerId, ftpConfig, false);
+    const group = service.createSharedIndexGroupFromServer(master.profileId, masterServerId, { name: "Sputnik Main", keyHint: "sputnik-main" });
+    service.saveSharedIndexStatus(group.group.id, { lastScanAt: "2026-05-18T12:00:00.000Z", mediaItems: 42 });
+    const linked = await service.createProfile("linked-browser-uid", "passphrase");
+    const linkedServerId = service.defaultFtpServerId(linked.profileId);
+    service.saveFtpServerConfig(linked.profileId, linkedServerId, ftpConfig, false);
+    service.linkServerToSharedGroup(linked.profileId, linkedServerId, group.group.id, group.sharedIndexKey);
+    const counts = vi.spyOn(ProfileService.prototype as unknown as { sharedIndexGroupCatalogItemCounts: () => unknown }, "sharedIndexGroupCatalogItemCounts");
+
+    const linkedStatus = await request(app)
+      .post("/api/profile/index/status")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "linked-browser-uid", passphrase: "passphrase" })
+      .expect(200);
+    const masterStatus = await request(app)
+      .post("/api/profile/index/status")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "master-browser-uid", passphrase: "passphrase" })
+      .expect(200);
+
+    expect(linkedStatus.body.servers[0]).toMatchObject({
+      indexStatus: { lastScanAt: "2026-05-18T12:00:00.000Z", mediaItems: 42 },
+      pendingScanAfter: null,
+      sharedIndex: { id: group.group.id, name: "Sputnik Main", keyHint: "sputnik-main", linked: true, isMaster: false },
+    });
+    expect(linkedStatus.body.globalStats.lastCompletedScanAt).toBe("2026-05-18T12:00:00.000Z");
+    expect(masterStatus.body.servers[0].sharedIndex).toMatchObject({ isMaster: true, message: "This server is the shared index master." });
+    expect(counts).not.toHaveBeenCalled();
+    counts.mockRestore();
   });
 
   it("requires confirmation before FTP identity changes unlink a shared index server", async () => {

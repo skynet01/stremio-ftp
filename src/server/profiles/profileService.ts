@@ -119,6 +119,8 @@ export type SharedIndexGroup = {
   updatedAt: string;
 };
 
+export type SharedIndexGroupIdentity = Omit<SharedIndexGroup, "catalogItemCounts" | "linkedServers">;
+
 export type SharedIndexGroupMaster = {
   profileId: number;
   browserUid: string;
@@ -775,6 +777,11 @@ export class ProfileService {
     return row ? this.sharedIndexGroupFromRow(row) : null;
   }
 
+  getSharedIndexGroupIdentity(groupId: number): SharedIndexGroupIdentity | null {
+    const row = this.db.prepare("select * from shared_index_groups where id = ?").get(groupId) as SharedIndexGroupRow | undefined;
+    return row ? sharedIndexGroupIdentityFromRow(row) : null;
+  }
+
   listSharedIndexGroups(): SharedIndexGroup[] {
     const rows = this.db.prepare("select * from shared_index_groups order by name asc, id asc").all() as SharedIndexGroupRow[];
     return rows.map((row) => this.sharedIndexGroupFromRow(row));
@@ -892,7 +899,7 @@ export class ProfileService {
   }
 
   private syncSharedIndexGroupCustomizationFromMaster(groupId: number, customization: Partial<AddonCustomization>) {
-    const group = this.getSharedIndexGroup(groupId);
+    const group = this.getSharedIndexGroupIdentity(groupId);
     if (!group) throw new ProfileNotFoundError();
     const content = customization.catalogContentTypes ?? group.catalogContentTypes;
     const libraryLayout = customization.libraryLayout ?? group.libraryLayout;
@@ -922,7 +929,7 @@ export class ProfileService {
   }
 
   private syncSharedIndexGroupNameFromMasterRename(groupId: number, oldServerName: string, newServerName: string) {
-    const group = this.getSharedIndexGroup(groupId);
+    const group = this.getSharedIndexGroupIdentity(groupId);
     if (!group || group.name !== oldServerName) return;
     const nextName = newServerName.trim();
     if (!nextName || nextName === group.name) return;
@@ -936,7 +943,7 @@ export class ProfileService {
     groupId: number,
     input: { name?: string; keyHint?: string; enabled?: boolean; autoLinkImports?: boolean },
   ): SharedIndexGroup {
-    const existing = this.getSharedIndexGroup(groupId);
+    const existing = this.getSharedIndexGroupIdentity(groupId);
     if (!existing) throw new ProfileNotFoundError();
     const now = new Date().toISOString();
     const result = this.db
@@ -964,7 +971,7 @@ export class ProfileService {
   }
 
   rotateSharedIndexGroupKey(groupId: number): { group: SharedIndexGroup; sharedIndexKey: string } {
-    if (!this.getSharedIndexGroup(groupId)) throw new ProfileNotFoundError();
+    if (!this.getSharedIndexGroupIdentity(groupId)) throw new ProfileNotFoundError();
     const sharedIndexKey = generateSharedIndexKey();
     const result = this.db
       .prepare("update shared_index_groups set shared_index_key_hash = ?, updated_at = ? where id = ?")
@@ -974,7 +981,7 @@ export class ProfileService {
   }
 
   deleteDisabledSharedIndexGroup(groupId: number) {
-    const group = this.getSharedIndexGroup(groupId);
+    const group = this.getSharedIndexGroupIdentity(groupId);
     if (!group) throw new ProfileNotFoundError();
     if (group.enabled) throw new Error("Disable the shared index group before deleting it");
     const deleted = this.db.prepare("delete from shared_index_groups where id = ? and enabled = 0").run(groupId).changes;
@@ -983,7 +990,7 @@ export class ProfileService {
   }
 
   setSharedIndexGroupMaster(groupId: number, profileId: number, serverId: number): SharedIndexGroup {
-    const group = this.getSharedIndexGroup(groupId);
+    const group = this.getSharedIndexGroupIdentity(groupId);
     const server = this.getFtpServer(profileId, serverId);
     if (!group || !server.ftpConfig || !serverMatchesSharedIndexGroup(server.ftpConfig, group)) {
       throw new Error("FTP server does not match shared index group");
@@ -998,7 +1005,7 @@ export class ProfileService {
     return this.getSharedIndexGroup(groupId)!;
   }
 
-  resolveApprovedSharedIndexKey(profileId: number, serverId: number, sharedIndexKey: string): SharedIndexGroup | null {
+  resolveApprovedSharedIndexKey(profileId: number, serverId: number, sharedIndexKey: string): SharedIndexGroupIdentity | null {
     const server = this.getFtpServer(profileId, serverId);
     if (!server.ftpConfig) return null;
     const row = this.db
@@ -1014,13 +1021,13 @@ export class ProfileService {
       )
       .get(hashSharedIndexKey(sharedIndexKey)) as SharedIndexGroupRow | undefined;
     if (!row) return null;
-    const group = this.sharedIndexGroupFromRow(row);
+    const group = sharedIndexGroupIdentityFromRow(row);
     return serverMatchesSharedIndexGroup(server.ftpConfig, group) ? group : null;
   }
 
   linkServerToSharedGroup(profileId: number, serverId: number, groupId: number, sharedIndexKey?: string) {
     const server = this.getFtpServer(profileId, serverId);
-    const group = this.getSharedIndexGroup(groupId);
+    const group = this.getSharedIndexGroupIdentity(groupId);
     if (!server.ftpConfig || !group || !serverMatchesSharedIndexGroup(server.ftpConfig, group)) {
       throw new Error("FTP server does not match shared index group");
     }
@@ -1063,7 +1070,7 @@ export class ProfileService {
 
   forceLinkServerToSharedGroup(profileId: number, serverId: number, groupId: number) {
     const server = this.getFtpServer(profileId, serverId);
-    const group = this.getSharedIndexGroup(groupId);
+    const group = this.getSharedIndexGroupIdentity(groupId);
     if (!server.ftpConfig || !group || !sharedIndexTransportMatches(server.ftpConfig, group)) {
       throw new Error("FTP server does not match shared index group");
     }
@@ -1127,13 +1134,13 @@ export class ProfileService {
   }
 
   sharedIndexScanConfig(groupId: number): {
-    group: SharedIndexGroup;
+    group: SharedIndexGroupIdentity;
     profileId: number;
     serverId: number;
     ftpConfig: FtpConfig;
     customization: AddonCustomization;
   } {
-    const group = this.getSharedIndexGroup(groupId);
+    const group = this.getSharedIndexGroupIdentity(groupId);
     if (!group) throw new ProfileNotFoundError();
     if (!group.masterProfileFtpServerId) throw new Error("Shared index group has no master server");
     const row = this.db
@@ -1372,7 +1379,7 @@ export class ProfileService {
 
   saveFtpServer(profileId: number, serverId: number, input: FtpServerInput) {
     const server = this.getFtpServer(profileId, serverId);
-    const sharedGroup = server.sharedIndex ? this.getSharedIndexGroup(server.sharedIndex.id) : null;
+    const sharedGroup = server.sharedIndex ? this.getSharedIndexGroupIdentity(server.sharedIndex.id) : null;
     const isSharedMaster = Boolean(sharedGroup && sharedGroup.masterProfileFtpServerId === serverId);
     let ftpConfig = input.ftpConfig;
     if (ftpConfig && sharedGroup && !serverMatchesSharedIndexGroup(ftpConfig, sharedGroup)) {
@@ -1430,8 +1437,7 @@ export class ProfileService {
     const servers = this.listFtpServers(profileId);
     if (servers.length <= 1) throw new Error("At least one FTP server is required");
     const server = servers.find((candidate) => candidate.id === serverId);
-    const group = server?.sharedIndex ? this.getSharedIndexGroup(server.sharedIndex.id) : null;
-    if (group?.masterProfileFtpServerId === serverId) throw new SharedIndexMasterDeleteError(group.name);
+    if (server?.sharedIndex?.isMaster) throw new SharedIndexMasterDeleteError(server.sharedIndex.name);
     const result = this.db.prepare("delete from profile_ftp_servers where profile_id = ? and id = ?").run(profileId, serverId);
     if (result.changes === 0) throw new ProfileNotFoundError();
   }
@@ -1617,27 +1623,10 @@ export class ProfileService {
     const linked = this.db.prepare("select count(*) as count from profile_ftp_servers where shared_index_group_id = ?").get(row.id) as {
       count: number;
     };
-    const catalogItemCounts = this.sharedIndexGroupCatalogItemCounts(row.id);
     return {
-      id: row.id,
-      keyHint: row.key_hint,
-      name: row.name,
-      host: row.host,
-      port: row.port,
-      tlsMode: row.tls_mode,
-      allowInvalidCertificate: Boolean(row.allow_invalid_certificate),
-      rootPaths: parseJsonArray(row.root_paths_json),
-      libraryLayout: row.library_layout,
-      catalogContentTypes: parseCatalogContentTypes(row.catalog_content_json),
-      enabled: Boolean(row.enabled),
-      autoLinkImports: Boolean(row.auto_link_imports),
-      masterProfileFtpServerId: row.master_profile_ftp_server_id,
-      indexedMediaCount: row.indexed_media_count,
-      catalogItemCounts,
-      lastIndexedAt: row.last_indexed_at,
+      ...sharedIndexGroupIdentityFromRow(row),
+      catalogItemCounts: this.sharedIndexGroupCatalogItemCounts(row.id),
       linkedServers: linked.count,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
     };
   }
 
@@ -1743,6 +1732,28 @@ type SharedIndexGroupRow = {
   created_at: string;
   updated_at: string;
 };
+
+function sharedIndexGroupIdentityFromRow(row: SharedIndexGroupRow): SharedIndexGroupIdentity {
+  return {
+    id: row.id,
+    keyHint: row.key_hint,
+    name: row.name,
+    host: row.host,
+    port: row.port,
+    tlsMode: row.tls_mode,
+    allowInvalidCertificate: Boolean(row.allow_invalid_certificate),
+    rootPaths: parseJsonArray(row.root_paths_json),
+    libraryLayout: row.library_layout,
+    catalogContentTypes: parseCatalogContentTypes(row.catalog_content_json),
+    enabled: Boolean(row.enabled),
+    autoLinkImports: Boolean(row.auto_link_imports),
+    masterProfileFtpServerId: row.master_profile_ftp_server_id,
+    indexedMediaCount: row.indexed_media_count,
+    lastIndexedAt: row.last_indexed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 function parseJsonArray(value: string): string[] {
   try {

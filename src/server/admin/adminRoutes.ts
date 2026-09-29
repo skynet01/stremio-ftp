@@ -298,7 +298,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
     try {
-      const group = service.getSharedIndexGroup(groupId.data);
+      const group = service.getSharedIndexGroupIdentity(groupId.data);
       if (!group) return res.status(404).json({ error: "Shared index group not found" });
       if (group.enabled) return res.status(400).json({ error: "Disable the shared index group before deleting it" });
       const scanStatus = scanQueue.getSharedIndexScanStatus(groupId.data);

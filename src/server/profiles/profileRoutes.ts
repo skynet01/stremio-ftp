@@ -418,7 +418,7 @@ export function profileRoutes(
       if (parsed.data.all) {
         const servers = service
           .listFtpServers(unlocked.profileId)
-          .filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig) && (!server.sharedIndex || isSharedIndexMaster(service, server)));
+          .filter((server) => server.ftpConfig && !isDraftFtpConfig(server.ftpConfig) && (!server.sharedIndex || isSharedIndexMaster(server)));
         if (!servers.length) return res.status(400).json({ error: "No FTP servers can be rescanned from this profile." });
         const scanStatuses = servers.map((server) =>
           server.sharedIndex
@@ -437,7 +437,7 @@ export function profileRoutes(
       if (!ftpConfig) return res.status(400).json({ error: "FTP settings are not configured" });
       if (isDraftFtpConfig(ftpConfig)) return res.status(400).json({ error: "Fill in username and password before scanning this server." });
       const server = service.getFtpServer(unlocked.profileId, serverId);
-      if (server.sharedIndex && !isSharedIndexMaster(service, server)) {
+      if (server.sharedIndex && !isSharedIndexMaster(server)) {
         return res.status(400).json({ error: "Linked servers are scanned through their shared index group." });
       }
       res.json({
@@ -495,7 +495,7 @@ export function profileRoutes(
       }
       const serverId = parsed.data.serverId ?? service.defaultFtpServerId(unlocked.profileId);
       const server = service.getFtpServer(unlocked.profileId, serverId);
-      if (server.sharedIndex && !isSharedIndexMaster(service, server)) {
+      if (server.sharedIndex && !isSharedIndexMaster(server)) {
         return res.status(400).json({ error: "Shared index scans are scheduled from the master index." });
       }
       const nextScheduledScanAt =
@@ -521,9 +521,9 @@ function serverPayloads(service: ProfileService, scanQueue: ScanQueue, profileId
 function serverPayload(service: ProfileService, scanQueue: ScanQueue, server: FtpServer) {
   const ftpConfig = server.ftpConfig;
   const draft = ftpConfig ? isDraftFtpConfig(ftpConfig) : false;
-  const sharedGroup = server.sharedIndex ? service.getSharedIndexGroup(server.sharedIndex.id) : null;
+  const sharedGroup = server.sharedIndex;
   const sharedScanStatus = sharedGroup ? scanQueue.getSharedIndexScanStatus(sharedGroup.id) : null;
-  const sharedMaster = Boolean(sharedGroup && sharedGroup.masterProfileFtpServerId === server.id);
+  const sharedMaster = Boolean(sharedGroup?.isMaster);
   return {
     id: server.id,
     name: server.name,
@@ -561,8 +561,8 @@ function serverPayload(service: ProfileService, scanQueue: ScanQueue, server: Ft
   };
 }
 
-function isSharedIndexMaster(service: ProfileService, server: FtpServer) {
-  return Boolean(server.sharedIndex && service.getSharedIndexGroup(server.sharedIndex.id)?.masterProfileFtpServerId === server.id);
+function isSharedIndexMaster(server: FtpServer) {
+  return Boolean(server.sharedIndex?.isMaster);
 }
 
 function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: number) {
@@ -579,7 +579,7 @@ function globalStats(service: ProfileService, scanQueue: ScanQueue, profileId: n
   const lastCompletedScanAt =
     [
       ...servers.filter((server) => !server.sharedIndex).map((server) => server.indexStatus.lastScanAt),
-      ...linkedGroupIds.map((groupId) => service.getSharedIndexGroup(groupId)?.lastIndexedAt ?? null),
+      ...servers.map((server) => server.sharedIndex?.lastIndexedAt ?? null),
     ]
       .filter((value): value is string => Boolean(value))
       .sort()
