@@ -280,7 +280,7 @@ describe("createFtpProxyResolver", () => {
           },
           sharedIndex: { id: 3, name: "Sputnik Main", keyHint: "sputnik-main" },
         }),
-        getSharedIndexGroup: () => ({
+        getSharedIndexGroupIdentity: () => ({
           id: 3,
           host: "sputnik.whatbox.ca",
           port: 21,
