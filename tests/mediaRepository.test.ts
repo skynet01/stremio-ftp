@@ -948,3 +948,79 @@ describe("MediaRepository", () => {
 function titleCase(value: string) {
   return value.replace(/\b\w/g, (character) => character.toUpperCase());
 }
+
+describe("MediaRepository shared index count queries", () => {
+  function sharedMovie(title: string, year: number) {
+    const filename = `${titleCase(title).replace(/ /g, ".")}.${year}.mkv`;
+    return {
+      ftpPath: `/Movies/${filename}`,
+      filename,
+      normalizedFilename: title,
+      extension: "mkv",
+      mediaKind: "movie" as const,
+      catalogKind: "movie" as const,
+      parsedTitle: title,
+      parsedYear: year,
+      season: null,
+      episode: null,
+      imdbId: null,
+      quality: null,
+      confidence: 90,
+    };
+  }
+
+  it("finds unenriched shared groups through the enrichment unique index instead of a table scan", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const groupId = createSharedGroup(db, serverId, "plan");
+    const repo = new MediaRepository(db);
+    repo.upsertSharedParsedFile(groupId, sharedMovie("matrix", 1999));
+
+    const statements: string[] = [];
+    const prepare = db.prepare.bind(db);
+    db.prepare = ((sql: string) => {
+      statements.push(sql);
+      return prepare(sql);
+    }) as typeof db.prepare;
+    repo.aggregateCountsForProfileWithSharedIndexes(profileId, [groupId]);
+    db.prepare = prepare;
+
+    const fullEnrichmentScans = statements.flatMap((sql) => {
+      const parameterCount = sql.match(/\?/g)?.length ?? 0;
+      const plan = prepare(`explain query plan ${sql}`).all(...Array(parameterCount).fill(groupId)) as Array<{ detail: string }>;
+      return plan.map((row) => row.detail).filter((detail) => /^SCAN (ce|catalog_enrichment)\b/.test(detail));
+    });
+    expect(fullEnrichmentScans).toEqual([]);
+  });
+
+  it("treats groups whose master enrichment only covers other items as unenriched", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const staleServerId = createServer(db, profileId);
+    const staleGroupId = createSharedGroup(db, staleServerId, "stale");
+    const orphanServerId = createServer(db, profileId);
+    const orphanGroupId = createSharedGroup(db, orphanServerId, "orphan");
+    db.prepare("update shared_index_groups set master_profile_ftp_server_id = null where id = ?").run(orphanGroupId);
+    const repo = new MediaRepository(db);
+
+    repo.upsertSharedParsedFile(staleGroupId, sharedMovie("old movie", 2001));
+    const seenAt = "2026-05-04T00:00:00.000Z";
+    repo.syncCatalogEnrichmentCandidates(profileId, staleServerId, repo.sharedCatalogEnrichmentCandidates(staleGroupId, staleServerId, ["movie"]), seenAt);
+    const [candidate] = repo.pendingCatalogEnrichment(profileId, staleServerId, seenAt, 10);
+    repo.saveCatalogEnrichmentMatch(candidate.id, { id: "tt0000001", type: "movie", name: "Old Movie" }, seenAt);
+    db.prepare("delete from shared_media_files where shared_index_group_id = ?").run(staleGroupId);
+    repo.upsertSharedParsedFile(staleGroupId, sharedMovie("new movie", 2024));
+    repo.upsertSharedParsedFile(orphanGroupId, sharedMovie("orphan movie", 2023));
+
+    expect(repo.aggregateCountsForProfileWithSharedIndexes(profileId, [staleGroupId, orphanGroupId])).toEqual({
+      total: 2,
+      movies: 2,
+      series: 0,
+      anime: 0,
+      uncategorized: 0,
+    });
+  });
+});

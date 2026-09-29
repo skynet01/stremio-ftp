@@ -755,23 +755,23 @@ export class MediaRepository {
     const rows = this.db
       .prepare(
         `
-        with shared_keys as (
-          select distinct sm.shared_index_group_id, ${catalogEnrichmentSqlKey("sm")} as item_key
-          from shared_media_files sm
-          where sm.shared_index_group_id in (${sharedIndexGroupIds.map(() => "?").join(", ")})
-            and sm.parsed_title is not null
-        )
         select g.id
         from shared_index_groups g
-        left join catalog_enrichment ce
-          on ce.ftp_server_id = g.master_profile_ftp_server_id
-         and ce.item_key in (select item_key from shared_keys where shared_index_group_id = g.id)
+        left join profile_ftp_servers master on master.id = g.master_profile_ftp_server_id
         where g.id in (${sharedIndexGroupIds.map(() => "?").join(", ")})
-        group by g.id
-        having count(ce.id) = 0
+          and not exists (
+            select 1
+            from shared_media_files sm
+            join catalog_enrichment ce
+              on ce.profile_id = master.profile_id
+             and ce.ftp_server_id = master.id
+             and ce.item_key = ${catalogEnrichmentSqlKey("sm")}
+            where sm.shared_index_group_id = g.id
+              and sm.parsed_title is not null
+          )
       `,
       )
-      .all(...sharedIndexGroupIds, ...sharedIndexGroupIds) as Array<{ id: number }>;
+      .all(...sharedIndexGroupIds) as Array<{ id: number }>;
     return rows.map((row) => row.id);
   }
 
