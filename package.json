@@ -1,6 +1,6 @@
 {
   "name": "stremio-ftp",
-  "version": "0.4.54",
+  "version": "0.4.55",
   "private": true,
   "type": "module",
   "engines": {
