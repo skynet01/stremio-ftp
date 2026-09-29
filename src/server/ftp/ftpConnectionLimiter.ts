@@ -1,5 +1,11 @@
-import type { FtpClient, FtpClientFactory } from "./ftpTypes.js";
+import type { FtpClient } from "./ftpTypes.js";
 import type { FtpConfig } from "../profiles/profileService.js";
+
+export type FtpClientRequestOptions = {
+  signal?: AbortSignal;
+};
+
+export type AbortableFtpClientFactory = (config: FtpConfig, options?: FtpClientRequestOptions) => Promise<FtpClient>;
 
 type QueueWaiter = {
   resolve: (release: () => void) => void;
@@ -10,19 +16,20 @@ type LimiterState = {
   queue: QueueWaiter[];
 };
 
-export function limitFtpClientFactory(factory: FtpClientFactory, maxConnections: number): FtpClientFactory {
+export function limitFtpClientFactory(factory: AbortableFtpClientFactory, maxConnections: number): AbortableFtpClientFactory {
   return limitFtpClientFactoryByKey(factory, maxConnections, () => "global");
 }
 
 export function limitFtpClientFactoryByKey(
-  factory: FtpClientFactory,
+  factory: AbortableFtpClientFactory,
   maxConnectionsPerKey: number,
   keyForConfig: (config: FtpConfig) => string = ftpConfigConnectionKey,
-): FtpClientFactory {
+): AbortableFtpClientFactory {
   const connectionLimit = Math.max(1, Math.floor(maxConnectionsPerKey));
   const states = new Map<string, LimiterState>();
 
-  async function acquire(key: string) {
+  function acquire(key: string, signal: AbortSignal | undefined) {
+    if (signal?.aborted) return Promise.reject(abortError());
     let state = states.get(key);
     if (!state) {
       state = { activeConnections: 0, queue: [] };
@@ -31,11 +38,25 @@ export function limitFtpClientFactoryByKey(
 
     if (state.activeConnections < connectionLimit) {
       state.activeConnections += 1;
-      return releaseOnce(key, state);
+      return Promise.resolve(releaseOnce(key, state));
     }
 
-    return new Promise<() => void>((resolve) => {
-      state.queue.push({ resolve });
+    const queue = state.queue;
+    return new Promise<() => void>((resolve, reject) => {
+      const onAbort = () => {
+        const index = queue.indexOf(waiter);
+        if (index === -1) return;
+        queue.splice(index, 1);
+        reject(abortError());
+      };
+      const waiter: QueueWaiter = {
+        resolve: (release) => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve(release);
+        },
+      };
+      queue.push(waiter);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 
@@ -56,16 +77,31 @@ export function limitFtpClientFactoryByKey(
     };
   }
 
-  return async (config) => {
-    const release = await acquire(keyForConfig(config));
+  return async (config, options = {}) => {
+    const { signal } = options;
+    const release = await acquire(keyForConfig(config), signal);
+    let client: FtpClient;
     try {
-      const client = await factory(config);
-      return releaseClientSlotOnClose(client, release);
+      if (signal?.aborted) throw abortError();
+      client = await factory(config, { signal });
     } catch (error) {
       release();
       throw error;
     }
+
+    const limitedClient = releaseClientSlotOnClose(client, release);
+    if (signal?.aborted) {
+      await limitedClient.close().catch(() => undefined);
+      throw abortError();
+    }
+    return limitedClient;
   };
+}
+
+function abortError() {
+  const error = new Error("FTP connection request aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 function ftpConfigConnectionKey(config: FtpConfig) {

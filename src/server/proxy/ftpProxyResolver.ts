@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
-import type { FtpClient, FtpClientFactory } from "../ftp/ftpTypes.js";
+import type { AbortableFtpClientFactory } from "../ftp/ftpConnectionLimiter.js";
+import type { FtpClient } from "../ftp/ftpTypes.js";
 import type { MediaRepository } from "../media/mediaRepository.js";
 import type { FtpConfig } from "../profiles/profileService.js";
 import type { ProfileService } from "../profiles/profileService.js";
@@ -21,7 +22,7 @@ type OpenFtpClientResult = {
 export function createFtpProxyResolver(
   profiles: ProfileService,
   mediaRepository: MediaRepository,
-  ftpClientFactory: FtpClientFactory,
+  ftpClientFactory: AbortableFtpClientFactory,
 ) {
   const warmClients = new Map<string, WarmClient>();
 
@@ -59,7 +60,14 @@ export function createFtpProxyResolver(
       },
       openReadStream: async ({ start, end, signal }: { start: number; end: number; signal?: AbortSignal }) => {
         const openStartedAt = performance.now();
-        const { client, warmed, clientReadyMs } = await openFtpClient(warmClients, warmKey, ftpConfig, ftpClientFactory);
+        let openedClient: OpenFtpClientResult;
+        try {
+          openedClient = await openFtpClient(warmClients, warmKey, ftpConfig, ftpClientFactory, signal);
+        } catch (error) {
+          if (signal?.aborted) throw new Error("Proxy request aborted");
+          throw error;
+        }
+        const { client, warmed, clientReadyMs } = openedClient;
         let closeRequested = false;
         const closeClient = () => {
           closeRequested = true;
@@ -115,19 +123,20 @@ async function openFtpClient(
   warmClients: Map<string, WarmClient>,
   warmKey: string,
   ftpConfig: FtpConfig,
-  ftpClientFactory: FtpClientFactory,
+  ftpClientFactory: AbortableFtpClientFactory,
+  signal: AbortSignal | undefined,
 ): Promise<OpenFtpClientResult> {
   const startedAt = performance.now();
   const warmClient = takeWarmFtpClient(warmClients, warmKey);
   if (!warmClient) {
-    return { client: await ftpClientFactory(ftpConfig), warmed: false, clientReadyMs: elapsedMs(startedAt) };
+    return { client: await ftpClientFactory(ftpConfig, { signal }), warmed: false, clientReadyMs: elapsedMs(startedAt) };
   }
 
   try {
     return { client: await warmClient, warmed: true, clientReadyMs: elapsedMs(startedAt) };
   } catch {
     const fallbackStartedAt = performance.now();
-    return { client: await ftpClientFactory(ftpConfig), warmed: false, clientReadyMs: elapsedMs(fallbackStartedAt) };
+    return { client: await ftpClientFactory(ftpConfig, { signal }), warmed: false, clientReadyMs: elapsedMs(fallbackStartedAt) };
   }
 }
 
@@ -135,7 +144,7 @@ function warmFtpClient(
   warmClients: Map<string, WarmClient>,
   warmKey: string,
   ftpConfig: FtpConfig,
-  ftpClientFactory: FtpClientFactory,
+  ftpClientFactory: AbortableFtpClientFactory,
 ) {
   if (warmClients.has(warmKey)) return;
 

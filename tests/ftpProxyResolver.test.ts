@@ -1,5 +1,6 @@
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
+import { limitFtpClientFactoryByKey } from "../src/server/ftp/ftpConnectionLimiter";
 import { createFtpProxyResolver } from "../src/server/proxy/ftpProxyResolver";
 
 function deferred<T>() {
@@ -105,6 +106,35 @@ describe("createFtpProxyResolver", () => {
     expect(closed).toBe(1);
   });
 
+  it("abandons a stream open that is still waiting for an FTP connection slot", async () => {
+    let factoryCalls = 0;
+    const resolver = createFtpProxyResolver(
+      profileStub(),
+      mediaStub(),
+      limitFtpClientFactoryByKey(async () => {
+        factoryCalls += 1;
+        return {
+          list: async () => [],
+          openReadStream: async () => new Readable({ read() {} }),
+          close: async () => undefined,
+        };
+      }, 1),
+    );
+    const file = await resolver({ installToken: "token", fileId: 44 });
+    const playing = await file!.openReadStream({ start: 0, end: 9 });
+
+    const controller = new AbortController();
+    const abandoned = file!.openReadStream({ start: 5, end: 9, signal: controller.signal });
+    controller.abort();
+
+    expect(await settleWithin(abandoned)).toEqual({ status: "rejected", message: "Proxy request aborted" });
+
+    const live = file!.openReadStream({ start: 7, end: 9 });
+    (playing as Readable).destroy();
+    expect((await settleWithin(live)).status).toBe("fulfilled");
+    expect(factoryCalls).toBe(2);
+  });
+
   it("opens shared media with the requesting profile server credentials", async () => {
     let openedPath = "";
     const resolver = createFtpProxyResolver(
@@ -171,3 +201,40 @@ describe("createFtpProxyResolver", () => {
     expect(openedPath).toBe("requesting-user:/media/video.mkv");
   });
 });
+
+function profileStub(overrides: Record<string, unknown> = {}) {
+  return {
+    profileIdForInstallToken: () => 12,
+    getFtpServerConfig: () => ({
+      host: "ftp.example.test",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "none",
+      allowInvalidCertificate: false,
+      roots: ["/"],
+    }),
+    getFtpConfig: () => null,
+    ...overrides,
+  } as never;
+}
+
+function mediaStub(files: Record<number, string> = { 44: "/video.mkv" }) {
+  return {
+    getFileForProfile: (_profileId: number, fileId: number) =>
+      files[fileId]
+        ? { id: fileId, ftpServerId: 5, filename: files[fileId]!.slice(1), ftpPath: files[fileId], sizeBytes: 10 }
+        : null,
+  } as never;
+}
+
+async function settleWithin<T>(promise: Promise<T>, ms = 100) {
+  const timeout = new Promise<{ status: "pending" }>((resolve) => setTimeout(() => resolve({ status: "pending" }), ms));
+  return Promise.race([
+    promise.then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, message: error instanceof Error ? error.message : String(error) }),
+    ),
+    timeout,
+  ]);
+}

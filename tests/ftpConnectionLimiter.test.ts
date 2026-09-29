@@ -173,6 +173,110 @@ describe("limitFtpClientFactoryByKey", () => {
   });
 });
 
+describe("limitFtpClientFactoryByKey cancellation", () => {
+  it("drops a queued request when its signal aborts so it never connects", async () => {
+    let opened = 0;
+    const limitedFactory = limitFtpClientFactoryByKey(async () => {
+      opened += 1;
+      return fakeClient();
+    }, 1);
+    const config = ftpConfig();
+
+    const first = await limitedFactory(config);
+    const controller = new AbortController();
+    const abandoned = limitedFactory(config, { signal: controller.signal });
+    const live = limitedFactory(config);
+
+    controller.abort();
+    expect(await settleWithin(abandoned)).toEqual({ status: "rejected", message: expect.stringMatching(/aborted/i) });
+
+    await first.close();
+    const liveClient = await live;
+    expect(opened).toBe(2);
+
+    await liveClient.close();
+    const next = await settleWithin(limitedFactory(config));
+    expect(next.status).toBe("fulfilled");
+  });
+
+  it("rejects immediately when the signal is already aborted", async () => {
+    let opened = 0;
+    const limitedFactory = limitFtpClientFactoryByKey(async () => {
+      opened += 1;
+      return fakeClient();
+    }, 1);
+
+    const result = await settleWithin(limitedFactory(ftpConfig(), { signal: AbortSignal.abort() }));
+
+    expect(result.status).toBe("rejected");
+    expect(opened).toBe(0);
+    const client = await settleWithin(limitedFactory(ftpConfig()));
+    expect(client.status).toBe("fulfilled");
+  });
+
+  it("passes the signal to the login and releases the slot when the login is aborted", async () => {
+    let loginSignal: AbortSignal | undefined;
+    const limitedFactory = limitFtpClientFactoryByKey(
+      (_config, options) =>
+        new Promise((_resolve, reject) => {
+          loginSignal = options?.signal;
+          loginSignal?.addEventListener("abort", () => reject(new Error("login aborted")), { once: true });
+        }),
+      1,
+    );
+    const controller = new AbortController();
+
+    const pending = limitedFactory(ftpConfig(), { signal: controller.signal });
+    await Promise.resolve();
+    controller.abort();
+
+    expect((await settleWithin(pending)).status).toBe("rejected");
+    expect(loginSignal?.aborted).toBe(true);
+  });
+
+  it("closes a client whose login finishes after the request aborted and frees its slot", async () => {
+    const login = deferred<void>();
+    let opened = 0;
+    let closed = 0;
+    const limitedFactory = limitFtpClientFactoryByKey(async () => {
+      opened += 1;
+      if (opened === 1) await login.promise;
+      return fakeClient({ onClose: () => (closed += 1) });
+    }, 1);
+    const controller = new AbortController();
+
+    const pending = limitedFactory(ftpConfig(), { signal: controller.signal });
+    await Promise.resolve();
+    controller.abort();
+    login.resolve();
+
+    expect((await settleWithin(pending)).status).toBe("rejected");
+    expect(closed).toBe(1);
+    expect((await settleWithin(limitedFactory(ftpConfig()))).status).toBe("fulfilled");
+  });
+});
+
+function fakeClient(options: { onClose?: () => void } = {}) {
+  return {
+    list: async () => [],
+    openReadStream: async () => Readable.from("not used"),
+    close: async () => {
+      options.onClose?.();
+    },
+  };
+}
+
+async function settleWithin<T>(promise: Promise<T>, ms = 100) {
+  const timeout = new Promise<{ status: "pending" }>((resolve) => setTimeout(() => resolve({ status: "pending" }), ms));
+  return Promise.race([
+    promise.then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, message: error instanceof Error ? error.message : String(error) }),
+    ),
+    timeout,
+  ]);
+}
+
 function ftpConfig(overrides: Partial<FtpConfig> = {}): FtpConfig {
   return {
     host: "ftp.example.test",
