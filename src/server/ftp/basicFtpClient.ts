@@ -3,17 +3,30 @@ import { PassThrough, Writable } from "node:stream";
 import type { FtpConfig } from "../profiles/profileService.js";
 import type { FtpClient, FtpClientFactory } from "./ftpTypes.js";
 
-export function createBasicFtpClientFactory(timeoutMs = 30000): FtpClientFactory {
-  return async (config: FtpConfig): Promise<FtpClient> => {
+export function createBasicFtpClientFactory(
+  timeoutMs = 30000,
+): (config: FtpConfig, options?: { signal?: AbortSignal }) => Promise<FtpClient> {
+  return async (config, options = {}) => {
+    const { signal } = options;
+    if (signal?.aborted) throw new Error("FTP login aborted");
     const client = new Client(timeoutMs);
-    await client.access({
-      host: config.host,
-      port: config.port,
-      user: config.username,
-      password: config.password,
-      secure: config.tlsMode === "implicit" ? "implicit" : config.tlsMode === "explicit",
-      secureOptions: config.allowInvalidCertificate ? { rejectUnauthorized: false } : undefined,
-    });
+    const closeOnAbort = () => client.close();
+    signal?.addEventListener("abort", closeOnAbort, { once: true });
+    try {
+      await client.access({
+        host: config.host,
+        port: config.port,
+        user: config.username,
+        password: config.password,
+        secure: config.tlsMode === "implicit" ? "implicit" : config.tlsMode === "explicit",
+        secureOptions: config.allowInvalidCertificate ? { rejectUnauthorized: false } : undefined,
+      });
+    } catch (error) {
+      client.close();
+      throw error;
+    } finally {
+      signal?.removeEventListener("abort", closeOnAbort);
+    }
 
     return {
       async list(path: string) {

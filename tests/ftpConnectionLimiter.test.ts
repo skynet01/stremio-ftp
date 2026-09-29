@@ -256,6 +256,31 @@ describe("limitFtpClientFactoryByKey cancellation", () => {
   });
 });
 
+describe("limitFtpClientFactoryByKey slot accounting", () => {
+  it("releases the slot when the login or the stream open fails", async () => {
+    let attempt = 0;
+    let closed = 0;
+    const limitedFactory = limitFtpClientFactoryByKey(async () => {
+      attempt += 1;
+      if (attempt === 1) throw new Error("530 Login incorrect");
+      return {
+        ...fakeClient({ onClose: () => (closed += 1) }),
+        openReadStream: async () => {
+          throw new Error("550 Not found");
+        },
+      };
+    }, 1);
+
+    expect((await settleWithin(limitedFactory(ftpConfig()))).status).toBe("rejected");
+    const client = await limitedFactory(ftpConfig());
+    await expect(client.openReadStream("/missing.mkv", { start: 0, end: 1 })).rejects.toThrow("550");
+    await client.close();
+
+    expect(closed).toBe(1);
+    expect((await settleWithin(limitedFactory(ftpConfig()))).status).toBe("fulfilled");
+  });
+});
+
 describe("limitFtpClientFactoryByKey background requests", () => {
   it("does not queue a background request when every slot is busy", async () => {
     let opened = 0;

@@ -57,13 +57,49 @@ describe("createBasicFtpClientFactory", () => {
   });
 });
 
+describe("createBasicFtpClientFactory login cleanup", () => {
+  it("closes the control connection when the login is rejected", async () => {
+    const server = await startFakeFtpServer({ files: {}, login: "reject" });
+
+    await expect(createBasicFtpClientFactory(5000)(ftpConfig(server.port))).rejects.toThrow();
+
+    await waitFor(() => server.closedControlConnections === 1);
+  });
+
+  it("aborts a login in progress and closes the control connection", async () => {
+    const server = await startFakeFtpServer({ files: {}, login: "stall" });
+    const controller = new AbortController();
+
+    const pending = createBasicFtpClientFactory(5000)(ftpConfig(server.port), { signal: controller.signal });
+    await waitFor(() => server.passwordAttempts === 1);
+    controller.abort();
+
+    await expect(pending).rejects.toThrow();
+    await waitFor(() => server.closedControlConnections === 1);
+  });
+
+  it("does not connect when the signal is already aborted", async () => {
+    const server = await startFakeFtpServer({ files: {} });
+
+    await expect(createBasicFtpClientFactory(5000)(ftpConfig(server.port), { signal: AbortSignal.abort() })).rejects.toThrow();
+
+    expect(server.connections).toBe(0);
+  });
+});
+
 type FakeFtpServer = {
   port: number;
+  connections: number;
+  passwordAttempts: number;
   closedControlConnections: number;
   close(): Promise<void>;
 };
 
-async function startFakeFtpServer(options: { files: Record<string, Buffer>; abortAfterBytes?: number }): Promise<FakeFtpServer> {
+async function startFakeFtpServer(options: {
+  files: Record<string, Buffer>;
+  abortAfterBytes?: number;
+  login?: "accept" | "reject" | "stall";
+}): Promise<FakeFtpServer> {
   const sockets = new Set<Socket>();
   const passiveServers = new Set<Server>();
   const track = (socket: Socket) => {
@@ -74,6 +110,8 @@ async function startFakeFtpServer(options: { files: Record<string, Buffer>; abor
 
   const fake: FakeFtpServer = {
     port: 0,
+    connections: 0,
+    passwordAttempts: 0,
     closedControlConnections: 0,
     close: async () => {
       for (const socket of sockets) socket.destroy();
@@ -83,6 +121,7 @@ async function startFakeFtpServer(options: { files: Record<string, Buffer>; abor
   };
 
   const server = createServer((control) => {
+    fake.connections += 1;
     track(control);
     control.once("close", () => {
       fake.closedControlConnections += 1;
@@ -113,7 +152,9 @@ async function startFakeFtpServer(options: { files: Record<string, Buffer>; abor
           reply("331 Password required");
           return;
         case "PASS":
-          reply("230 Logged in");
+          fake.passwordAttempts += 1;
+          if (options.login === "stall") return;
+          reply(options.login === "reject" ? "530 Login incorrect" : "230 Logged in");
           return;
         case "TYPE":
           reply("200 Type set");
