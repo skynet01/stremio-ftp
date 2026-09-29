@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_STREAM_DESCRIPTION_TEMPLATE,
   DEFAULT_STREAM_NAME_TEMPLATE,
+  MAX_STREAM_FORMATTER_TEMPLATE_LENGTH,
   renderStreamTemplate,
   stream3DType,
   streamAudioTags,
@@ -405,5 +406,21 @@ describe("stream formatter characterization", () => {
     for (let round = 0; round < 3; round += 1) {
       expect(renderBoth(PRODUCTION_DESCRIPTION)).toEqual(["✎  The Matrix (1999)\n▣  HEVC  54GB", "✎  The Office Us  S02·ᴇ05"]);
     }
+  });
+});
+
+describe("stream formatter limits", () => {
+  it("caps saved templates at 12,000 characters", () => {
+    expect(MAX_STREAM_FORMATTER_TEMPLATE_LENGTH).toBe(12_000);
+  });
+
+  it("renders templates up to the cap and falls back to the default beyond it", () => {
+    const expression = "{stream.title}";
+    const atCap = `${"x".repeat(MAX_STREAM_FORMATTER_TEMPLATE_LENGTH - expression.length - 1)} ${expression}`;
+    const overCap = `x${atCap}`;
+
+    expect(atCap).toHaveLength(MAX_STREAM_FORMATTER_TEMPLATE_LENGTH);
+    expect(renderStreamTemplate(`  ${atCap}\n`, movie, "description").endsWith(" The Matrix")).toBe(true);
+    expect(renderBoth(overCap)).toEqual(DEFAULT_DESCRIPTIONS);
   });
 });

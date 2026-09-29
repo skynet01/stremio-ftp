@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderStreamTemplate } from "../src/shared/streamFormatter";
+import { DEFAULT_STREAM_DESCRIPTION_TEMPLATE, renderStreamTemplate } from "../src/shared/streamFormatter";
 
 const TEMPLATE_CAP = 12_000;
 
@@ -48,6 +48,18 @@ describe("stream formatter performance", () => {
 
     expect(renderStreamTemplate(templates[0], context, "description")).toBe(templates[0]);
     expect(duration).toBeLessThan(250);
+  });
+
+  it("renders templates over the length cap as the default template without parsing them", () => {
+    const template = "{".repeat(50_000);
+    let rendered = "";
+
+    const duration = elapsed(() => {
+      rendered = renderStreamTemplate(template, context, "description");
+    });
+
+    expect(rendered).toBe(renderStreamTemplate(DEFAULT_STREAM_DESCRIPTION_TEMPLATE, context, "description"));
+    expect(duration).toBeLessThan(200);
   });
 
   it("renders a long realistic template repeatedly within budget", () => {

@@ -1,5 +1,6 @@
 export const DEFAULT_STREAM_NAME_TEMPLATE = "FTP {stream.serverPrefix}{stream.quality}";
 export const DEFAULT_STREAM_DESCRIPTION_TEMPLATE = "{stream.serverName}{tools.newLine}{stream.filename}{tools.newLine}{stream.size::bytes}";
+export const MAX_STREAM_FORMATTER_TEMPLATE_LENGTH = 12_000;
 
 export type StreamFormatterContext = {
   config?: Record<string, unknown>;
@@ -75,7 +76,8 @@ const SMALL_CAPS: Record<string, string> = {
 
 export function renderStreamTemplate(template: string | null | undefined, context: StreamFormatterContext, kind: TemplateKind): string {
   const fallback = kind === "name" ? DEFAULT_STREAM_NAME_TEMPLATE : DEFAULT_STREAM_DESCRIPTION_TEMPLATE;
-  const rendered = renderNodes(compiledTemplate(template?.trim() || fallback), context);
+  const source = template?.trim() || fallback;
+  const rendered = renderNodes(compiledTemplate(source.length > MAX_STREAM_FORMATTER_TEMPLATE_LENGTH ? fallback : source), context);
   const normalized = kind === "name" ? normalizeName(rendered) : normalizeDescription(rendered);
   if (normalized) return normalized;
   const fallbackRendered = renderNodes(compiledTemplate(fallback), context);

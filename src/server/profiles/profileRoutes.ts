@@ -1,6 +1,7 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { isIP } from "node:net";
 import { z } from "zod";
+import { MAX_STREAM_FORMATTER_TEMPLATE_LENGTH } from "../../shared/streamFormatter.js";
 import type { AppConfig } from "../config.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
 import { countryCodeFromRequest } from "../http/requestMetadata.js";
@@ -42,7 +43,6 @@ type AuthenticatedBody = z.infer<typeof authenticatedSchema>;
 type ProfileContext<T> = { req: Request; res: Response; data: T; profileId: number };
 const saveFtpSchema = createSchema.extend({ ftpConfig: ftpConfigSchema });
 const serverIdSchema = createSchema.extend({ serverId: z.number().int().positive() });
-const MAX_STREAM_FORMATTER_TEMPLATE_LENGTH = 50000;
 const saveScanScheduleSchema = createSchema.extend({
   intervalMinutes: z.number().int().min(0).max(10080),
 });
