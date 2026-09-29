@@ -1032,40 +1032,51 @@ export class ProfileService {
       throw new Error("FTP server does not match shared index group");
     }
     const content = group.catalogContentTypes;
-    const result = this.db
-      .prepare(
-        `
-        update profile_ftp_servers
-        set shared_index_group_id = ?,
-            shared_index_key_hash = ?,
-            library_layout = ?,
-            catalog_content_movies = ?,
-            catalog_content_series = ?,
-            catalog_content_anime = ?,
-            catalog_content_uncategorized = ?,
-            scan_interval_minutes = case when id = (select master_profile_ftp_server_id from shared_index_groups where id = ?) then scan_interval_minutes else 0 end,
-            next_scheduled_scan_at = case when id = (select master_profile_ftp_server_id from shared_index_groups where id = ?) then next_scheduled_scan_at else null end,
-            pending_scan_after = null,
-            updated_at = ?
-        where profile_id = ? and id = ?
-      `,
-      )
-      .run(
-        groupId,
-        sharedIndexKey ? hashSharedIndexKey(sharedIndexKey) : null,
-        group.libraryLayout,
-        content.movies ? 1 : 0,
-        content.series ? 1 : 0,
-        content.anime ? 1 : 0,
-        content.uncategorized === false ? 0 : 1,
-        groupId,
-        groupId,
-        new Date().toISOString(),
-        profileId,
-        serverId,
-      );
-    if (result.changes === 0) throw new ProfileNotFoundError();
+    const link = this.db.transaction(() => {
+      const result = this.db
+        .prepare(
+          `
+          update profile_ftp_servers
+          set shared_index_group_id = ?,
+              shared_index_key_hash = ?,
+              library_layout = ?,
+              catalog_content_movies = ?,
+              catalog_content_series = ?,
+              catalog_content_anime = ?,
+              catalog_content_uncategorized = ?,
+              scan_interval_minutes = case when id = (select master_profile_ftp_server_id from shared_index_groups where id = ?) then scan_interval_minutes else 0 end,
+              next_scheduled_scan_at = case when id = (select master_profile_ftp_server_id from shared_index_groups where id = ?) then next_scheduled_scan_at else null end,
+              pending_scan_after = null,
+              updated_at = ?
+          where profile_id = ? and id = ?
+        `,
+        )
+        .run(
+          groupId,
+          sharedIndexKey ? hashSharedIndexKey(sharedIndexKey) : null,
+          group.libraryLayout,
+          content.movies ? 1 : 0,
+          content.series ? 1 : 0,
+          content.anime ? 1 : 0,
+          content.uncategorized === false ? 0 : 1,
+          groupId,
+          groupId,
+          new Date().toISOString(),
+          profileId,
+          serverId,
+        );
+      if (result.changes === 0) throw new ProfileNotFoundError();
+      this.clearLocalIndexForLinkedServer(profileId, serverId);
+    });
+    link();
     return this.getFtpServer(profileId, serverId);
+  }
+
+  private clearLocalIndexForLinkedServer(profileId: number, serverId: number) {
+    this.db.prepare("delete from media_files where profile_id = ? and ftp_server_id = ?").run(profileId, serverId);
+    this.db.prepare("delete from scan_directory_snapshots where profile_id = ? and ftp_server_id = ?").run(profileId, serverId);
+    const isMaster = this.db.prepare("select 1 from shared_index_groups where master_profile_ftp_server_id = ? limit 1").get(serverId);
+    if (!isMaster) this.db.prepare("delete from catalog_enrichment where profile_id = ? and ftp_server_id = ?").run(profileId, serverId);
   }
 
   forceLinkServerToSharedGroup(profileId: number, serverId: number, groupId: number) {
@@ -1114,11 +1125,12 @@ export class ProfileService {
             shared_index_key_hash = null,
             scan_interval_minutes = 0,
             next_scheduled_scan_at = null,
+            pending_scan_after = ?,
             updated_at = ?
         where profile_id = ? and id = ?
       `,
       )
-      .run(now, profileId, serverId);
+      .run(now, now, profileId, serverId);
     if (result.changes === 0) throw new ProfileNotFoundError();
     this.db
       .prepare(
@@ -1382,6 +1394,7 @@ export class ProfileService {
     const sharedGroup = server.sharedIndex ? this.getSharedIndexGroupIdentity(server.sharedIndex.id) : null;
     const isSharedMaster = Boolean(sharedGroup && sharedGroup.masterProfileFtpServerId === serverId);
     let ftpConfig = input.ftpConfig;
+    let unlinked = false;
     if (ftpConfig && sharedGroup && !serverMatchesSharedIndexGroup(ftpConfig, sharedGroup)) {
       if (isSharedMaster) {
         if (!sharedIndexTransportMatches(ftpConfig, sharedGroup)) throw new SharedIndexMasterIdentityChangeError(sharedGroup.name);
@@ -1392,6 +1405,7 @@ export class ProfileService {
       } else {
         if (!input.unlinkSharedIndex) throw new SharedIndexUnlinkRequiredError(sharedGroup.name);
         this.unlinkServerFromSharedGroup(profileId, serverId);
+        unlinked = true;
       }
     }
     if (ftpConfig) this.saveFtpServerConfig(profileId, serverId, ftpConfig);
@@ -1403,6 +1417,7 @@ export class ProfileService {
       if (isSharedMaster && sharedGroup) this.syncSharedIndexGroupNameFromMasterRename(sharedGroup.id, server.name, input.name);
       this.renameFtpServer(profileId, serverId, input.name);
     }
+    if (unlinked) this.schedulePendingScan(profileId, serverId, new Date().toISOString());
     if (input.sharedIndexKey) {
       const group = this.resolveApprovedSharedIndexKey(profileId, serverId, input.sharedIndexKey);
       if (group) this.linkServerToSharedGroup(profileId, serverId, group.id, input.sharedIndexKey);

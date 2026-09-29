@@ -27,6 +27,33 @@ async function serviceWithServer() {
   return { db, service, profileId: created.profileId, serverId };
 }
 
+function insertLocalIndexRows(db: Database.Database, profileId: number, serverId: number) {
+  db.prepare(
+    `
+      insert into media_files (
+        profile_id, ftp_server_id, ftp_path, filename, normalized_filename, extension, media_kind, catalog_kind,
+        parsed_title, parsed_year, confidence, last_seen_at
+      ) values (?, ?, '/media/Local.Movie.2020.mkv', 'Local.Movie.2020.mkv', 'local movie', 'mkv', 'movie', 'movie', 'local movie', 2020, 90, 'n')
+    `,
+  ).run(profileId, serverId);
+  db.prepare(
+    "insert into scan_directory_snapshots (profile_id, ftp_server_id, dir_path, entry_count, fingerprint, last_seen_at) values (?, ?, '/media', 1, 'f', 'n')",
+  ).run(profileId, serverId);
+  db.prepare(
+    `
+      insert into catalog_enrichment (
+        profile_id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year,
+        status, meta_id, meta_type, meta_name, algorithm_version, attempts, last_seen_at, created_at, updated_at
+      ) values (?, ?, 'movie||local movie|2020', 'movie', 'movie', 'local movie', 2020, 'matched', 'tt7654321', 'movie', 'Local Movie', 3, 1, 'n', 'n', 'n')
+    `,
+  ).run(profileId, serverId);
+}
+
+function localIndexRowCounts(db: Database.Database, serverId: number) {
+  const count = (table: string) => db.prepare(`select count(*) from ${table} where ftp_server_id = ?`).pluck().get(serverId) as number;
+  return { mediaFiles: count("media_files"), snapshots: count("scan_directory_snapshots"), enrichment: count("catalog_enrichment") };
+}
+
 describe("shared index groups", () => {
   it("canonicalizes roots and hashes keys without storing raw values", () => {
     expect(canonicalRootPaths(["/media/", "TV", "/media"])).toEqual(["/media", "/TV"]);
@@ -296,6 +323,59 @@ describe("shared index groups", () => {
     expect(() => service.deleteFtpServer(profileId, serverId)).toThrow(/master source/);
 
     expect(service.getSharedIndexGroup(created.group.id)?.masterProfileFtpServerId).toBe(serverId);
+  });
+
+  it("clears local index rows when linking but keeps the master's shared enrichment", async () => {
+    const { db, service, profileId, serverId } = await serviceWithServer();
+    insertLocalIndexRows(db, profileId, serverId);
+    const linked = await service.createProfile("stale-linked-browser", "passphrase");
+    const linkedServerId = service.defaultFtpServerId(linked.profileId);
+    service.saveFtpServerConfig(linked.profileId, linkedServerId, service.getFtpServerConfig(profileId, serverId)!, false);
+    insertLocalIndexRows(db, linked.profileId, linkedServerId);
+    const untouchedServerId = service.createFtpServer(linked.profileId, { name: "Untouched" }).id;
+    insertLocalIndexRows(db, linked.profileId, untouchedServerId);
+
+    const created = service.createSharedIndexGroupFromServer(profileId, serverId, { name: "Sputnik Main", keyHint: "sputnik-main" });
+    expect(localIndexRowCounts(db, serverId)).toEqual({ mediaFiles: 0, snapshots: 0, enrichment: 1 });
+
+    service.linkServerToSharedGroup(linked.profileId, linkedServerId, created.group.id, created.sharedIndexKey);
+    expect(localIndexRowCounts(db, linkedServerId)).toEqual({ mediaFiles: 0, snapshots: 0, enrichment: 0 });
+    expect(localIndexRowCounts(db, untouchedServerId)).toEqual({ mediaFiles: 1, snapshots: 1, enrichment: 1 });
+
+    service.setSharedIndexGroupMaster(created.group.id, profileId, serverId);
+    expect(localIndexRowCounts(db, serverId)).toEqual({ mediaFiles: 0, snapshots: 0, enrichment: 1 });
+  });
+
+  it("schedules a prompt local rescan after unlinking a server", async () => {
+    const { db, service, profileId, serverId } = await serviceWithServer();
+    const created = service.createSharedIndexGroupFromServer(profileId, serverId, { name: "Sputnik Main", keyHint: "sputnik-main" });
+    const linked = await service.createProfile("unlink-rescan-browser", "passphrase");
+    const linkedServerId = service.defaultFtpServerId(linked.profileId);
+    const ftpConfig = service.getFtpServerConfig(profileId, serverId)!;
+    service.saveFtpServerConfig(linked.profileId, linkedServerId, ftpConfig, false);
+    service.linkServerToSharedGroup(linked.profileId, linkedServerId, created.group.id, created.sharedIndexKey);
+    expect(service.getFtpServer(linked.profileId, linkedServerId).pendingScanAfter).toBeNull();
+
+    service.unlinkServerFromSharedGroup(linked.profileId, linkedServerId);
+    const pendingAfterUnlink = service.getFtpServer(linked.profileId, linkedServerId).pendingScanAfter;
+    expect(pendingAfterUnlink).toEqual(expect.any(String));
+    expect(Date.parse(pendingAfterUnlink!)).toBeLessThanOrEqual(Date.now());
+    expect(service.dueScheduledScanServerIds(new Date().toISOString())).toContainEqual({
+      profileId: linked.profileId,
+      serverId: linkedServerId,
+      dueReason: "pending",
+    });
+
+    service.linkServerToSharedGroup(linked.profileId, linkedServerId, created.group.id, created.sharedIndexKey);
+    service.saveFtpServer(linked.profileId, linkedServerId, {
+      ftpConfig: { ...ftpConfig, roots: ["/private"] },
+      customization: { catalogEnabled: true },
+      unlinkSharedIndex: true,
+    });
+    const pendingAfterSave = service.getFtpServer(linked.profileId, linkedServerId).pendingScanAfter;
+    expect(service.getFtpServer(linked.profileId, linkedServerId).sharedIndex).toBeNull();
+    expect(Date.parse(pendingAfterSave!)).toBeLessThanOrEqual(Date.now());
+    expect(db.prepare("select pending_scan_after from profile_ftp_servers where id = ?").pluck().get(serverId)).toBeNull();
   });
 
   it("reads shared group identity without computing catalog counts", async () => {

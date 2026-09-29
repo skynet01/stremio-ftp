@@ -1024,6 +1024,50 @@ describe("profile routes", () => {
     counts.mockRestore();
   });
 
+  it("stops a queued local scan when a saved server links to a shared index", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), scanGlobalConcurrency: 0 }, db);
+    const service = new ProfileService(db, config().encryptionKey);
+    const ftpConfig = {
+      host: "sputnik.whatbox.ca",
+      port: 21,
+      username: "user",
+      password: "secret",
+      tlsMode: "explicit" as const,
+      allowInvalidCertificate: false,
+      roots: ["/media"],
+    };
+    const master = await service.createProfile("master-browser-uid", "passphrase");
+    const masterServerId = service.defaultFtpServerId(master.profileId);
+    service.saveFtpServerConfig(master.profileId, masterServerId, ftpConfig, false);
+    const group = service.createSharedIndexGroupFromServer(master.profileId, masterServerId, { name: "Sputnik Main", keyHint: "sputnik-main" });
+    const linked = await service.createProfile("linked-browser-uid", "passphrase");
+    const serverId = service.defaultFtpServerId(linked.profileId);
+    service.saveFtpServerConfig(linked.profileId, serverId, ftpConfig, false);
+    await request(app)
+      .post("/api/profile/index/rescan")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "linked-browser-uid", passphrase: "passphrase", serverId })
+      .expect(200);
+
+    await request(app)
+      .post("/api/profile/servers/save")
+      .set("x-setup-token", "setup-secret-123")
+      .send({
+        browserUid: "linked-browser-uid",
+        passphrase: "passphrase",
+        serverId,
+        name: "Linked",
+        sharedIndexKey: group.sharedIndexKey,
+        ftpConfig,
+        customization: { catalogEnabled: true, catalogContentTypes: { movies: true, series: true, anime: false }, libraryLayout: "auto", streamDeliveryMode: "proxy" },
+      })
+      .expect(200);
+
+    expect(db.prepare("select status from scan_jobs where target_kind = 'profile_server' and ftp_server_id = ?").pluck().all(serverId)).toEqual(["cancelled"]);
+  });
+
   it("requires confirmation before FTP identity changes unlink a shared index server", async () => {
     const db = new Database(":memory:");
     migrate(db);

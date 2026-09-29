@@ -335,6 +335,111 @@ describe("admin routes", () => {
     expect(response.body.scanStatus).toEqual(expect.objectContaining({ status: "queued", trigger: "manual" }));
   });
 
+  it("routes admin rescans of shared index servers to the shared group scan", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config({ scanGlobalConcurrency: 0 }), db);
+    await createProfile(app, "admin-uid");
+    const master = await createProfile(app, "master-uid");
+    const linked = await createProfile(app, "linked-uid");
+    await saveDefaultFtp(app, "master-uid", "sputnik.whatbox.ca");
+    await saveDefaultFtp(app, "linked-uid", "sputnik.whatbox.ca");
+    const masterServerId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(master.body.profileId) as number;
+    const linkedServerId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(linked.body.profileId) as number;
+    const created = await request(app)
+      .post("/api/admin/shared-index-groups/create")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: master.body.profileId, serverId: masterServerId, name: "Sputnik Main" })
+      .expect(200);
+    const groupId = created.body.group.id;
+    await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/link-server`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: linked.body.profileId, serverId: linkedServerId })
+      .expect(200);
+    db.prepare("delete from scan_jobs").run();
+
+    for (const profileId of [master.body.profileId, linked.body.profileId]) {
+      const response = await request(app)
+        .post(`/api/admin/profiles/${profileId}/rescan`)
+        .set("x-setup-token", "setup-secret-123")
+        .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+        .expect(200);
+      expect(response.body).toMatchObject({ profileId, scanStatus: { status: "queued", trigger: "manual" } });
+    }
+
+    expect(db.prepare("select target_kind, shared_index_group_id, status from scan_jobs").all()).toEqual([
+      { target_kind: "shared_group", shared_index_group_id: groupId, status: "queued" },
+    ]);
+  });
+
+  it("schedules a prompt local rescan when admin unlinks a server", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config({ scanGlobalConcurrency: 0 }), db);
+    await createProfile(app, "admin-uid");
+    const master = await createProfile(app, "master-uid");
+    const linked = await createProfile(app, "linked-uid");
+    await saveDefaultFtp(app, "master-uid", "sputnik.whatbox.ca");
+    await saveDefaultFtp(app, "linked-uid", "sputnik.whatbox.ca");
+    const masterServerId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(master.body.profileId) as number;
+    const linkedServerId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(linked.body.profileId) as number;
+    const created = await request(app)
+      .post("/api/admin/shared-index-groups/create")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: master.body.profileId, serverId: masterServerId, name: "Sputnik Main" })
+      .expect(200);
+    const groupId = created.body.group.id;
+    await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/link-server`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: linked.body.profileId, serverId: linkedServerId })
+      .expect(200);
+
+    await request(app)
+      .post(`/api/admin/shared-index-groups/${groupId}/unlink-server`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: linked.body.profileId, serverId: linkedServerId })
+      .expect(200);
+
+    const pendingScanAfter = db.prepare("select pending_scan_after from profile_ftp_servers where id = ?").pluck().get(linkedServerId) as string | null;
+    expect(pendingScanAfter).toEqual(expect.any(String));
+    expect(Date.parse(pendingScanAfter!)).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("stops a queued local scan when admin links the server to a shared index", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp(config({ scanGlobalConcurrency: 0 }), db);
+    await createProfile(app, "admin-uid");
+    const master = await createProfile(app, "master-uid");
+    const linked = await createProfile(app, "linked-uid");
+    await saveDefaultFtp(app, "master-uid", "sputnik.whatbox.ca");
+    await saveDefaultFtp(app, "linked-uid", "sputnik.whatbox.ca");
+    const masterServerId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(master.body.profileId) as number;
+    const linkedServerId = db.prepare("select id from profile_ftp_servers where profile_id = ?").pluck().get(linked.body.profileId) as number;
+    await request(app)
+      .post(`/api/admin/profiles/${linked.body.profileId}/rescan`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase" })
+      .expect(200);
+    const created = await request(app)
+      .post("/api/admin/shared-index-groups/create")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: master.body.profileId, serverId: masterServerId, name: "Sputnik Main" })
+      .expect(200);
+
+    await request(app)
+      .post(`/api/admin/shared-index-groups/${created.body.group.id}/link-server`)
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "admin-uid", passphrase: "passphrase", profileId: linked.body.profileId, serverId: linkedServerId })
+      .expect(200);
+
+    expect(
+      db.prepare("select status from scan_jobs where target_kind = 'profile_server' and ftp_server_id = ? order by id").pluck().all(linkedServerId),
+    ).toEqual(["cancelled"]);
+  });
+
   it("runs bulk admin actions for selected profiles", async () => {
     const db = new Database(":memory:");
     migrate(db);

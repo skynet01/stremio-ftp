@@ -141,6 +141,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
         enabled: parsed.data.enabled,
         autoLinkImports: parsed.data.autoLinkImports,
       });
+      scanQueue.cancelServerScan(parsed.data.profileId, parsed.data.serverId);
       res.json({ group: sharedIndexGroupView(service, scanQueue, created.group), sharedIndexKey: created.sharedIndexKey });
     } catch (error) {
       handleSharedIndexError(error, res);
@@ -193,6 +194,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     try {
       if (parsed.data.force) service.forceLinkServerToSharedGroup(parsed.data.profileId, parsed.data.serverId, groupId.data);
       else service.linkServerToSharedGroup(parsed.data.profileId, parsed.data.serverId, groupId.data);
+      scanQueue.cancelServerScan(parsed.data.profileId, parsed.data.serverId);
       const group = service.getSharedIndexGroup(groupId.data);
       if (!group) return res.status(404).json({ error: "Shared index group not found" });
       res.json({ group: sharedIndexGroupView(service, scanQueue, group) });
@@ -255,6 +257,7 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
 
     try {
       const group = service.setSharedIndexGroupMaster(groupId.data, parsed.data.profileId, parsed.data.serverId);
+      scanQueue.cancelServerScan(parsed.data.profileId, parsed.data.serverId);
       res.json({ group: sharedIndexGroupView(service, scanQueue, group) });
     } catch (error) {
       handleSharedIndexError(error, res);
@@ -334,7 +337,13 @@ export function adminRoutes(config: AppConfig, service: ProfileService, scanQueu
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
     try {
-      res.json({ profileId: profileId.data, scanStatus: scanQueue.enqueueProfileScan(profileId.data, "manual") });
+      const serverId = service.defaultFtpServerId(profileId.data);
+      const server = service.getFtpServer(profileId.data, serverId);
+      if (!server.sharedIndex) return res.json({ profileId: profileId.data, scanStatus: scanQueue.enqueueProfileScan(profileId.data, "manual", serverId) });
+      if (!service.getSharedIndexGroupIdentity(server.sharedIndex.id)?.masterProfileFtpServerId) {
+        return res.status(400).json({ error: "Shared index group has no master server" });
+      }
+      res.json({ profileId: profileId.data, scanStatus: scanQueue.enqueueSharedIndexScan(server.sharedIndex.id, "manual") });
     } catch (error) {
       if (error instanceof ProfileNotFoundError) return res.status(404).json({ error: "Profile not found" });
       throw error;

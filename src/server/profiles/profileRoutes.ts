@@ -266,6 +266,7 @@ export function profileRoutes(
         sharedIndexKey: parsed.data.sharedIndexKey,
         unlinkSharedIndex: parsed.data.unlinkSharedIndex,
       });
+      if (server.sharedIndex) scanQueue.cancelServerScan(unlocked.profileId, server.id);
       res.json({
         server: serverPayload(service, scanQueue, server),
         globalStats: globalStats(service, scanQueue, unlocked.profileId),
