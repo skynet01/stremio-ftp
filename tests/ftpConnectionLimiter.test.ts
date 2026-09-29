@@ -122,6 +122,24 @@ describe("limitFtpClientFactory", () => {
 });
 
 describe("limitFtpClientFactoryByKey", () => {
+  it("shares a provider login slot across password and TLS changes for the same account", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const limited = limitFtpClientFactoryByKey(async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return fakeClient({ onClose: () => { active -= 1; } });
+    }, 1);
+    const first = await limited(ftpConfig({ password: "old-password" }));
+    const replacement = limited(ftpConfig({ password: "new-password", tlsMode: "explicit" }));
+
+    expect((await settleWithin(replacement)).status).toBe("pending");
+    await first.close();
+    const second = await replacement;
+    await second.close();
+    expect(maxActive).toBe(1);
+  });
+
   it("allows one active connection per FTP credential key", async () => {
     let active = 0;
     let maxActive = 0;

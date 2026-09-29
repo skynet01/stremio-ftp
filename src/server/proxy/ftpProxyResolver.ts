@@ -11,6 +11,7 @@ const WARM_CLIENT_TTL_MS = 10_000;
 type WarmClient = {
   promise: Promise<ClaimableFtpClient>;
   timeout: NodeJS.Timeout;
+  controller: AbortController;
 };
 
 type OpenFtpClientResult = {
@@ -130,15 +131,44 @@ async function openFtpClient(
   const warmClient = takeWarmFtpClient(warmClients, warmKey);
   if (warmClient) {
     try {
-      const client = await warmClient;
+      const client = await awaitWarmFtpClient(warmClient, signal);
       if (client.claim?.() !== false) return { client, warmed: true, clientReadyMs: elapsedMs(startedAt) };
     } catch {
       // The warm-up failed or gave its slot away; open a fresh connection instead.
     }
   }
 
+  if (signal?.aborted) throw new Error("Proxy request aborted");
   const connectStartedAt = performance.now();
   return { client: await ftpClientFactory(ftpConfig, { signal }), warmed: false, clientReadyMs: elapsedMs(connectStartedAt) };
+}
+
+function awaitWarmFtpClient(warmClient: WarmClient, signal: AbortSignal | undefined): Promise<ClaimableFtpClient> {
+  if (!signal) return warmClient.promise;
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      warmClient.controller.abort();
+      reject(new Error("Proxy request aborted"));
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    void warmClient.promise.then(
+      (client) => {
+        signal.removeEventListener("abort", onAbort);
+        if (signal.aborted) {
+          void client.close().catch(() => undefined);
+          reject(new Error("Proxy request aborted"));
+        } else resolve(client);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function warmFtpClient(
@@ -150,7 +180,8 @@ function warmFtpClient(
   if (warmClients.has(warmKey)) return;
 
   const startedAt = performance.now();
-  const promise = ftpClientFactory(ftpConfig, { background: true });
+  const controller = new AbortController();
+  const promise = ftpClientFactory(ftpConfig, { background: true, signal: controller.signal });
   void promise
     .then(() => {
       logFtpProxyTiming("warm_ready", {
@@ -170,11 +201,12 @@ function warmFtpClient(
     });
   const timeout = setTimeout(() => {
     warmClients.delete(warmKey);
+    controller.abort();
     void promise.then((client) => client.close()).catch(() => undefined);
   }, WARM_CLIENT_TTL_MS);
   timeout.unref?.();
 
-  warmClients.set(warmKey, { promise, timeout });
+  warmClients.set(warmKey, { promise, timeout, controller });
   void promise.catch(() => {
     const warmClient = warmClients.get(warmKey);
     if (warmClient?.promise === promise) {
@@ -190,7 +222,7 @@ function takeWarmFtpClient(warmClients: Map<string, WarmClient>, warmKey: string
 
   warmClients.delete(warmKey);
   clearTimeout(warmClient.timeout);
-  return warmClient.promise;
+  return warmClient;
 }
 
 function ftpWarmKey(profileId: number, serverId: number | null, ftpPath: string, ftpConfig: FtpConfig) {
@@ -200,6 +232,7 @@ function ftpWarmKey(profileId: number, serverId: number | null, ftpPath: string,
     ftpConfig.host,
     ftpConfig.port,
     ftpConfig.username,
+    ftpConfig.password,
     ftpConfig.tlsMode,
     ftpConfig.allowInvalidCertificate ? "invalid-cert-ok" : "valid-cert",
     ftpPath,

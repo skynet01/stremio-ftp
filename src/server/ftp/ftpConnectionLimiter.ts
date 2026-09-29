@@ -147,9 +147,6 @@ function ftpConfigConnectionKey(config: FtpConfig) {
     config.host.trim().toLowerCase(),
     config.port,
     config.username,
-    config.password,
-    config.tlsMode,
-    config.allowInvalidCertificate ? "invalid-cert-ok" : "valid-cert",
   ].join("\0");
 }
 

@@ -12,6 +12,60 @@ function deferred<T>() {
 }
 
 describe("createFtpProxyResolver", () => {
+  it("aborts a claimed warm login when its playback request is cancelled", async () => {
+    let aborted = false;
+    let logins = 0;
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub(), (_config, options) => {
+      logins += 1;
+      if (logins > 1) return Promise.resolve({
+        list: async () => [],
+        openReadStream: async () => Readable.from("ok"),
+        close: async () => undefined,
+      });
+      return new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => {
+          aborted = true;
+          reject(new Error("login aborted"));
+        }, { once: true });
+      });
+    });
+    const file = await resolver({ installToken: "token", fileId: 44 });
+    file!.warmReadStream();
+    const controller = new AbortController();
+    const pending = file!.openReadStream({ start: 0, end: 9, signal: controller.signal });
+    controller.abort();
+
+    expect(await settleWithin(pending)).toEqual({ status: "rejected", message: "Proxy request aborted" });
+    expect(aborted).toBe(true);
+    expect((await settleWithin(file!.openReadStream({ start: 0, end: 9 }))).status).toBe("fulfilled");
+  });
+
+  it("does not reuse a warmed login after the FTP password changes", async () => {
+    let password = "old-password";
+    const usedPasswords: string[] = [];
+    const resolver = createFtpProxyResolver(
+      profileStub({ getFtpServerConfig: () => ({
+        host: "ftp.example.test", port: 21, username: "user", password,
+        tlsMode: "none", allowInvalidCertificate: false, roots: ["/"],
+      }) }),
+      mediaStub(),
+      async (config) => ({
+        list: async () => [],
+        openReadStream: async () => {
+          usedPasswords.push(config.password);
+          return Readable.from("ok");
+        },
+        close: async () => undefined,
+      }),
+    );
+    (await resolver({ installToken: "token", fileId: 44 }))!.warmReadStream();
+    password = "new-password";
+    const file = await resolver({ installToken: "token", fileId: 44 });
+    await file!.openReadStream({ start: 0, end: 9 });
+
+    expect(usedPasswords).toEqual(["new-password"]);
+  });
+
   it("reuses a warmed FTP client for the next stream open", async () => {
     let factoryCalls = 0;
     let openedPath = "";

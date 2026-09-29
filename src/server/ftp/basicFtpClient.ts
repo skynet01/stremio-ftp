@@ -3,6 +3,8 @@ import { PassThrough, Writable } from "node:stream";
 import type { FtpConfig } from "../profiles/profileService.js";
 import type { FtpClient, FtpClientFactory } from "./ftpTypes.js";
 
+const SOCKET_CLOSE_TIMEOUT_MS = 3_000;
+
 export function createBasicFtpClientFactory(
   timeoutMs = 30000,
 ): (config: FtpConfig, options?: { signal?: AbortSignal }) => Promise<FtpClient> {
@@ -22,12 +24,11 @@ export function createBasicFtpClientFactory(
         secureOptions: config.allowInvalidCertificate ? { rejectUnauthorized: false } : undefined,
       });
     } catch (error) {
-      client.close();
+      await closeBasicFtpClient(client);
       throw error;
     } finally {
       signal?.removeEventListener("abort", closeOnAbort);
     }
-
     return {
       async list(path: string) {
         const entries = await client.list(path);
@@ -43,13 +44,30 @@ export function createBasicFtpClientFactory(
         return openLimitedDownloadStream(client, path, input.start, input.end);
       },
       async close() {
-        client.close();
+        await closeBasicFtpClient(client);
       },
     };
   };
 }
 
 export const createBasicFtpClient: FtpClientFactory = createBasicFtpClientFactory();
+
+async function closeBasicFtpClient(client: Client) {
+  const socket = client.ftp.socket;
+  const alreadyClosed = socket.closed;
+  client.close();
+  if (!alreadyClosed) {
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(resolve, SOCKET_CLOSE_TIMEOUT_MS);
+      socket.once("close", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+  }
+  // The provider can retire the login shortly after the local socket closes.
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+}
 
 function openLimitedDownloadStream(client: Client, remotePath: string, start: number, end: number) {
   const output = new PassThrough();

@@ -11,6 +11,15 @@ afterEach(async () => {
 });
 
 describe("createBasicFtpClientFactory", () => {
+  it("does not release a login slot until its control socket closes", async () => {
+    const server = await startFakeFtpServer({ files: {} });
+    const client = await createBasicFtpClientFactory(5000)(ftpConfig(server.port));
+
+    await client.close();
+
+    expect(server.closedControlConnections).toBe(1);
+  });
+
   it("delivers every byte of a range to a slow consumer", async () => {
     const file = patternedBuffer(256 * 1024);
     const server = await startFakeFtpServer({ files: { "/video.mkv": file } });
@@ -63,7 +72,7 @@ describe("createBasicFtpClientFactory login cleanup", () => {
 
     await expect(createBasicFtpClientFactory(5000)(ftpConfig(server.port))).rejects.toThrow();
 
-    await waitFor(() => server.closedControlConnections === 1);
+    expect(server.closedControlConnections).toBe(1);
   });
 
   it("aborts a login in progress and closes the control connection", async () => {
