@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { migrate } from "../src/server/db/schema";
 import { MediaRepository } from "../src/server/media/mediaRepository";
 import { ProfileService } from "../src/server/profiles/profileService";
+import { createFtpConnectionPool } from "../src/server/ftp/ftpConnectionPool";
 import { createFtpProxyResolver } from "../src/server/proxy/ftpProxyResolver";
 import { canonicalRootPaths, hashSharedIndexKey, serverMatchesSharedIndexGroup } from "../src/server/shared/sharedIndex";
 
@@ -451,9 +452,10 @@ describe("shared index groups", () => {
         .run(created.group.id).lastInsertRowid,
     );
     const counts = vi.spyOn(ProfileService.prototype as unknown as { sharedIndexGroupCatalogItemCounts: () => unknown }, "sharedIndexGroupCatalogItemCounts");
-    const resolve = createFtpProxyResolver(service, new MediaRepository(db), async () => {
+    const unusedPool = createFtpConnectionPool(async () => {
       throw new Error("not used");
-    });
+    }, { idleMs: 0 });
+    const resolve = createFtpProxyResolver(service, new MediaRepository(db), unusedPool);
 
     const resolved = await resolve({ installToken: linked.installUrlToken, serverId: linkedServerId, sharedMediaId });
 

@@ -196,6 +196,35 @@ describe("proxy routes", () => {
     expect(openReadStream).not.toHaveBeenCalled();
   });
 
+  it("tells the FTP side which ranges are open-ended", async () => {
+    const opened: Array<{ start: number; end: number; openEnded?: boolean }> = [];
+    const router = createProxyRouter({
+      resolve: async () => ({
+        filename: "video.mkv",
+        sizeBytes: 10,
+        openReadStream: async ({ start, end, openEnded }) => {
+          opened.push({ start, end, openEnded });
+          return Readable.from([Buffer.from("0123456789").subarray(start, end + 1)]);
+        },
+      }),
+    });
+
+    const express = (await import("express")).default;
+    const app = express().use(router);
+
+    await request(app).get("/proxy/token/1").set("Range", "bytes=2-5").expect(206);
+    await request(app).get("/proxy/token/1").set("Range", "bytes=6-").expect(206);
+    await request(app).get("/proxy/token/1").set("Range", "bytes=-3").expect(206);
+    await request(app).get("/proxy/token/1").expect(200);
+
+    expect(opened).toEqual([
+      { start: 2, end: 5, openEnded: false },
+      { start: 6, end: 9, openEnded: true },
+      { start: 7, end: 9, openEnded: false },
+      { start: 0, end: 9, openEnded: true },
+    ]);
+  });
+
   it("does not destroy the stream during normal response completion", async () => {
     let destroyCalls = 0;
     const stream = new Readable({

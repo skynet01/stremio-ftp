@@ -8,6 +8,7 @@ import helmet from "helmet";
 import type { AppConfig } from "./config.js";
 import { openDatabase } from "./db/database.js";
 import { createBasicFtpClientFactory } from "./ftp/basicFtpClient.js";
+import { createFtpConnectionPool } from "./ftp/ftpConnectionPool.js";
 import { limitFtpClientFactoryByKey } from "./ftp/ftpConnectionLimiter.js";
 import type { FtpClientFactory } from "./ftp/ftpTypes.js";
 import { redactSecrets } from "./logging/redact.js";
@@ -53,6 +54,8 @@ export function createApp(
   const mediaRepository = new MediaRepository(db);
   const baseFtpClientFactory = options.ftpClientFactory ?? createBasicFtpClientFactory(config.ftpTimeoutMs);
   const ftpClientFactory = limitFtpClientFactoryByKey(baseFtpClientFactory, config.ftpMaxConnections);
+  // Configs built without loadConfig (tests) leave pooling off.
+  const ftpPool = createFtpConnectionPool(ftpClientFactory, { idleMs: config.ftpPoolIdleMs ?? 0 });
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
   const scanScheduler = setInterval(
     guardedTimerTask("[scan-scheduler] Failed to enqueue scheduled scans:", () => scanQueue.enqueueDueScheduledScans()),
@@ -85,7 +88,7 @@ export function createApp(
     res.json({ ok: true });
   });
   app.use("/api", profileRoutes(config, profileService, ftpClientFactory, scanQueue, mediaRepository));
-  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpClientFactory) }));
+  app.use(createProxyRouter({ resolve: createFtpProxyResolver(profileService, mediaRepository, ftpPool) }));
   app.use(stremioRoutes(config, profileService, mediaRepository));
 
   app.get("/health", (_req, res) => {
@@ -107,7 +110,8 @@ export function createApp(
 
   app.use(jsonErrorHandler());
 
-  return app;
+  // Logs out pooled FTP connections; the process calls it before exiting.
+  return Object.assign(app, { shutdown: () => ftpPool.close() });
 }
 
 function guardedTimerTask(failureMessage: string, task: () => void) {

@@ -14,6 +14,7 @@ describe("playback stress (reduced)", () => {
         longPause: false,
         fileSizeBytes: 64 * 1024 * 1024,
         quiesceTimeoutMs: 5_000,
+        poolIdleMs: 500,
         hangTimeoutMs: 10_000,
       }),
     );

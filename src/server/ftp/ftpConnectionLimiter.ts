@@ -6,11 +6,18 @@ export type FtpClientRequestOptions = {
   signal?: AbortSignal;
   // Background requests only take a free slot and give it up to a waiting request until claimed.
   background?: boolean;
+  // Passed through to the login: playback connections skip the directory-listing setup scans need.
+  playback?: boolean;
+  // Runs once the request holds a slot and its login starts (it no longer waits in the queue).
+  onLoginStart?: () => void;
 };
 
 export type ClaimableFtpClient = FtpClient & {
-  // Marks a background client as in use; returns false once it has been given up.
+  // Marks a background or parked client as in use; returns false once it has been given up.
   claim?(): boolean;
+  // Parks an idle logged-in client: its slot goes to the next request that would otherwise wait, and onYield runs
+  // when that happens. Returns false (and gives the slot away) if a request is already waiting or the client is closing.
+  park?(onYield: () => void): boolean;
 };
 
 export type AbortableFtpClientFactory = (config: FtpConfig, options?: FtpClientRequestOptions) => Promise<ClaimableFtpClient>;
@@ -98,6 +105,7 @@ export function limitFtpClientFactoryByKey(
   return async (config, options = {}) => {
     const { signal, background = false } = options;
     const { state, release } = await acquire(keyForConfig(config), options);
+    options.onLoginStart?.();
     const yieldController = background ? new AbortController() : null;
     const yieldLogin = () => {
       state.yieldable.delete(yieldLogin);
@@ -114,7 +122,7 @@ export function limitFtpClientFactoryByKey(
     let client: ClaimableFtpClient;
     try {
       if (loginSignal?.aborted) throw cancellationError();
-      client = await factory(config, { signal: loginSignal });
+      client = await factory(config, { signal: loginSignal, playback: options.playback });
     } catch (error) {
       state.yieldable.delete(yieldLogin);
       release();
@@ -122,7 +130,7 @@ export function limitFtpClientFactoryByKey(
     }
     state.yieldable.delete(yieldLogin);
 
-    const limitedClient = releaseClientSlotOnClose(client, release, background ? state.yieldable : null);
+    const limitedClient = releaseClientSlotOnClose(client, release, state, background);
     if (loginSignal?.aborted) {
       await limitedClient.close().catch(() => undefined);
       throw cancellationError();
@@ -152,11 +160,12 @@ function ftpConfigConnectionKey(config: FtpConfig) {
   ].join("\0");
 }
 
-function releaseClientSlotOnClose(client: FtpClient, release: () => void, yieldable: Set<() => void> | null): ClaimableFtpClient {
+function releaseClientSlotOnClose(client: ClaimableFtpClient, release: () => void, state: LimiterState, background: boolean): ClaimableFtpClient {
   let closing: Promise<void> | null = null;
+  let onYield: (() => void) | null = null;
   const closeAndRelease = () => {
     if (!closing) {
-      yieldable?.delete(yieldSlot);
+      state.yieldable.delete(yieldSlot);
       closing = (async () => {
         try {
           await client.close();
@@ -168,39 +177,64 @@ function releaseClientSlotOnClose(client: FtpClient, release: () => void, yielda
     return closing;
   };
   const yieldSlot = () => {
+    const notify = onYield;
+    onYield = null;
+    notify?.();
     void closeAndRelease().catch(() => undefined);
   };
   const claim = () => {
     if (closing) return false;
-    yieldable?.delete(yieldSlot);
+    state.yieldable.delete(yieldSlot);
+    onYield = null;
     return true;
   };
-  yieldable?.add(yieldSlot);
+  const park = (notify: () => void) => {
+    if (closing) return false;
+    if (state.queue.length > 0) {
+      void closeAndRelease().catch(() => undefined);
+      return false;
+    }
+    onYield = notify;
+    state.yieldable.add(yieldSlot);
+    return true;
+  };
+  if (background) state.yieldable.add(yieldSlot);
 
   return {
     list: (path) => {
       claim();
       return client.list(path);
     },
-    openReadStream: async (path, input) => {
+    openReadStream: async (path, { onReusable, ...range }) => {
       claim();
       let stream: NodeJS.ReadableStream;
       try {
-        stream = await client.openReadStream(path, input);
+        stream = await client.openReadStream(path, range);
       } catch (error) {
         await closeAndRelease();
         throw error;
       }
 
-      const releaseAfterStream = () => {
+      // The first of end/close/error decides: a login whose transfer completed cleanly goes back to its owner,
+      // anything else is closed so its slot is released.
+      let settled = false;
+      const afterStream = () => {
+        if (settled) return;
+        settled = true;
+        if (onReusable && !closing && client.isReusable?.()) {
+          onReusable();
+          return;
+        }
         void closeAndRelease().catch(() => undefined);
       };
-      stream.once("close", releaseAfterStream);
-      stream.once("end", releaseAfterStream);
-      stream.once("error", releaseAfterStream);
+      stream.once("close", afterStream);
+      stream.once("end", afterStream);
+      stream.once("error", afterStream);
       return stream;
     },
     close: closeAndRelease,
+    isReusable: () => !closing && (client.isReusable?.() ?? true),
     claim,
+    park,
   };
 }

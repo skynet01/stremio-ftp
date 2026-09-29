@@ -8,7 +8,7 @@ type ProxyFile = {
   filename: string;
   sizeBytes: number | null;
   warmReadStream?: () => void;
-  openReadStream(input: { start: number; end: number; signal?: AbortSignal }): Promise<NodeJS.ReadableStream>;
+  openReadStream(input: { start: number; end: number; openEnded?: boolean; signal?: AbortSignal }): Promise<NodeJS.ReadableStream>;
 };
 
 type ProxyDeps = {
@@ -130,6 +130,8 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
   const status = range && file.sizeBytes !== null ? 206 : 200;
   const start = range?.start ?? 0;
   const end = range?.end ?? (file.sizeBytes === null ? Number.MAX_SAFE_INTEGER : file.sizeBytes - 1);
+  // Whole-file and "bytes=start-" requests are the ones players drop on the next seek.
+  const openEnded = !range || /^bytes=\d+-$/.test(rangeHeader ?? "");
   const contentLength = status === 206 ? range?.size ?? null : file.sizeBytes;
   timing.status = status;
   timing.contentLength = contentLength;
@@ -171,7 +173,7 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
   let stream: NodeJS.ReadableStream;
   try {
     const openStartedAt = performance.now();
-    stream = await file.openReadStream({ start, end, signal: openController.signal });
+    stream = await file.openReadStream({ start, end, openEnded, signal: openController.signal });
     timing.openMs = elapsedMs(openStartedAt);
   } catch (error) {
     res.off("close", abortPendingOpen);

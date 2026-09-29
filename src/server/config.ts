@@ -11,6 +11,8 @@ export type AppConfig = {
   crawlerConcurrency: number;
   ftpTimeoutMs: number;
   ftpMaxConnections: number;
+  // How long a logged-in playback connection waits idle for the next request; 0 turns pooling and pre-logins off.
+  ftpPoolIdleMs: number;
   maxOnDemandSearchMs: number;
   profileRateLimitWindowMs: number;
   profileRateLimitMax: number;
@@ -101,6 +103,7 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     crawlerConcurrency: numberValue(env, "CRAWLER_CONCURRENCY", 2),
     ftpTimeoutMs: numberValue(env, "FTP_TIMEOUT_MS", 15000),
     ftpMaxConnections: numberValue(env, "FTP_MAX_CONNECTIONS", 3),
+    ftpPoolIdleMs: nonNegativeNumberValue(env, "FTP_POOL_IDLE_MS", 45_000),
     maxOnDemandSearchMs: numberValue(env, "MAX_ON_DEMAND_SEARCH_MS", 4500),
     profileRateLimitWindowMs: numberValue(env, "PROFILE_RATE_LIMIT_WINDOW_MS", 600000),
     profileRateLimitMax: numberValue(env, "PROFILE_RATE_LIMIT_MAX", 200),

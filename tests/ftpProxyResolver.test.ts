@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
-import { describe, expect, it } from "vitest";
-import { limitFtpClientFactoryByKey } from "../src/server/ftp/ftpConnectionLimiter";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createFtpConnectionPool, type FtpConnectionPool } from "../src/server/ftp/ftpConnectionPool";
+import { limitFtpClientFactoryByKey, type AbortableFtpClientFactory } from "../src/server/ftp/ftpConnectionLimiter";
 import { createFtpProxyResolver } from "../src/server/proxy/ftpProxyResolver";
 
 function deferred<T>() {
@@ -11,11 +12,24 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+const pools: FtpConnectionPool[] = [];
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(pools.splice(0).map((pool) => pool.close()));
+});
+
+function pooled(factory: AbortableFtpClientFactory) {
+  const pool = createFtpConnectionPool(factory, { idleMs: 45_000 });
+  pools.push(pool);
+  return pool;
+}
+
 describe("createFtpProxyResolver", () => {
   it("aborts a claimed warm login when its playback request is cancelled", async () => {
     let aborted = false;
     let logins = 0;
-    const resolver = createFtpProxyResolver(profileStub(), mediaStub(), (_config, options) => {
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub(), pooled((_config, options) => {
       logins += 1;
       if (logins > 1) return Promise.resolve({
         list: async () => [],
@@ -28,9 +42,10 @@ describe("createFtpProxyResolver", () => {
           reject(new Error("login aborted"));
         }, { once: true });
       });
-    });
+    }));
     const file = await resolver({ installToken: "token", fileId: 44 });
     file!.warmReadStream();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const controller = new AbortController();
     const pending = file!.openReadStream({ start: 0, end: 9, signal: controller.signal });
     controller.abort();
@@ -49,14 +64,14 @@ describe("createFtpProxyResolver", () => {
         tlsMode: "none", allowInvalidCertificate: false, roots: ["/"],
       }) }),
       mediaStub(),
-      async (config) => ({
+      pooled(async (config) => ({
         list: async () => [],
         openReadStream: async () => {
           usedPasswords.push(config.password);
           return Readable.from("ok");
         },
         close: async () => undefined,
-      }),
+      })),
     );
     (await resolver({ installToken: "token", fileId: 44 }))!.warmReadStream();
     password = "new-password";
@@ -66,93 +81,49 @@ describe("createFtpProxyResolver", () => {
     expect(usedPasswords).toEqual(["new-password"]);
   });
 
-  it("reuses a warmed FTP client for the next stream open", async () => {
-    let factoryCalls = 0;
-    let openedPath = "";
-    const resolver = createFtpProxyResolver(
-      {
-        profileIdForInstallToken: () => 12,
-        getFtpServerConfig: () => ({
-          host: "ftp.example.test",
-          port: 21,
-          username: "user",
-          password: "secret",
-          tlsMode: "none",
-          allowInvalidCertificate: false,
-          roots: ["/"],
-        }),
-        getFtpConfig: () => null,
-      } as never,
-      {
-        getFileForProfile: () => ({
-          id: 44,
-          ftpServerId: 5,
-          filename: "video.mkv",
-          ftpPath: "/video.mkv",
-          sizeBytes: 10,
-        }),
-      } as never,
-      async () => {
-        factoryCalls += 1;
-        return {
-          list: async () => [],
-          openReadStream: async (path) => {
-            openedPath = path;
-            return Readable.from("ok");
-          },
-          close: async () => undefined,
-        };
-      },
-    );
+  it("opens the stream on the warmed FTP login", async () => {
+    const openedBy: number[] = [];
+    let logins = 0;
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub(), pooled(async () => {
+      const id = ++logins;
+      return {
+        list: async () => [],
+        openReadStream: async () => {
+          openedBy.push(id);
+          return Readable.from("ok");
+        },
+        close: async () => undefined,
+      };
+    }));
 
     const file = await resolver({ installToken: "token", fileId: 44 });
     file?.warmReadStream();
     const stream = await file?.openReadStream({ start: 0, end: 1 });
 
     expect(stream).toBeDefined();
-    expect(factoryCalls).toBe(1);
-    expect(openedPath).toBe("/video.mkv");
+    expect(openedBy).toEqual([1]);
   });
 
   it("closes the FTP client when a pending stream open is aborted", async () => {
     const streamReady = deferred<NodeJS.ReadableStream>();
     let closed = 0;
     const resolver = createFtpProxyResolver(
-      {
-        profileIdForInstallToken: () => 12,
-        getFtpServerConfig: () => ({
-          host: "ftp.example.test",
-          port: 21,
-          username: "user",
-          password: "secret",
-          tlsMode: "none",
-          allowInvalidCertificate: false,
-          roots: ["/"],
-        }),
-        getFtpConfig: () => null,
-      } as never,
-      {
-        getFileForProfile: () => ({
-          id: 44,
-          ftpServerId: 5,
-          filename: "video.mkv",
-          ftpPath: "/video.mkv",
-          sizeBytes: 10,
-        }),
-      } as never,
-      async () => ({
+      profileStub(),
+      mediaStub(),
+      pooled(async () => ({
         list: async () => [],
         openReadStream: async () => streamReady.promise,
         close: async () => {
           closed += 1;
         },
-      }),
+      })),
     );
 
     const file = await resolver({ installToken: "token", fileId: 44 });
     const controller = new AbortController();
     const openPromise = file?.openReadStream({ start: 0, end: 1, signal: controller.signal } as never);
 
+    await new Promise((resolve) => setTimeout(resolve, 0));
     controller.abort();
     streamReady.resolve(Readable.from("ok"));
 
@@ -161,19 +132,8 @@ describe("createFtpProxyResolver", () => {
   });
 
   it("abandons a stream open that is still waiting for an FTP connection slot", async () => {
-    let factoryCalls = 0;
-    const resolver = createFtpProxyResolver(
-      profileStub(),
-      mediaStub(),
-      limitFtpClientFactoryByKey(async () => {
-        factoryCalls += 1;
-        return {
-          list: async () => [],
-          openReadStream: async () => new Readable({ read() {} }),
-          close: async () => undefined,
-        };
-      }, 1),
-    );
+    const connections = limitedConnections(1);
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub(), pooled(connections.factory));
     const file = await resolver({ installToken: "token", fileId: 44 });
     const playing = await file!.openReadStream({ start: 0, end: 9 });
 
@@ -186,12 +146,12 @@ describe("createFtpProxyResolver", () => {
     const live = file!.openReadStream({ start: 7, end: 9 });
     (playing as Readable).destroy();
     expect((await settleWithin(live)).status).toBe("fulfilled");
-    expect(factoryCalls).toBe(2);
+    expect(connections.created).toBe(2);
   });
 
-  it("releases an idle warm-up connection when playback of another file needs the slot", async () => {
+  it("serves any file of the account from a warm login", async () => {
     const connections = limitedConnections(1);
-    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv" }), connections.factory);
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv" }), pooled(connections.factory));
 
     const fileA = await resolver({ installToken: "token", fileId: 44 });
     fileA!.warmReadStream();
@@ -199,13 +159,13 @@ describe("createFtpProxyResolver", () => {
     const fileB = await resolver({ installToken: "token", fileId: 45 });
 
     expect((await settleWithin(fileB!.openReadStream({ start: 0, end: 9 }))).status).toBe("fulfilled");
-    expect(connections.closed).toEqual([1]);
-    expect(connections.opened).toEqual(["/b.mkv"]);
+    expect(connections.created).toBe(1);
+    expect(connections.opened).toEqual(["1:/b.mkv"]);
   });
 
   it("does not queue warm-ups ahead of playback requests", async () => {
     const connections = limitedConnections(1);
-    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv", 46: "/c.mkv" }), connections.factory);
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv", 46: "/c.mkv" }), pooled(connections.factory));
 
     const playingA = await (await resolver({ installToken: "token", fileId: 44 }))!.openReadStream({ start: 0, end: 9 });
     (await resolver({ installToken: "token", fileId: 45 }))!.warmReadStream();
@@ -219,7 +179,7 @@ describe("createFtpProxyResolver", () => {
 
   it("keeps using a warmed client once playback has claimed it", async () => {
     const connections = limitedConnections(1);
-    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv" }), connections.factory);
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv" }), pooled(connections.factory));
 
     const fileA = await resolver({ installToken: "token", fileId: 44 });
     fileA!.warmReadStream();
@@ -234,21 +194,20 @@ describe("createFtpProxyResolver", () => {
     expect((await settleWithin(playingB)).status).toBe("fulfilled");
   });
 
-  it("opens a fresh connection when its warm client was released to another request", async () => {
-    const connections = limitedConnections(1);
-    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv" }), connections.factory);
+  it("logs pooled reuse without credentials", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const connections = limitedConnections(1, { finishStreams: true });
+    const resolver = createFtpProxyResolver(profileStub(), mediaStub({ 44: "/a.mkv", 45: "/b.mkv" }), pooled(connections.factory));
 
-    const fileA = await resolver({ installToken: "token", fileId: 44 });
-    fileA!.warmReadStream();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const playingB = await (await resolver({ installToken: "token", fileId: 45 }))!.openReadStream({ start: 0, end: 9 });
-    const playingA = fileA!.openReadStream({ start: 0, end: 9 });
+    await drain(await (await resolver({ installToken: "token", fileId: 44 }))!.openReadStream({ start: 0, end: 9 }));
+    await drain(await (await resolver({ installToken: "token", fileId: 45 }))!.openReadStream({ start: 0, end: 9 }));
 
-    expect((await settleWithin(playingA)).status).toBe("pending");
-    (playingB as Readable).destroy();
-    expect((await settleWithin(playingA)).status).toBe("fulfilled");
-    expect(connections.opened).toEqual(["/b.mkv", "/a.mkv"]);
-    expect(connections.created).toBe(3);
+    const opened = info.mock.calls
+      .filter(([label, payload]) => label === "[proxy-ftp-timing]" && String(payload).includes("stream_opened"))
+      .map(([, payload]) => String(payload));
+    expect(opened.map((payload) => JSON.parse(payload).pooled)).toEqual([false, true]);
+    expect(connections.created).toBe(1);
+    expect(opened.join("\n")).not.toMatch(/secret|"user"/);
   });
 
   it("opens shared media with the requesting profile server credentials", async () => {
@@ -300,14 +259,14 @@ describe("createFtpProxyResolver", () => {
           sizeBytes: 10,
         }),
       } as never,
-      async (config) => ({
+      pooled(async (config) => ({
         list: async () => [],
         openReadStream: async (path) => {
           openedPath = `${config.username}:${path}`;
           return Readable.from("ok");
         },
         close: async () => undefined,
-      }),
+      })),
     );
 
     const file = await resolver({ installToken: "token", serverId: 5, sharedMediaId: 44 });
@@ -355,19 +314,36 @@ async function settleWithin<T>(promise: Promise<T>, ms = 100) {
   ]);
 }
 
-function limitedConnections(maxConnections: number) {
+async function drain(stream: NodeJS.ReadableStream) {
+  for await (const _chunk of stream) {
+    // Read the whole range like a player that finishes it.
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function limitedConnections(maxConnections: number, options: { finishStreams?: boolean } = {}) {
   const state = { created: 0, closed: [] as number[], opened: [] as string[] };
   const factory = limitFtpClientFactoryByKey(async () => {
     state.created += 1;
     const id = state.created;
     let closed = false;
+    let idle = true;
     return {
       list: async () => [],
       openReadStream: async (path: string) => {
         if (closed) throw new Error("Client is closed");
-        state.opened.push(path);
-        return new Readable({ read() {} });
+        state.opened.push(`${id}:${path}`);
+        idle = false;
+        if (!options.finishStreams) return new Readable({ read() {} });
+        return new Readable({
+          read() {
+            idle = true;
+            this.push("0123456789");
+            this.push(null);
+          },
+        });
       },
+      isReusable: () => idle && !closed,
       close: async () => {
         if (closed) return;
         closed = true;

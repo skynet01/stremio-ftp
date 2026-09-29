@@ -360,6 +360,110 @@ describe("limitFtpClientFactoryByKey background requests", () => {
   });
 });
 
+describe("limitFtpClientFactoryByKey idle clients", () => {
+  it("passes the playback flag through to the login", async () => {
+    const seen: unknown[] = [];
+    const limitedFactory = limitFtpClientFactoryByKey(async (_config, options) => {
+      seen.push(options?.playback);
+      return fakeClient();
+    }, 2);
+
+    await limitedFactory(ftpConfig(), { playback: true });
+    await limitedFactory(ftpConfig());
+
+    expect(seen).toEqual([true, undefined]);
+  });
+
+  it("reports when a queued request stops waiting and starts its login", async () => {
+    const limitedFactory = limitFtpClientFactoryByKey(async () => fakeClient(), 1);
+    const first = await limitedFactory(ftpConfig());
+    let started = 0;
+
+    const queued = limitedFactory(ftpConfig(), { onLoginStart: () => (started += 1) });
+    await settleWithin(queued, 20);
+    expect(started).toBe(0);
+    await first.close();
+    await queued;
+
+    expect(started).toBe(1);
+  });
+
+  it("hands a cleanly finished client back instead of closing it", async () => {
+    let closed = 0;
+    const limitedFactory = limitFtpClientFactoryByKey(async () => reusableClient({ onClose: () => (closed += 1) }), 1);
+    const client = await limitedFactory(ftpConfig());
+    let reusable = 0;
+
+    const stream = await client.openReadStream("/a.mkv", { start: 0, end: 1, onReusable: () => (reusable += 1) });
+    stream.resume();
+    await new Promise((resolve) => stream.once("close", resolve));
+
+    expect(reusable).toBe(1);
+    expect(closed).toBe(0);
+    expect((await settleWithin(limitedFactory(ftpConfig()))).status).toBe("pending");
+  });
+
+  it("closes a client after its stream when nobody takes it back or the transfer did not finish cleanly", async () => {
+    let closed = 0;
+    const limitedFactory = limitFtpClientFactoryByKey(async () => reusableClient({ onClose: () => (closed += 1), reusable: false }), 2);
+    const unfinished = await limitedFactory(ftpConfig());
+    const unclaimed = limitFtpClientFactoryByKey(async () => reusableClient({ onClose: () => (closed += 1) }), 1);
+
+    const first = await unfinished.openReadStream("/a.mkv", { start: 0, end: 1, onReusable: () => undefined });
+    const second = await (await unclaimed(ftpConfig())).openReadStream("/a.mkv", { start: 0, end: 1 });
+    first.resume();
+    second.resume();
+    await Promise.all([new Promise((resolve) => first.once("close", resolve)), new Promise((resolve) => second.once("close", resolve))]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(closed).toBe(2);
+  });
+
+  it("gives a parked client's slot to a request that has to wait", async () => {
+    let closed = 0;
+    const limitedFactory = limitFtpClientFactoryByKey(async () => fakeClient({ onClose: () => (closed += 1) }), 1);
+    const idle = await limitedFactory(ftpConfig());
+    let yielded = 0;
+
+    expect(idle.park?.(() => (yielded += 1))).toBe(true);
+    const waiting = await settleWithin(limitedFactory(ftpConfig()));
+
+    expect(waiting.status).toBe("fulfilled");
+    expect(yielded).toBe(1);
+    expect(closed).toBe(1);
+    expect(idle.claim?.()).toBe(false);
+  });
+
+  it("gives the slot away at once when a request is already waiting as the client is parked", async () => {
+    let closed = 0;
+    const limitedFactory = limitFtpClientFactoryByKey(async () => fakeClient({ onClose: () => (closed += 1) }), 1);
+    const busy = await limitedFactory(ftpConfig());
+    const waiting = limitedFactory(ftpConfig());
+
+    expect(busy.park?.(() => undefined)).toBe(false);
+
+    expect((await settleWithin(waiting)).status).toBe("fulfilled");
+    expect(closed).toBe(1);
+  });
+
+  it("keeps a parked client once it is claimed again", async () => {
+    const limitedFactory = limitFtpClientFactoryByKey(async () => fakeClient(), 1);
+    const client = await limitedFactory(ftpConfig());
+
+    client.park?.(() => undefined);
+    expect(client.claim?.()).toBe(true);
+
+    expect((await settleWithin(limitedFactory(ftpConfig()))).status).toBe("pending");
+  });
+});
+
+function reusableClient(options: { onClose?: () => void; reusable?: boolean } = {}) {
+  return {
+    ...fakeClient(options),
+    isReusable: () => options.reusable ?? true,
+  };
+}
+
 function fakeClient(options: { onClose?: () => void } = {}) {
   return {
     list: async () => [],

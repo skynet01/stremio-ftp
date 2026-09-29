@@ -13,6 +13,7 @@
 //   --release-lag-ms=0        fake FTP server: a closed session keeps counting this long
 //   --latency-ms=0            fake FTP server: delay added to every control reply
 //   --ftp-timeout-ms=15000    app FTP_TIMEOUT_MS
+//   --pool-idle-ms=2000       app FTP_POOL_IDLE_MS (0 turns pooling off); the "quiet" checks wait this out
 //   --file-mb=256             size of the generated files
 //   --seed=1                  PRNG seed for request plans and faults
 //   --no-long-pause           skip the paused-reader check in scenario C
@@ -65,6 +66,7 @@ for (const cap of caps) {
     releaseLagMs: numberArg(args, "release-lag-ms", 0),
     latencyMs: numberArg(args, "latency-ms", 0),
     ftpTimeoutMs: numberArg(args, "ftp-timeout-ms", 15_000),
+    poolIdleMs: numberArg(args, "pool-idle-ms", 2_000),
     fileSizeBytes: numberArg(args, "file-mb", 256) * 1024 * 1024,
     seed: numberArg(args, "seed", 1),
     scenarios,
@@ -73,7 +75,7 @@ for (const cap of caps) {
   });
   out(
     `Run: FTP_MAX_CONNECTIONS=${cap}, ${options.viewers} viewers (one FTP user each), FTP server cap ${options.serverUserCap}/user, ` +
-      `release lag ${options.releaseLagMs} ms, reply latency ${options.latencyMs} ms, FTP_TIMEOUT_MS=${options.ftpTimeoutMs}, plain FTP (no TLS)`,
+      `release lag ${options.releaseLagMs} ms, reply latency ${options.latencyMs} ms, FTP_TIMEOUT_MS=${options.ftpTimeoutMs}, FTP_POOL_IDLE_MS=${options.poolIdleMs}, plain FTP (no TLS)`,
   );
   const report = await runPlaybackStress(options);
   reports.push(report);

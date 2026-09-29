@@ -20,6 +20,7 @@ describe("loadConfig", () => {
     expect(config.sqlitePath).toBe("/tmp/stremio-ftp-test/stremio-ftp.sqlite");
     expect(config.maxOnDemandSearchMs).toBe(4500);
     expect(config.ftpMaxConnections).toBe(3);
+    expect(config.ftpPoolIdleMs).toBe(45000);
     expect(config.scanGlobalConcurrency).toBe(2);
     expect(config.scanQueueMax).toBe(50);
     expect(config.scanCooldownMs).toBe(900000);
@@ -59,6 +60,25 @@ describe("loadConfig", () => {
     expect(config.scanSchedulerIntervalMs).toBe(30000);
     expect(config.scanProgressAverageItems).toBe(5000);
     expect(config.scanTransientRetryDelayMs).toBe(180000);
+  });
+
+  it("loads FTP pooling environment values and allows turning them off", () => {
+    const config = loadConfig({
+      BASE_URL: "https://example.test",
+      CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+      SETUP_TOKEN: "setup-secret-123",
+      FTP_POOL_IDLE_MS: "0",
+    });
+
+    expect(config.ftpPoolIdleMs).toBe(0);
+    expect(() =>
+      loadConfig({
+        BASE_URL: "https://example.test",
+        CONFIG_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef",
+        SETUP_TOKEN: "setup-secret-123",
+        FTP_POOL_IDLE_MS: "-1",
+      }),
+    ).toThrow("FTP_POOL_IDLE_MS must be a non-negative integer");
   });
 
   it("rejects an omitted setup token unless public profile APIs are explicitly enabled", () => {

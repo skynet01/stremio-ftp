@@ -10,7 +10,7 @@ import type Database from "better-sqlite3";
 import { createApp } from "../../src/server/app";
 import { loadConfig } from "../../src/server/config";
 import { openDatabase } from "../../src/server/db/database";
-import { createBasicFtpClientFactory } from "../../src/server/ftp/basicFtpClient";
+import { createBasicFtpClientFactory, type BasicFtpClientOptions } from "../../src/server/ftp/basicFtpClient";
 import type { FtpClient } from "../../src/server/ftp/ftpTypes";
 import { MediaRepository } from "../../src/server/media/mediaRepository";
 import { ProfileService, type FtpConfig } from "../../src/server/profiles/profileService";
@@ -39,6 +39,8 @@ export type HarnessOptions = {
   releaseLagMs: number;
   latencyMs: number;
   ftpTimeoutMs: number;
+  // App FTP_POOL_IDLE_MS. Short by default so the "quiet" checks do not wait out the production idle time.
+  poolIdleMs: number;
   hangTimeoutMs: number;
   quiesceTimeoutMs: number;
   fileSizeBytes: number;
@@ -68,6 +70,7 @@ export function defaultHarnessOptions(overrides: Partial<HarnessOptions> = {}): 
     releaseLagMs: 0,
     latencyMs: 0,
     ftpTimeoutMs: 15_000,
+    poolIdleMs: 2_000,
     hangTimeoutMs: 30_000,
     quiesceTimeoutMs: 15_000,
     fileSizeBytes: 256 * 1024 * 1024,
@@ -180,6 +183,7 @@ type Environment = {
   db: Database.Database;
   ftp: FakeFtpServer;
   httpServer: http.Server;
+  shutdownApp: () => Promise<void>;
   port: number;
   slots: SlotCounter;
   activeStreams: () => Promise<number>;
@@ -211,6 +215,7 @@ async function startEnvironment(options: HarnessOptions, logs: LogCollector): Pr
     CONFIG_DIR: tmpDir,
     FTP_MAX_CONNECTIONS: String(options.ftpMaxConnections),
     FTP_TIMEOUT_MS: String(options.ftpTimeoutMs),
+    FTP_POOL_IDLE_MS: String(options.poolIdleMs),
     EMPTY_PROFILE_CLEANUP_DAYS: "0",
     SCAN_SCHEDULER_INTERVAL_MS: "3600000",
   });
@@ -221,7 +226,7 @@ async function startEnvironment(options: HarnessOptions, logs: LogCollector): Pr
   const loginErrors = new Map<string, number>();
   const slots = new SlotCounter();
   const basicFactory = createBasicFtpClientFactory(config.ftpTimeoutMs);
-  const countingFactory = async (ftpConfig: FtpConfig, requestOptions?: { signal?: AbortSignal }) => {
+  const countingFactory = async (ftpConfig: FtpConfig, requestOptions?: BasicFtpClientOptions) => {
     slots.acquire(ftpConfig.username);
     let client: FtpClient;
     try {
@@ -299,7 +304,7 @@ async function startEnvironment(options: HarnessOptions, logs: LogCollector): Pr
   // The public build has no proxy stream tracker; the FTP-side counters and open HTTP connections cover leaks.
   const activeStreams = async () => 0;
 
-  return { options, tmpDir, db, ftp, httpServer, port, slots, activeStreams, files, viewerTokens, loginErrors, logs };
+  return { options, tmpDir, db, ftp, httpServer, shutdownApp: app.shutdown, port, slots, activeStreams, files, viewerTokens, loginErrors, logs };
 }
 
 const VIEWER_PASSPHRASE = "stress-passphrase";
@@ -337,6 +342,7 @@ class SlotCounter {
 }
 
 async function stopEnvironment(env: Environment) {
+  await env.shutdownApp();
   env.httpServer.closeAllConnections();
   await new Promise<void>((resolve) => env.httpServer.close(() => resolve()));
   await env.ftp.close();
