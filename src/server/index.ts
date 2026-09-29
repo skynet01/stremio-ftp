@@ -5,7 +5,7 @@ import { createApp } from "./app.js";
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 
 const config = loadConfig();
-const app = createApp(config);
+const app = createApp(config, undefined, { refreshStoredCatalogAtStartup: true });
 
 const server = app.listen(config.port, () => {
   console.log(`stremio-ftp listening on ${config.port}`);

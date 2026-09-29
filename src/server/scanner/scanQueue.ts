@@ -89,6 +89,23 @@ export class ScanQueue {
     this.pump();
   }
 
+  async refreshStoredCatalogMetadata(): Promise<void> {
+    await this.mediaRepository.reparseStoredFiles();
+    const servers = this.db.prepare("select profile_id, id, shared_index_group_id from profile_ftp_servers where catalog_enabled = 1 order by id").all() as Array<{
+      profile_id: number; id: number; shared_index_group_id: number | null;
+    }>;
+    const signal = new AbortController().signal;
+    for (const server of servers) {
+      const seenAt = new Date().toISOString();
+      if (server.shared_index_group_id) {
+        await this.enrichSharedCatalogMetadata(null, server.profile_id, server.id, server.shared_index_group_id, seenAt, signal);
+      } else {
+        await this.enrichCatalogMetadata(null, server.profile_id, server.id, seenAt, signal);
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
+
   enqueueProfileScan(
     profileId: number,
     trigger: ScanTrigger,
@@ -540,7 +557,7 @@ export class ScanQueue {
     return row?.mediaItemsAdded ?? null;
   }
 
-  private async enrichCatalogMetadata(jobId: number, profileId: number, ftpServerId: number, seenAt: string, signal: AbortSignal) {
+  private async enrichCatalogMetadata(jobId: number | null, profileId: number, ftpServerId: number, seenAt: string, signal: AbortSignal) {
     const customization = this.profileService.getFtpServerCustomization(profileId, ftpServerId);
     if (!customization.catalogEnabled) return null;
 
@@ -587,7 +604,7 @@ export class ScanQueue {
   }
 
   private async enrichSharedCatalogMetadata(
-    jobId: number,
+    jobId: number | null,
     profileId: number,
     ftpServerId: number,
     sharedIndexGroupId: number,
@@ -639,7 +656,8 @@ export class ScanQueue {
     return this.mediaRepository.catalogEnrichmentStats(profileId, ftpServerId);
   }
 
-  private saveEnrichmentProgress(jobId: number, processed: number, total: number, candidate: CatalogEnrichmentCandidate | null) {
+  private saveEnrichmentProgress(jobId: number | null, processed: number, total: number, candidate: CatalogEnrichmentCandidate | null) {
+    if (jobId === null) return;
     const progressPercent = total > 0 ? Math.min(99, 95 + Math.floor((processed / total) * 4)) : 95;
     const title = candidate?.parsedTitle ? ` - ${candidate.parsedTitle}` : "";
     this.statement(

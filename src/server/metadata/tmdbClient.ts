@@ -80,6 +80,16 @@ const TITLE_NUMBER_TOKENS = new Map([
   ["ix", "9"],
   ["ten", "10"],
   ["x", "10"],
+  ["eleven", "11"],
+  ["twelve", "12"],
+  ["thirteen", "13"],
+  ["fourteen", "14"],
+  ["fifteen", "15"],
+  ["sixteen", "16"],
+  ["seventeen", "17"],
+  ["eighteen", "18"],
+  ["nineteen", "19"],
+  ["twenty", "20"],
 ]);
 const MOVIE_GENRES = new Map([
   [28, "Action"],
@@ -151,10 +161,6 @@ export async function tmdbCatalogEnrichment(
   try {
     const meta = item.imdbId ? await metaFromImdbId(item, item.imdbId, apiKey, catalogKind) : await metaFromSearch(item, apiKey, catalogKind);
     if (meta) return { status: "matched", meta };
-    if (catalogKind !== "movie") {
-      const movieMeta = item.imdbId ? await metaFromImdbId(item, item.imdbId, apiKey, "movie") : await metaFromSearch(item, apiKey, "movie");
-      if (movieMeta) return { status: "matched", meta: movieMeta };
-    }
     return { status: "unmatched" };
   } catch (error) {
     return { status: "retry", error: error instanceof Error ? error.message : "TMDB enrichment failed" };
@@ -180,17 +186,18 @@ async function metaFromImdbId(item: CatalogItem, imdbId: string, apiKey: string 
 
 async function metaFromSearch(item: CatalogItem, apiKey: string | null, catalogKind: TmdbCatalogKind): Promise<CatalogMeta | null> {
   if (!apiKey) return null;
-  const queries = searchQueries(item.parsedTitle);
-  for (const query of queries) {
-    const meta = await metaFromSearchQuery(item, apiKey, catalogKind, query, true);
-    if (meta) return meta;
+  const query = titleWithoutEditionSuffix(item.parsedTitle);
+  let hadResults = false;
+  const first = await metaFromSearchQuery(item, apiKey, catalogKind, query, true, (value) => { hadResults = value; });
+  if (first) return first;
+  const alternate = item.alternateTitle ? titleWithoutEditionSuffix(item.alternateTitle) : null;
+  if (alternate && alternate !== query) {
+    const alternateItem = { ...item, parsedTitle: item.alternateTitle!, parsedYear: item.alternateYear ?? item.parsedYear };
+    return metaFromSearchQuery(alternateItem, apiKey, catalogKind, alternate, true);
   }
-  if (!item.parsedYear) return null;
-  for (const query of queries) {
-    const metaWithoutYear = await metaFromSearchQuery(item, apiKey, catalogKind, query, false);
-    if (metaWithoutYear) return metaWithoutYear;
-  }
-  return null;
+  const variant = hadResults ? wordNumberSequelTitle(query) ?? romanNumeralSequelTitle(query) : romanNumeralSequelTitle(query) ?? wordNumberSequelTitle(query);
+  if (variant && variant !== query) return metaFromSearchQuery(item, apiKey, catalogKind, variant, true);
+  return item.parsedYear ? metaFromSearchQuery(item, apiKey, catalogKind, query, false) : null;
 }
 
 async function metaFromSearchQuery(
@@ -199,6 +206,7 @@ async function metaFromSearchQuery(
   catalogKind: TmdbCatalogKind,
   query: string,
   includeYear: boolean,
+  onResults?: (hadResults: boolean) => void,
 ): Promise<CatalogMeta | null> {
   const searchType = catalogKind === "movie" ? "movie" : "tv";
   const url = new URL(`https://api.themoviedb.org/3/search/${searchType}`);
@@ -210,6 +218,7 @@ async function metaFromSearchQuery(
 
   const body = await fetchJson<TmdbSearchResponse<TmdbMovie | TmdbTv>>(url);
   if (!body) return null;
+  onResults?.(Boolean(body.results?.length));
   const result = await resultWithImdbId(item, catalogKind, searchType, body.results ?? [], apiKey, query);
   if (!result) return null;
 
@@ -270,6 +279,7 @@ function titleRelationshipScore(expectedTitle: string, resultTitleValue: string)
   const expectedTokens = relationshipTokens(normalizedExpectedTitle);
   const resultTokens = relationshipTokens(normalizedResultTitle);
   if (!expectedTokens.length || !resultTokens.length) return 0;
+  if (expectedTokens.join(" ") === resultTokens.join(" ")) return 100;
   const expectedSet = new Set(expectedTokens);
   const resultSet = new Set(resultTokens);
   if (expectedSet.size === 1 && resultSet.has(expectedTokens[0])) return 25;
@@ -301,25 +311,11 @@ function resultReleaseYear(result: TmdbMovie | TmdbTv, catalogKind: TmdbCatalogK
   return year && /^\d{4}$/.test(year) ? Number(year) : null;
 }
 
-function searchQueries(parsedTitle: string) {
-  const queries = [parsedTitle];
-  const editionless = titleWithoutEditionSuffix(parsedTitle);
-  if (editionless && editionless !== parsedTitle) queries.push(editionless);
-  const roman = romanNumeralSequelTitle(parsedTitle);
-  if (roman && roman !== parsedTitle) queries.push(roman);
-  const wordNumber = wordNumberSequelTitle(parsedTitle);
-  if (wordNumber && !queries.includes(wordNumber)) queries.push(wordNumber);
-  return queries;
-}
-
 function titleWithoutEditionSuffix(parsedTitle: string) {
   return parsedTitle
-    .replace(
-      /\b(?:director(?:s)?|extended|final|special|theatrical|ultimate|ulysses|unrated|restored|remastered|collector(?:s)?)\s+(?:cut|edition|version)\b$/i,
-      "",
-    )
+    .replace(/\b(?:(?:killer|legacy|ultimate|director(?:s)?|ulysses|final|special|theatrical|restored|collector(?:s)?)\s+(?:cut|edition|version)|(?:uncut|extended|unrated|remastered|3d)(?:\s+edition)?)\b/gi, " ")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim() || parsedTitle;
 }
 
 function romanNumeralSequelTitle(parsedTitle: string) {

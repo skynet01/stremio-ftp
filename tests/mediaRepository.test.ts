@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 import { migrate } from "../src/server/db/schema";
 import { MediaRepository } from "../src/server/media/mediaRepository";
+import { parseMediaPath, PARSER_VERSION } from "../src/server/media/parser";
 
 let profileSequence = 0;
 
@@ -62,6 +63,65 @@ function createSharedGroup(db: Database.Database, serverId: number, suffix: stri
 }
 
 describe("MediaRepository", () => {
+  it("reparses old profile and shared rows from stored paths once without deleting files", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const groupId = createSharedGroup(db, serverId, "reparse");
+    db.prepare("update profile_ftp_servers set library_layout = 'folders' where id = ?").run(serverId);
+    db.prepare("update shared_index_groups set library_layout = 'folders' where id = ?").run(groupId);
+    const repo = new MediaRepository(db);
+    const profilePath = "/TV Shows/The Mandalorian (2019)/MandoS1E1.1080p.mkv";
+    const sharedPath = "/Movies/Avatar (2025)/Avatar FS3D 1920x1080.mkv";
+    repo.upsertParsedFile(profileId, { ...parseMediaPath(profilePath)!, ftpServerId: serverId });
+    repo.upsertSharedParsedFile(groupId, parseMediaPath(sharedPath)!);
+    db.prepare("update media_files set parser_version = 0, media_kind = 'movie', parsed_title = 'mando', season = null, episode = null").run();
+    db.prepare("update shared_media_files set parser_version = 0, parsed_year = 1920").run();
+
+    expect(repo.reparseOutdatedBatch(1)).toBe(1);
+    expect(repo.reparseOutdatedBatch(1)).toBe(1);
+    expect(repo.reparseOutdatedBatch(1)).toBe(0);
+    expect(db.prepare("select media_kind, parsed_title, season, episode, parser_version from media_files").get()).toMatchObject({
+      media_kind: "series", parsed_title: "mandalorian", season: 1, episode: 1, parser_version: PARSER_VERSION,
+    });
+    expect(db.prepare("select parsed_year, parser_version from shared_media_files").get()).toMatchObject({ parsed_year: 2025, parser_version: PARSER_VERSION });
+    expect(db.prepare("select count(*) as count from media_files").get()).toEqual({ count: 1 });
+    expect(db.prepare("select count(*) as count from shared_media_files").get()).toEqual({ count: 1 });
+  });
+
+  it("stamps an unmatched item after one algorithm recheck while preserving a prior match if recheck finds none", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const repo = new MediaRepository(db);
+    const candidates = ["lost movie", "known movie"].map((parsedTitle, id) => ({ id: id + 1, ftpServerId: serverId, itemKey: parsedTitle, mediaKind: "movie" as const, catalogKind: "movie" as const, parsedTitle, parsedYear: 2020, imdbId: null }));
+    repo.syncCatalogEnrichmentCandidates(profileId, serverId, candidates, "2026-01-01");
+    const initial = repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-01", 10);
+    repo.saveCatalogEnrichmentUnmatched(initial[0].id, "2026-01-01");
+    repo.saveCatalogEnrichmentMatch(initial[1].id, { id: "tt1111111", type: "movie", name: "Known Movie" }, "2026-01-01");
+    db.prepare("update catalog_enrichment set algorithm_version = 6").run();
+    repo.syncCatalogEnrichmentCandidates(profileId, serverId, candidates, "2026-01-02");
+    const pending = repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-02", 10);
+    expect(pending.map((row) => row.parsedTitle).sort()).toEqual(["known movie", "lost movie"]);
+    for (const row of pending) repo.saveCatalogEnrichmentUnmatched(row.id, "2026-01-02");
+    expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-02", 10)).toEqual([]);
+    expect(db.prepare("select status, meta_id from catalog_enrichment where parsed_title = 'known movie'").get()).toEqual({ status: "matched", meta_id: "tt1111111" });
+  });
+
+  it("keeps a filename title alternative through the enrichment queue", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    db.prepare("update profile_ftp_servers set library_layout = 'folders' where id = ?").run(serverId);
+    const repo = new MediaRepository(db);
+    const path = "/Movies/Novacaine (2025)/Novocaine.2025.mkv";
+    repo.upsertParsedFile(profileId, { ...parseMediaPath(path, { libraryLayout: "folders" })!, ftpServerId: serverId });
+    repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), "2026-01-01");
+    expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-01", 10)[0]).toMatchObject({ alternateTitle: "novocaine", alternateYear: 2025 });
+  });
   it("upserts and queries episode rows", () => {
     const db = new Database(":memory:");
     migrate(db);

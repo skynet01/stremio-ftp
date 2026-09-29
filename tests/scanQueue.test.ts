@@ -7,6 +7,7 @@ import type { AppConfig } from "../src/server/config";
 import { migrate } from "../src/server/db/schema";
 import type { FtpClientFactory } from "../src/server/ftp/ftpTypes";
 import { MediaRepository } from "../src/server/media/mediaRepository";
+import { parseMediaPath } from "../src/server/media/parser";
 import { clearTmdbCatalogCache } from "../src/server/metadata/tmdbClient";
 import { ProfileService } from "../src/server/profiles/profileService";
 import { ScanQueue } from "../src/server/scanner/scanQueue";
@@ -864,7 +865,7 @@ describe("ScanQueue", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("replaces a stale matched enrichment when the refreshed result is unmatched", async () => {
+  it("preserves a stale matched enrichment when the refreshed result is unmatched", async () => {
     const { db, profileService, queue } = createHarness(
       async () => ({
         list: async () => [{ name: "The.Matrix.1999.mkv", path: "/The.Matrix.1999.mkv", type: "file", size: 1024 * 1024 }],
@@ -922,12 +923,35 @@ describe("ScanQueue", () => {
         .prepare("select status, meta_id, meta_name, genres, algorithm_version from catalog_enrichment where profile_id = ?")
         .get(profileId),
     ).toEqual({
-      status: "unmatched",
-      meta_id: null,
-      meta_name: null,
-      genres: null,
-      algorithm_version: 6,
+      status: "matched",
+      meta_id: "tt0133093",
+      meta_name: "The Matrix",
+      genres: '["Drama"]',
+      algorithm_version: 7,
     });
+  });
+
+  it("reparses and enriches stored files without connecting to FTP", async () => {
+    const ftp = vi.fn(async () => { throw new Error("FTP must not be contacted"); });
+    const { db, profileService, mediaRepository, queue } = createHarness(ftp, { ...baseConfig, tmdbApiKey: "tmdb-key" });
+    const created = await profileService.createProfile(`browser-${Math.random()}`, "passphrase");
+    const profileId = created.profileId;
+    profileService.saveAddonCustomization(profileId, { catalogEnabled: true });
+    const serverId = profileService.defaultFtpServerId(profileId);
+    const path = "/Movies/The.Matrix.1999.mkv";
+    mediaRepository.upsertParsedFile(profileId, { ...parseMediaPath(path)!, ftpServerId: serverId });
+    db.prepare("update media_files set parser_version = 0, parsed_title = 'wrong title'").run();
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [{ id: 603, title: "The Matrix", release_date: "1999-01-01" }] }) };
+      if (url.pathname === "/3/movie/603/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0133093" }) };
+      throw new Error(`Unexpected URL: ${url.pathname}`);
+    }));
+
+    await queue.refreshStoredCatalogMetadata();
+    expect(ftp).not.toHaveBeenCalled();
+    expect(db.prepare("select parsed_title, parser_version from media_files").get()).toEqual({ parsed_title: "matrix", parser_version: 1 });
+    expect(db.prepare("select status, meta_id from catalog_enrichment").get()).toEqual({ status: "matched", meta_id: "tt0133093" });
   });
 
   it("preserves a stale matched enrichment when no TMDB key can verify it", async () => {

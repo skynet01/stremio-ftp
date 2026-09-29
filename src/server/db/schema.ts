@@ -62,6 +62,7 @@ const SHARED_MEDIA_FILES_COLUMNS = `
       imdb_id text,
       quality text,
       confidence integer not null check (confidence between 0 and 100),
+      parser_version integer not null default 0,
       last_seen_at text not null,
       unique(shared_index_group_id, ftp_path)
 `;
@@ -96,6 +97,7 @@ const MEDIA_FILES_COLUMNS = `
       imdb_id text,
       quality text,
       confidence integer not null check (confidence between 0 and 100),
+      parser_version integer not null default 0,
       last_seen_at text not null,
       unique(profile_id, ftp_server_id, ftp_path)
 `;
@@ -122,6 +124,8 @@ const CATALOG_ENRICHMENT_COLUMNS = `
       parsed_title text not null,
       parsed_year integer check (parsed_year is null or parsed_year between 1888 and 2200),
       source_imdb_id text,
+      alternate_title text,
+      alternate_year integer,
       status text not null check (status in ('pending', 'matched', 'unmatched', 'retry')),
       meta_id text,
       meta_type text check (meta_type is null or meta_type in ('movie', 'series')),
@@ -282,6 +286,8 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureProfileColumn(db, "last_manifest_accessed_at", "text");
   ensureMediaColumn(db, "catalog_kind", "text not null default 'movie'");
   ensureMediaColumn(db, "ftp_server_id", "integer references profile_ftp_servers(id) on delete cascade");
+  ensureMediaColumn(db, "parser_version", "integer not null default 0");
+  ensureSharedMediaColumn(db, "parser_version", "integer not null default 0");
   ensureFtpServerColumn(db, "catalog_content_uncategorized", "integer not null default 1");
   ensureFtpServerColumn(db, "catalog_sort", "text not null default 'alphabetical'");
   ensureFtpServerColumn(db, "shared_index_group_id", "integer references shared_index_groups(id) on delete set null");
@@ -298,6 +304,8 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureCatalogEnrichmentTable(db);
   ensureCatalogEnrichmentColumn(db, "algorithm_version", "integer not null default 1");
   ensureCatalogEnrichmentColumn(db, "genres", "text");
+  ensureCatalogEnrichmentColumn(db, "alternate_title", "text");
+  ensureCatalogEnrichmentColumn(db, "alternate_year", "integer");
 }
 
 function ensureProfileColumn(db: Database.Database, name: string, definition: string) {
@@ -316,6 +324,12 @@ function ensureMediaColumn(db: Database.Database, name: string, definition: stri
   const columns = db.prepare("pragma table_info(media_files)").all() as { name: string }[];
   if (columns.some((column) => column.name === name)) return;
   db.prepare(`alter table media_files add column ${name} ${definition}`).run();
+}
+
+function ensureSharedMediaColumn(db: Database.Database, name: string, definition: string) {
+  const columns = db.prepare("pragma table_info(shared_media_files)").all() as { name: string }[];
+  if (columns.some((column) => column.name === name)) return;
+  db.prepare(`alter table shared_media_files add column ${name} ${definition}`).run();
 }
 
 function ensureScanJobColumn(db: Database.Database, name: string, definition: string) {

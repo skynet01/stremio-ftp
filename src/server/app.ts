@@ -23,6 +23,7 @@ import { stremioRoutes } from "./stremio/routes.js";
 type AppOptions = {
   publicDir?: string;
   ftpClientFactory?: FtpClientFactory;
+  refreshStoredCatalogAtStartup?: boolean;
 };
 
 export function createApp(
@@ -60,6 +61,13 @@ export function createApp(
     loginFailureMs: config.ftpLoginFailureCacheMs ?? 0,
   });
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
+  if (options.refreshStoredCatalogAtStartup) {
+    setImmediate(() => {
+      void scanQueue.refreshStoredCatalogMetadata().catch((error) => {
+        console.error("[catalog] Failed to refresh stored files:", redactSecrets(error instanceof Error ? error.message : String(error)));
+      });
+    });
+  }
   const scanScheduler = setInterval(
     guardedTimerTask("[scan-scheduler] Failed to enqueue scheduled scans:", () => scanQueue.enqueueDueScheduledScans()),
     config.scanSchedulerIntervalMs,

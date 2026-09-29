@@ -318,7 +318,7 @@ describe("tmdbCatalogMeta", () => {
     expect(new URL(String(fetchMock.mock.calls[1][0])).searchParams.get("first_air_date_year")).toBeNull();
   });
 
-  it("falls back from unmatched series enrichment to movie search", async () => {
+  it("does not search movies for an unmatched series", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -349,17 +349,9 @@ describe("tmdbCatalogMeta", () => {
         "tmdb-key",
         "series",
       ),
-    ).resolves.toEqual({
-      status: "matched",
-      meta: expect.objectContaining({
-        id: "tt0328832",
-        type: "movie",
-        name: "The Animatrix",
-        releaseInfo: "2003",
-      }),
-    });
+    ).resolves.toEqual({ status: "unmatched" });
     expect(String(fetchMock.mock.calls[0][0])).toContain("/3/search/tv");
-    expect(String(fetchMock.mock.calls[1][0])).toContain("/3/search/movie");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -427,7 +419,7 @@ describe("tmdbCatalogMeta", () => {
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/movie/99/external_ids");
   });
 
-  it("rejects an unrelated TV result before falling back to the matching movie", async () => {
+  it("rejects an unrelated TV result without trying a movie", async () => {
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = new URL(String(input));
       if (url.pathname === "/3/search/tv") {
@@ -472,15 +464,48 @@ describe("tmdbCatalogMeta", () => {
         "tmdb-key",
         "anime",
       ),
-    ).resolves.toEqual({
-      status: "matched",
-      meta: expect.objectContaining({
-        id: "tt0120737",
-        type: "movie",
-        name: "The Lord of the Rings: The Fellowship of the Ring",
-        releaseInfo: "2001",
-      }),
-    });
+    ).resolves.toEqual({ status: "unmatched" });
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/tv/123034/external_ids");
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/search/movie");
+  });
+
+  it("searches an editionless title before an alternate filename title, at most twice", async () => {
+    const queries: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") {
+        queries.push(url.searchParams.get("query") ?? "");
+        return { ok: true, json: async () => ({ results: queries.length === 1 ? [] : [{ id: 1, title: "Novocaine", release_date: "2025-01-01" }] }) };
+      }
+      if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt29603959" }) };
+      throw new Error(`Unexpected URL: ${url.pathname}`);
+    }));
+    await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle: "novacaine ultimate cut 3d", parsedYear: 2025, imdbId: null, alternateTitle: "novocaine", alternateYear: 2025 }, "tmdb-key")).resolves.toMatchObject({ status: "matched", meta: { id: "tt29603959" } });
+    expect(queries).toEqual(["novacaine", "novocaine"]);
+  });
+
+  it("omits edition tags even when they occur before the end of the title", async () => {
+    const queries: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") {
+        queries.push(url.searchParams.get("query") ?? "");
+        return { ok: true, json: async () => ({ results: [{ id: 1, title: "The Matrix", release_date: "1999-01-01" }] }) };
+      }
+      if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0133093" }) };
+      throw new Error(`Unexpected URL: ${url.pathname}`);
+    }));
+    await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle: "matrix extended 3d edition", parsedYear: 1999, imdbId: null }, "tmdb-key")).resolves.toMatchObject({ status: "matched" });
+    expect(queries).toEqual(["matrix"]);
+  });
+
+  it("matches number words to digits", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/tv") return { ok: true, json: async () => ({ results: [{ id: 1, name: "Twelve Monkeys", first_air_date: "2015-01-01" }] }) };
+      if (url.pathname === "/3/tv/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt3148266" }) };
+      throw new Error(`Unexpected URL: ${url.pathname}`);
+    }));
+    await expect(tmdbCatalogEnrichment({ mediaKind: "series", catalogKind: "series", parsedTitle: "12 monkeys", parsedYear: 2015, imdbId: null }, "tmdb-key")).resolves.toMatchObject({ status: "matched", meta: { id: "tt3148266" } });
   });
 });

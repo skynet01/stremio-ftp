@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
-import type { ParsedMedia } from "./parser.js";
+import { PARSER_VERSION, parseMediaPath, type ParsedMedia, type ParseMediaOptions } from "./parser.js";
 
-const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 6;
+const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 7;
 
 export type ParsedMediaFileInput = Omit<ParsedMedia, "catalogKind"> & {
   catalogKind?: ParsedMedia["catalogKind"];
@@ -30,6 +30,8 @@ export type CatalogItem = {
   parsedTitle: string;
   parsedYear: number | null;
   imdbId: string | null;
+  alternateTitle?: string | null;
+  alternateYear?: number | null;
 };
 
 export type CatalogEnrichmentCandidate = CatalogItem & {
@@ -108,8 +110,65 @@ function toMediaMatch(row: MediaFileRow): MediaMatch {
   };
 }
 
+function storedParseValues(parsed: ParsedMedia) {
+  return [parsed.normalizedFilename, parsed.extension, parsed.mediaKind, parsed.catalogKind, parsed.parsedTitle, parsed.parsedYear,
+    parsed.season, parsed.episode, parsed.imdbId, parsed.quality, parsed.confidence];
+}
+
+function alternateForPath(ftpPath: string, libraryLayout: ParseMediaOptions["libraryLayout"], parsedTitle?: string) {
+  const parsed = parseMediaPath(ftpPath, { libraryLayout, contentTypes: { movies: true, series: true, anime: true } });
+  if (!parsed || (parsedTitle && parsed.parsedTitle !== parsedTitle)) return { alternateTitle: null, alternateYear: null };
+  return { alternateTitle: parsed.alternateTitle, alternateYear: parsed.alternateYear };
+}
+
 export class MediaRepository {
   constructor(private readonly db: Database.Database) {}
+
+  reparseOutdatedBatch(limit = 250): number {
+    const profileRows = this.db.prepare(`
+      select mf.id, mf.ftp_path, coalesce(s.library_layout, p.library_layout, 'auto') as library_layout,
+        coalesce(s.catalog_content_movies, p.catalog_content_movies, 1) as movies,
+        coalesce(s.catalog_content_series, p.catalog_content_series, 1) as series,
+        coalesce(s.catalog_content_anime, p.catalog_content_anime, 0) as anime
+      from media_files mf
+      join profiles p on p.id = mf.profile_id
+      left join profile_ftp_servers s on s.id = mf.ftp_server_id
+      where mf.parser_version < ? order by mf.id limit ?
+    `).all(PARSER_VERSION, limit) as Array<{ id: number; ftp_path: string; library_layout: ParseMediaOptions["libraryLayout"]; movies: number; series: number; anime: number }>;
+    const sharedRows = this.db.prepare(`
+      select sm.id, sm.ftp_path, g.library_layout, g.catalog_content_json
+      from shared_media_files sm join shared_index_groups g on g.id = sm.shared_index_group_id
+      where sm.parser_version < ? order by sm.id limit ?
+    `).all(PARSER_VERSION, limit - profileRows.length) as Array<{ id: number; ftp_path: string; library_layout: ParseMediaOptions["libraryLayout"]; catalog_content_json: string }>;
+    const updateProfile = this.db.prepare(`update media_files set normalized_filename=?, extension=?, media_kind=?, catalog_kind=?, parsed_title=?, parsed_year=?, season=?, episode=?, imdb_id=?, quality=?, confidence=?, parser_version=? where id=?`);
+    const updateShared = this.db.prepare(`update shared_media_files set normalized_filename=?, extension=?, media_kind=?, catalog_kind=?, parsed_title=?, parsed_year=?, season=?, episode=?, imdb_id=?, quality=?, confidence=?, parser_version=? where id=?`);
+    const stampProfile = this.db.prepare("update media_files set parser_version = ? where id = ?");
+    const stampShared = this.db.prepare("update shared_media_files set parser_version = ? where id = ?");
+    this.db.transaction(() => {
+      for (const row of profileRows) {
+        const parsed = parseMediaPath(row.ftp_path, { libraryLayout: row.library_layout, contentTypes: { movies: Boolean(row.movies), series: Boolean(row.series), anime: Boolean(row.anime) } });
+        if (parsed) updateProfile.run(...storedParseValues(parsed), PARSER_VERSION, row.id);
+        else stampProfile.run(PARSER_VERSION, row.id);
+      }
+      for (const row of sharedRows) {
+        const content = JSON.parse(row.catalog_content_json) as ParseMediaOptions["contentTypes"];
+        const parsed = parseMediaPath(row.ftp_path, { libraryLayout: row.library_layout, contentTypes: content });
+        if (parsed) updateShared.run(...storedParseValues(parsed), PARSER_VERSION, row.id);
+        else stampShared.run(PARSER_VERSION, row.id);
+      }
+    })();
+    return profileRows.length + sharedRows.length;
+  }
+
+  async reparseStoredFiles(batchSize = 250): Promise<number> {
+    let total = 0;
+    while (true) {
+      const count = this.reparseOutdatedBatch(batchSize);
+      total += count;
+      if (count < batchSize) return total;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
 
   upsertParsedFile(profileId: number, file: ParsedMediaFileInput) {
     const lastSeenAt = file.lastSeenAt ?? new Date().toISOString();
@@ -131,6 +190,7 @@ export class MediaRepository {
             imdb_id = ?,
             quality = ?,
             confidence = ?,
+            parser_version = ${PARSER_VERSION},
             last_seen_at = ?
         where profile_id = ?
           and ftp_server_id is null
@@ -177,8 +237,9 @@ export class MediaRepository {
         imdb_id,
         quality,
         confidence,
+        parser_version,
         last_seen_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${PARSER_VERSION}, ?)
       on conflict(profile_id, ftp_server_id, ftp_path) do update set
         ftp_server_id = excluded.ftp_server_id,
         filename = excluded.filename,
@@ -195,6 +256,7 @@ export class MediaRepository {
         imdb_id = excluded.imdb_id,
         quality = excluded.quality,
         confidence = excluded.confidence,
+        parser_version = excluded.parser_version,
         last_seen_at = excluded.last_seen_at
     `,
     ).run(
@@ -240,8 +302,9 @@ export class MediaRepository {
         imdb_id,
         quality,
         confidence,
+        parser_version,
         last_seen_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${PARSER_VERSION}, ?)
       on conflict(shared_index_group_id, ftp_path) do update set
         filename = excluded.filename,
         normalized_filename = excluded.normalized_filename,
@@ -257,6 +320,7 @@ export class MediaRepository {
         imdb_id = excluded.imdb_id,
         quality = excluded.quality,
         confidence = excluded.confidence,
+        parser_version = excluded.parser_version,
         last_seen_at = excluded.last_seen_at
     `,
     ).run(
@@ -946,8 +1010,11 @@ export class MediaRepository {
           mf.parsed_title,
           mf.parsed_year,
           mf.imdb_id,
+          min(mf.ftp_path) as ftp_path,
+          s.library_layout,
           max(mf.confidence) as max_confidence
         from media_files mf
+        join profile_ftp_servers s on s.id = mf.ftp_server_id
         where mf.profile_id = ?
           and mf.ftp_server_id = ?
           and mf.catalog_kind in (${catalogKinds.map(() => "?").join(", ")})
@@ -964,6 +1031,8 @@ export class MediaRepository {
       parsed_title: string;
       parsed_year: number | null;
       imdb_id: string | null;
+      ftp_path: string;
+      library_layout: ParseMediaOptions["libraryLayout"];
     }>;
 
     return rows.map((row) => ({
@@ -974,6 +1043,7 @@ export class MediaRepository {
       parsedTitle: row.parsed_title,
       parsedYear: row.parsed_year,
       imdbId: row.imdb_id,
+      ...alternateForPath(row.ftp_path, row.library_layout, row.parsed_title),
       itemKey: catalogEnrichmentKey(row.catalog_kind, row.parsed_title, row.parsed_year, row.imdb_id),
     }));
   }
@@ -994,8 +1064,11 @@ export class MediaRepository {
           sm.parsed_title,
           sm.parsed_year,
           sm.imdb_id,
+          min(sm.ftp_path) as ftp_path,
+          g.library_layout,
           max(sm.confidence) as max_confidence
         from shared_media_files sm
+        join shared_index_groups g on g.id = sm.shared_index_group_id
         where sm.shared_index_group_id = ?
           and sm.catalog_kind in (${catalogKinds.map(() => "?").join(", ")})
           and sm.parsed_title is not null
@@ -1010,6 +1083,8 @@ export class MediaRepository {
       parsed_title: string;
       parsed_year: number | null;
       imdb_id: string | null;
+      ftp_path: string;
+      library_layout: ParseMediaOptions["libraryLayout"];
     }>;
 
     return rows.map((row) => ({
@@ -1020,6 +1095,7 @@ export class MediaRepository {
       parsedTitle: row.parsed_title,
       parsedYear: row.parsed_year,
       imdbId: row.imdb_id,
+      ...alternateForPath(row.ftp_path, row.library_layout, row.parsed_title),
       itemKey: catalogEnrichmentKey(row.catalog_kind, row.parsed_title, row.parsed_year, row.imdb_id),
     }));
   }
@@ -1029,14 +1105,16 @@ export class MediaRepository {
       `
       insert into catalog_enrichment (
         profile_id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year,
-        source_imdb_id, status, algorithm_version, last_seen_at, created_at, updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+        source_imdb_id, alternate_title, alternate_year, status, algorithm_version, last_seen_at, created_at, updated_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
       on conflict(profile_id, ftp_server_id, item_key) do update set
         media_kind = excluded.media_kind,
         catalog_kind = excluded.catalog_kind,
         parsed_title = excluded.parsed_title,
         parsed_year = excluded.parsed_year,
         source_imdb_id = excluded.source_imdb_id,
+        alternate_title = excluded.alternate_title,
+        alternate_year = excluded.alternate_year,
         status = case
           when catalog_enrichment.status = 'unmatched'
             and catalog_enrichment.algorithm_version < excluded.algorithm_version
@@ -1076,6 +1154,8 @@ export class MediaRepository {
           candidate.parsedTitle,
           candidate.parsedYear,
           candidate.imdbId,
+          candidate.alternateTitle ?? null,
+          candidate.alternateYear ?? null,
           CATALOG_ENRICHMENT_ALGORITHM_VERSION,
           seenAt,
           seenAt,
@@ -1090,14 +1170,14 @@ export class MediaRepository {
     const rows = this.db
       .prepare(
         `
-        select id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year, source_imdb_id, status
+        select id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, parsed_year, source_imdb_id, alternate_title, alternate_year, status
         from catalog_enrichment
         where profile_id = ?
           and ftp_server_id = ?
           and (
             status = 'pending'
             or (status = 'retry' and (next_attempt_at is null or next_attempt_at <= ?))
-            or (status = 'matched' and algorithm_version < ?)
+            or (status in ('matched', 'unmatched') and algorithm_version < ?)
           )
         order by updated_at asc, id asc
         limit ?
@@ -1112,6 +1192,8 @@ export class MediaRepository {
       parsed_title: string;
       parsed_year: number | null;
       source_imdb_id: string | null;
+      alternate_title: string | null;
+      alternate_year: number | null;
       status: "pending" | "matched" | "unmatched" | "retry";
     }>;
     return rows.map((row) => ({
@@ -1123,6 +1205,8 @@ export class MediaRepository {
       parsedTitle: row.parsed_title,
       parsedYear: row.parsed_year,
       imdbId: row.source_imdb_id,
+      alternateTitle: row.alternate_title,
+      alternateYear: row.alternate_year,
       status: row.status,
     }));
   }
@@ -1169,15 +1253,15 @@ export class MediaRepository {
       .prepare(
         `
         update catalog_enrichment
-        set status = 'unmatched',
-            meta_id = null,
-            meta_type = null,
-            meta_name = null,
-            poster = null,
-            background = null,
-            description = null,
-            release_info = null,
-            genres = null,
+        set status = case when status = 'matched' then 'matched' else 'unmatched' end,
+            meta_id = case when status = 'matched' then meta_id else null end,
+            meta_type = case when status = 'matched' then meta_type else null end,
+            meta_name = case when status = 'matched' then meta_name else null end,
+            poster = case when status = 'matched' then poster else null end,
+            background = case when status = 'matched' then background else null end,
+            description = case when status = 'matched' then description else null end,
+            release_info = case when status = 'matched' then release_info else null end,
+            genres = case when status = 'matched' then genres else null end,
             algorithm_version = ?,
             attempts = attempts + 1,
             error = null,
