@@ -1,4 +1,4 @@
-import type { MediaRepository } from "../media/mediaRepository.js";
+import type { MediaRepository, ParsedMediaFileInput } from "../media/mediaRepository.js";
 import { parseMediaPath, type ParseMediaOptions } from "../media/parser.js";
 import type { FtpConfig } from "../profiles/profileService.js";
 import type { FtpClient, FtpClientFactory, FtpEntry } from "./ftpTypes.js";
@@ -6,6 +6,7 @@ import type { FtpClient, FtpClientFactory, FtpEntry } from "./ftpTypes.js";
 const MAX_CRAWL_DEPTH = 64;
 const MAX_CRAWL_ENTRIES = 100000;
 const MAX_TRANSIENT_LIST_ATTEMPTS = 3;
+const ENTRIES_PER_WRITE_BATCH = 500;
 const LEGACY_CRAWL_SNAPSHOT_PREFIXES = ["parser-2026-05-04-3"];
 
 export type CrawlProfileRootInput = {
@@ -129,6 +130,18 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
       return;
     }
 
+    let pendingFiles: ParsedMediaFileInput[] = [];
+    let entriesSinceWrite = 0;
+    const writePendingFiles = () => {
+      entriesSinceWrite = 0;
+      if (!pendingFiles.length) return;
+      const files = pendingFiles;
+      pendingFiles = [];
+      input.repo.transaction(() => {
+        for (const file of files) upsertParsedFile(input, file);
+      });
+    };
+
     for (const entry of entries) {
       throwIfScanCancelled(input.signal);
       entriesSeen += 1;
@@ -136,12 +149,13 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
       if (entry.name === "." || entry.name === "..") continue;
 
       if (entry.type === "directory") {
+        writePendingFiles();
         await walk(entry.path, depth + 1, entry.modifiedAt ?? null);
       } else {
         const parsed = parseMediaPath(entry.path, input.parserOptions);
         if (parsed) {
           filesSeen += 1;
-          upsertParsedFile(input, {
+          pendingFiles.push({
             ...parsed,
             ftpServerId: input.ftpServerId ?? null,
             sizeBytes: entry.size ?? null,
@@ -150,8 +164,14 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
           });
         }
         report(entry.path);
+        entriesSinceWrite += 1;
+        if (entriesSinceWrite >= ENTRIES_PER_WRITE_BATCH) {
+          writePendingFiles();
+          await yieldToEventLoop();
+        }
       }
     }
+    writePendingFiles();
 
     pendingSnapshots.push({
       dirPath: normalizedPath,
@@ -164,10 +184,10 @@ export async function crawlProfileRoot(input: CrawlProfileRootInput) {
 
   try {
     await walk(input.rootPath, 0);
-    deleteStaleUnderRoot(input, input.rootPath, crawlStartedAt);
-    for (const snapshot of pendingSnapshots) {
-      saveDirectorySnapshot(input, snapshot);
-    }
+    input.repo.transaction(() => {
+      deleteStaleUnderRoot(input, input.rootPath, crawlStartedAt);
+      for (const snapshot of pendingSnapshots) saveDirectorySnapshot(input, snapshot);
+    });
     return { filesSeen };
   } finally {
     if (!input.session) await session.close();
@@ -191,6 +211,10 @@ function throwIfScanCancelled(signal?: AbortSignal) {
 function isTransientFtpDisconnect(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /\b(FIN packet|ECONNRESET|ETIMEDOUT|EPIPE|socket.*closed|connection.*(?:closed|reset|timeout|timed out))\b/i.test(message);
+}
+
+function yieldToEventLoop() {
+  return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 function normalizeFtpPath(path: string) {
@@ -265,7 +289,7 @@ function saveDirectorySnapshot(input: CrawlProfileRootInput, snapshot: {
   });
 }
 
-function upsertParsedFile(input: CrawlProfileRootInput, file: Parameters<MediaRepository["upsertParsedFile"]>[1]) {
+function upsertParsedFile(input: CrawlProfileRootInput, file: ParsedMediaFileInput) {
   if (input.sharedIndexGroupId) {
     input.repo.upsertSharedParsedFile(input.sharedIndexGroupId, file);
     return;

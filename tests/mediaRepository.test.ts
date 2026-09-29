@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { migrate } from "../src/server/db/schema";
 import { MediaRepository } from "../src/server/media/mediaRepository";
 
@@ -948,6 +948,55 @@ describe("MediaRepository", () => {
 function titleCase(value: string) {
   return value.replace(/\b\w/g, (character) => character.toUpperCase());
 }
+
+function scanFile(ftpPath: string, lastSeenAt: string) {
+  return {
+    ftpPath,
+    filename: ftpPath.split("/").at(-1) ?? "",
+    normalizedFilename: "movie 2020",
+    extension: "mkv",
+    mediaKind: "movie" as const,
+    parsedTitle: "movie",
+    parsedYear: 2020,
+    season: null,
+    episode: null,
+    imdbId: null,
+    quality: null,
+    confidence: 80,
+    lastSeenAt,
+  };
+}
+
+describe("MediaRepository scan writes", () => {
+  it("reuses prepared statements across repeated scan writes", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const groupId = createSharedGroup(db, serverId, "statements");
+    const repo = new MediaRepository(db);
+    const seenAt = "2026-05-02T00:00:00.000Z";
+    const prepareSpy = vi.spyOn(db, "prepare");
+
+    for (let index = 0; index < 50; index += 1) {
+      const file = scanFile(`/Movies/Movie.${index}.2020.mkv`, seenAt);
+      const snapshot = { dirPath: `/Movies/${index}`, entryCount: 1, fingerprint: "f", lastSeenAt: seenAt };
+      repo.upsertParsedFile(profileId, { ...file, ftpServerId: serverId });
+      repo.upsertParsedFile(profileId, file);
+      repo.upsertSharedParsedFile(groupId, file);
+      repo.saveDirectorySnapshot(profileId, { ...snapshot, ftpServerId: serverId });
+      repo.saveSharedDirectorySnapshot(groupId, snapshot);
+      repo.directorySnapshotMatchesFingerprint(profileId, serverId, snapshot.dirPath, 1, "f");
+      repo.sharedDirectorySnapshotMatchesFingerprint(groupId, snapshot.dirPath, 1, "f");
+      repo.markSeenUnderRoot(profileId, "/Movies", seenAt, serverId);
+      repo.markSharedSeenUnderRoot(groupId, "/Movies", seenAt);
+    }
+
+    expect(prepareSpy.mock.calls.length).toBeLessThanOrEqual(15);
+    expect(repo.countForServer(profileId, serverId)).toBe(50);
+    expect(repo.countForSharedIndexGroup(groupId)).toBe(50);
+  });
+});
 
 describe("MediaRepository shared index count queries", () => {
   function sharedMovie(title: string, year: number) {

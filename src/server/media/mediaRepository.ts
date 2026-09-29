@@ -114,97 +114,29 @@ export class MediaRepository {
   upsertParsedFile(profileId: number, file: ParsedMediaFileInput) {
     const lastSeenAt = file.lastSeenAt ?? new Date().toISOString();
     if (file.ftpServerId === undefined || file.ftpServerId === null) {
-      const updated = this.db
-        .prepare(
-          `
-          update media_files
-          set filename = ?,
-              normalized_filename = ?,
-              extension = ?,
-              size_bytes = ?,
-              modified_at = ?,
-              media_kind = ?,
-              catalog_kind = ?,
-              parsed_title = ?,
-              parsed_year = ?,
-              season = ?,
-              episode = ?,
-              imdb_id = ?,
-              quality = ?,
-              confidence = ?,
-              last_seen_at = ?
-          where profile_id = ?
-            and ftp_server_id is null
-            and ftp_path = ?
-        `,
-        )
-        .run(
-          file.filename,
-          file.normalizedFilename,
-          file.extension,
-          file.sizeBytes ?? null,
-          file.modifiedAt ?? null,
-          file.mediaKind,
-          file.catalogKind ?? file.mediaKind,
-          file.parsedTitle,
-          file.parsedYear,
-          file.season,
-          file.episode,
-          file.imdbId,
-          file.quality,
-          file.confidence,
-          lastSeenAt,
-          profileId,
-          file.ftpPath,
-        );
-      if (updated.changes > 0) return;
-    }
-    this.db
-      .prepare(
+      const updated = this.scanStatement(
         `
-        insert into media_files (
-          profile_id,
-          ftp_server_id,
-          ftp_path,
-          filename,
-          normalized_filename,
-          extension,
-          size_bytes,
-          modified_at,
-          media_kind,
-          catalog_kind,
-          parsed_title,
-          parsed_year,
-          season,
-          episode,
-          imdb_id,
-          quality,
-          confidence,
-          last_seen_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        on conflict(profile_id, ftp_server_id, ftp_path) do update set
-          ftp_server_id = excluded.ftp_server_id,
-          filename = excluded.filename,
-          normalized_filename = excluded.normalized_filename,
-          extension = excluded.extension,
-          size_bytes = excluded.size_bytes,
-          modified_at = excluded.modified_at,
-          media_kind = excluded.media_kind,
-          catalog_kind = excluded.catalog_kind,
-          parsed_title = excluded.parsed_title,
-          parsed_year = excluded.parsed_year,
-          season = excluded.season,
-          episode = excluded.episode,
-          imdb_id = excluded.imdb_id,
-          quality = excluded.quality,
-          confidence = excluded.confidence,
-          last_seen_at = excluded.last_seen_at
+        update media_files
+        set filename = ?,
+            normalized_filename = ?,
+            extension = ?,
+            size_bytes = ?,
+            modified_at = ?,
+            media_kind = ?,
+            catalog_kind = ?,
+            parsed_title = ?,
+            parsed_year = ?,
+            season = ?,
+            episode = ?,
+            imdb_id = ?,
+            quality = ?,
+            confidence = ?,
+            last_seen_at = ?
+        where profile_id = ?
+          and ftp_server_id is null
+          and ftp_path = ?
       `,
-      )
-      .run(
-        profileId,
-        file.ftpServerId ?? null,
-        file.ftpPath,
+      ).run(
         file.filename,
         file.normalizedFilename,
         file.extension,
@@ -220,70 +152,132 @@ export class MediaRepository {
         file.quality,
         file.confidence,
         lastSeenAt,
+        profileId,
+        file.ftpPath,
       );
+      if (updated.changes > 0) return;
+    }
+    this.scanStatement(
+      `
+      insert into media_files (
+        profile_id,
+        ftp_server_id,
+        ftp_path,
+        filename,
+        normalized_filename,
+        extension,
+        size_bytes,
+        modified_at,
+        media_kind,
+        catalog_kind,
+        parsed_title,
+        parsed_year,
+        season,
+        episode,
+        imdb_id,
+        quality,
+        confidence,
+        last_seen_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict(profile_id, ftp_server_id, ftp_path) do update set
+        ftp_server_id = excluded.ftp_server_id,
+        filename = excluded.filename,
+        normalized_filename = excluded.normalized_filename,
+        extension = excluded.extension,
+        size_bytes = excluded.size_bytes,
+        modified_at = excluded.modified_at,
+        media_kind = excluded.media_kind,
+        catalog_kind = excluded.catalog_kind,
+        parsed_title = excluded.parsed_title,
+        parsed_year = excluded.parsed_year,
+        season = excluded.season,
+        episode = excluded.episode,
+        imdb_id = excluded.imdb_id,
+        quality = excluded.quality,
+        confidence = excluded.confidence,
+        last_seen_at = excluded.last_seen_at
+    `,
+    ).run(
+      profileId,
+      file.ftpServerId ?? null,
+      file.ftpPath,
+      file.filename,
+      file.normalizedFilename,
+      file.extension,
+      file.sizeBytes ?? null,
+      file.modifiedAt ?? null,
+      file.mediaKind,
+      file.catalogKind ?? file.mediaKind,
+      file.parsedTitle,
+      file.parsedYear,
+      file.season,
+      file.episode,
+      file.imdbId,
+      file.quality,
+      file.confidence,
+      lastSeenAt,
+    );
   }
 
   upsertSharedParsedFile(sharedIndexGroupId: number, file: ParsedMediaFileInput) {
     const lastSeenAt = file.lastSeenAt ?? new Date().toISOString();
-    this.db
-      .prepare(
-        `
-        insert into shared_media_files (
-          shared_index_group_id,
-          ftp_path,
-          filename,
-          normalized_filename,
-          extension,
-          size_bytes,
-          modified_at,
-          media_kind,
-          catalog_kind,
-          parsed_title,
-          parsed_year,
-          season,
-          episode,
-          imdb_id,
-          quality,
-          confidence,
-          last_seen_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        on conflict(shared_index_group_id, ftp_path) do update set
-          filename = excluded.filename,
-          normalized_filename = excluded.normalized_filename,
-          extension = excluded.extension,
-          size_bytes = excluded.size_bytes,
-          modified_at = excluded.modified_at,
-          media_kind = excluded.media_kind,
-          catalog_kind = excluded.catalog_kind,
-          parsed_title = excluded.parsed_title,
-          parsed_year = excluded.parsed_year,
-          season = excluded.season,
-          episode = excluded.episode,
-          imdb_id = excluded.imdb_id,
-          quality = excluded.quality,
-          confidence = excluded.confidence,
-          last_seen_at = excluded.last_seen_at
-      `,
-      )
-      .run(
-        sharedIndexGroupId,
-        file.ftpPath,
-        file.filename,
-        file.normalizedFilename,
-        file.extension,
-        file.sizeBytes ?? null,
-        file.modifiedAt ?? null,
-        file.mediaKind,
-        file.catalogKind ?? file.mediaKind,
-        file.parsedTitle,
-        file.parsedYear,
-        file.season,
-        file.episode,
-        file.imdbId,
-        file.quality,
-        file.confidence,
-        lastSeenAt,
-      );
+    this.scanStatement(
+      `
+      insert into shared_media_files (
+        shared_index_group_id,
+        ftp_path,
+        filename,
+        normalized_filename,
+        extension,
+        size_bytes,
+        modified_at,
+        media_kind,
+        catalog_kind,
+        parsed_title,
+        parsed_year,
+        season,
+        episode,
+        imdb_id,
+        quality,
+        confidence,
+        last_seen_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict(shared_index_group_id, ftp_path) do update set
+        filename = excluded.filename,
+        normalized_filename = excluded.normalized_filename,
+        extension = excluded.extension,
+        size_bytes = excluded.size_bytes,
+        modified_at = excluded.modified_at,
+        media_kind = excluded.media_kind,
+        catalog_kind = excluded.catalog_kind,
+        parsed_title = excluded.parsed_title,
+        parsed_year = excluded.parsed_year,
+        season = excluded.season,
+        episode = excluded.episode,
+        imdb_id = excluded.imdb_id,
+        quality = excluded.quality,
+        confidence = excluded.confidence,
+        last_seen_at = excluded.last_seen_at
+    `,
+    ).run(
+      sharedIndexGroupId,
+      file.ftpPath,
+      file.filename,
+      file.normalizedFilename,
+      file.extension,
+      file.sizeBytes ?? null,
+      file.modifiedAt ?? null,
+      file.mediaKind,
+      file.catalogKind ?? file.mediaKind,
+      file.parsedTitle,
+      file.parsedYear,
+      file.season,
+      file.episode,
+      file.imdbId,
+      file.quality,
+      file.confidence,
+      lastSeenAt,
+    );
   }
 
   deleteStaleUnderRoot(profileId: number, rootPath: string, seenSince: string, ftpServerId?: number | null) {
@@ -775,6 +769,21 @@ export class MediaRepository {
     return rows.map((row) => row.id);
   }
 
+  private readonly scanStatements = new Map<string, Database.Statement>();
+
+  private scanStatement(sql: string) {
+    let statement = this.scanStatements.get(sql);
+    if (!statement) {
+      statement = this.db.prepare(sql);
+      this.scanStatements.set(sql, statement);
+    }
+    return statement;
+  }
+
+  transaction<T>(work: () => T): T {
+    return this.db.transaction(work)();
+  }
+
   directorySnapshotMatchesModifiedAt(profileId: number, ftpServerId: number | null | undefined, dirPath: string, modifiedAt: string) {
     const row = this.db
       .prepare(
@@ -815,77 +824,70 @@ export class MediaRepository {
     entryCount: number,
     fingerprint: string,
   ) {
-    const row = this.db
-      .prepare(
-        `
-        select id
-        from scan_directory_snapshots
-        where profile_id = ?
-          and (? is null or ftp_server_id = ?)
-          and dir_path = ?
-          and entry_count = ?
-          and fingerprint = ?
-        limit 1
-      `,
-      )
-      .get(profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath), entryCount, fingerprint) as
+    const row = this.scanStatement(
+      `
+      select id
+      from scan_directory_snapshots
+      where profile_id = ?
+        and (? is null or ftp_server_id = ?)
+        and dir_path = ?
+        and entry_count = ?
+        and fingerprint = ?
+      limit 1
+    `,
+    ).get(profileId, ftpServerId ?? null, ftpServerId ?? null, normalizeRootPath(dirPath), entryCount, fingerprint) as
       | { id: number }
       | undefined;
     return Boolean(row);
   }
 
   sharedDirectorySnapshotMatchesFingerprint(sharedIndexGroupId: number, dirPath: string, entryCount: number, fingerprint: string) {
-    const row = this.db
-      .prepare(
-        `
-        select id
-        from shared_directory_snapshots
-        where shared_index_group_id = ?
-          and dir_path = ?
-          and entry_count = ?
-          and fingerprint = ?
-        limit 1
-      `,
-      )
-      .get(sharedIndexGroupId, normalizeRootPath(dirPath), entryCount, fingerprint) as { id: number } | undefined;
+    const row = this.scanStatement(
+      `
+      select id
+      from shared_directory_snapshots
+      where shared_index_group_id = ?
+        and dir_path = ?
+        and entry_count = ?
+        and fingerprint = ?
+      limit 1
+    `,
+    ).get(sharedIndexGroupId, normalizeRootPath(dirPath), entryCount, fingerprint) as { id: number } | undefined;
     return Boolean(row);
   }
 
   saveDirectorySnapshot(profileId: number, snapshot: DirectorySnapshotInput) {
-    this.db
-      .prepare(
-        `
-        insert into scan_directory_snapshots (
-          profile_id,
-          ftp_server_id,
-          dir_path,
-          entry_count,
-          fingerprint,
-          modified_at,
-          last_seen_at
-        ) values (?, ?, ?, ?, ?, ?, ?)
-        on conflict(profile_id, ftp_server_id, dir_path) do update set
-          entry_count = excluded.entry_count,
-          fingerprint = excluded.fingerprint,
-          modified_at = excluded.modified_at,
-          last_seen_at = excluded.last_seen_at
-      `,
-      )
-      .run(
-        profileId,
-        snapshot.ftpServerId ?? null,
-        normalizeRootPath(snapshot.dirPath),
-        snapshot.entryCount,
-        snapshot.fingerprint,
-        snapshot.modifiedAt ?? null,
-        snapshot.lastSeenAt,
-      );
+    this.scanStatement(
+      `
+      insert into scan_directory_snapshots (
+        profile_id,
+        ftp_server_id,
+        dir_path,
+        entry_count,
+        fingerprint,
+        modified_at,
+        last_seen_at
+      ) values (?, ?, ?, ?, ?, ?, ?)
+      on conflict(profile_id, ftp_server_id, dir_path) do update set
+        entry_count = excluded.entry_count,
+        fingerprint = excluded.fingerprint,
+        modified_at = excluded.modified_at,
+        last_seen_at = excluded.last_seen_at
+    `,
+    ).run(
+      profileId,
+      snapshot.ftpServerId ?? null,
+      normalizeRootPath(snapshot.dirPath),
+      snapshot.entryCount,
+      snapshot.fingerprint,
+      snapshot.modifiedAt ?? null,
+      snapshot.lastSeenAt,
+    );
   }
 
   saveSharedDirectorySnapshot(sharedIndexGroupId: number, snapshot: Omit<DirectorySnapshotInput, "ftpServerId">) {
-    this.db
-      .prepare(
-        `
+    this.scanStatement(
+      `
       insert into shared_directory_snapshots (
         shared_index_group_id,
         dir_path,
@@ -900,15 +902,14 @@ export class MediaRepository {
         modified_at = excluded.modified_at,
         last_seen_at = excluded.last_seen_at
     `,
-      )
-      .run(
-        sharedIndexGroupId,
-        normalizeRootPath(snapshot.dirPath),
-        snapshot.entryCount,
-        snapshot.fingerprint,
-        snapshot.modifiedAt ?? null,
-        snapshot.lastSeenAt,
-      );
+    ).run(
+      sharedIndexGroupId,
+      normalizeRootPath(snapshot.dirPath),
+      snapshot.entryCount,
+      snapshot.fingerprint,
+      snapshot.modifiedAt ?? null,
+      snapshot.lastSeenAt,
+    );
   }
 
   touchDirectorySnapshot(profileId: number, ftpServerId: number | null | undefined, dirPath: string, lastSeenAt: string) {
@@ -965,44 +966,38 @@ export class MediaRepository {
   markSeenUnderRoot(profileId: number, rootPath: string, seenAt: string, ftpServerId?: number | null) {
     const root = normalizeRootPath(rootPath);
     if (root === "/") {
-      return this.db
-        .prepare("update media_files set last_seen_at = ? where profile_id = ? and (? is null or ftp_server_id = ?)")
+      return this.scanStatement("update media_files set last_seen_at = ? where profile_id = ? and (? is null or ftp_server_id = ?)")
         .run(seenAt, profileId, ftpServerId ?? null, ftpServerId ?? null).changes;
     }
 
     const rootWithSlash = `${root}/`;
-    return this.db
-      .prepare(
-        `
-        update media_files
-        set last_seen_at = ?
-        where profile_id = ?
-          and (? is null or ftp_server_id = ?)
-          and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
-      `,
-      )
-      .run(seenAt, profileId, ftpServerId ?? null, ftpServerId ?? null, root, rootWithSlash.length, rootWithSlash).changes;
+    return this.scanStatement(
+      `
+      update media_files
+      set last_seen_at = ?
+      where profile_id = ?
+        and (? is null or ftp_server_id = ?)
+        and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
+    `,
+    ).run(seenAt, profileId, ftpServerId ?? null, ftpServerId ?? null, root, rootWithSlash.length, rootWithSlash).changes;
   }
 
   markSharedSeenUnderRoot(sharedIndexGroupId: number, rootPath: string, seenAt: string) {
     const root = normalizeRootPath(rootPath);
     if (root === "/") {
-      return this.db
-        .prepare("update shared_media_files set last_seen_at = ? where shared_index_group_id = ?")
+      return this.scanStatement("update shared_media_files set last_seen_at = ? where shared_index_group_id = ?")
         .run(seenAt, sharedIndexGroupId).changes;
     }
 
     const rootWithSlash = `${root}/`;
-    return this.db
-      .prepare(
-        `
-        update shared_media_files
-        set last_seen_at = ?
-        where shared_index_group_id = ?
-          and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
-      `,
-      )
-      .run(seenAt, sharedIndexGroupId, root, rootWithSlash.length, rootWithSlash).changes;
+    return this.scanStatement(
+      `
+      update shared_media_files
+      set last_seen_at = ?
+      where shared_index_group_id = ?
+        and (ftp_path = ? or substr(ftp_path, 1, ?) = ?)
+    `,
+    ).run(seenAt, sharedIndexGroupId, root, rootWithSlash.length, rootWithSlash).changes;
   }
 
   catalogItems(

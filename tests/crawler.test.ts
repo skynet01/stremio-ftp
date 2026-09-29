@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { migrate } from "../src/server/db/schema";
 import { crawlProfileRoot } from "../src/server/ftp/crawler";
 import type { FtpClientFactory } from "../src/server/ftp/ftpTypes";
@@ -275,6 +275,57 @@ describe("crawler", () => {
       fingerprint: string;
     };
     expect(snapshot.fingerprint).toBe("file\tThe.Matrix.1999.mkv\t/Movies/The.Matrix.1999.mkv\t1000\t");
+  });
+
+  it("writes media upserts and directory snapshots inside transactions", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const repo = new MediaRepository(db);
+    db.function("scan_write_in_transaction", () => (db.inTransaction ? 1 : 0));
+    db.exec(`
+      create temp table scan_write_log (target text not null, in_transaction integer not null);
+      create temp trigger log_media_insert after insert on media_files
+      begin
+        insert into scan_write_log values ('media', scan_write_in_transaction());
+      end;
+      create temp trigger log_snapshot_insert after insert on scan_directory_snapshots
+      begin
+        insert into scan_write_log values ('snapshot', scan_write_in_transaction());
+      end;
+    `);
+    const movies = Array.from({ length: 20 }, (_, index) => ({
+      name: `Movie.${index}.2020.mkv`,
+      path: `/Movies/Movie.${index}.2020.mkv`,
+      type: "file" as const,
+      size: 1000,
+    }));
+    const factory: FtpClientFactory = async () => ({
+      list: async (path) =>
+        path === "/"
+          ? [
+              { name: "Movies", path: "/Movies", type: "directory", modifiedAt: "2026-05-01T00:00:00.000Z" },
+              { name: "Loose.Movie.2019.mkv", path: "/Loose.Movie.2019.mkv", type: "file", size: 1000 },
+            ]
+          : movies,
+      openReadStream: async () => {
+        throw new Error("not used");
+      },
+      close: async () => undefined,
+    });
+    const transactionSpy = vi.spyOn(db, "transaction");
+
+    const result = await crawlProfileRoot({ profileId, rootPath: "/", ftpConfig, factory, repo });
+
+    expect(result.filesSeen).toBe(21);
+    const writes = db.prepare("select target, in_transaction as inTransaction from scan_write_log").all() as Array<{
+      target: string;
+      inTransaction: number;
+    }>;
+    expect(writes.filter((write) => write.target === "media")).toHaveLength(21);
+    expect(writes.filter((write) => write.target === "snapshot")).toHaveLength(2);
+    expect(writes.filter((write) => write.inTransaction !== 1)).toEqual([]);
+    expect(transactionSpy.mock.calls.length).toBeLessThanOrEqual(3);
   });
 
   it("skips invalid zero-numbered episodes without failing the crawl", async () => {
