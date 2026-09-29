@@ -17,7 +17,7 @@ export async function fetchCinemetaMeta(
   imdbId: string,
   timeoutMs = 4500,
 ): Promise<CinemetaMeta | null> {
-  if (!IMDB_ID_PATTERN.test(imdbId)) return null;
+  if (!isImdbId(imdbId)) return null;
   const cacheKey = `${type}:${imdbId}`;
   const cached = cinemetaCache.get(cacheKey);
   if (cached) return cached;
@@ -28,6 +28,10 @@ export async function fetchCinemetaMeta(
   });
   cinemetaCache.set(cacheKey, value, CINEMETA_SUCCESS_TTL_MS);
   return value;
+}
+
+export function isImdbId(value: string) {
+  return IMDB_ID_PATTERN.test(value);
 }
 
 export function clearCinemetaCache() {

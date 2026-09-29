@@ -1,7 +1,104 @@
+import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
+import { migrate } from "../src/server/db/schema";
+import { MediaRepository } from "../src/server/media/mediaRepository";
 import { resolveStreams } from "../src/server/stremio/streamResolver";
 
+function movieRepositoryWithoutMetadata() {
+  const db = new Database(":memory:");
+  migrate(db);
+  const profileId = Number(
+    db
+      .prepare("insert into profiles (browser_uid, passphrase_verifier, install_token_hash, created_at, updated_at) values ('uid-1', 'v', 'h-1', 'n', 'n')")
+      .run().lastInsertRowid,
+  );
+  const serverId = Number(
+    db
+      .prepare(
+        `insert into profile_ftp_servers (profile_id, name, catalog_enabled, catalog_content_movies, catalog_content_series,
+          catalog_content_anime, catalog_sort, library_layout, stream_delivery_mode, created_at, updated_at)
+        values (?, 'Server 1', 1, 1, 1, 0, 'alphabetical', 'auto', 'proxy', 'n', 'n')`,
+      )
+      .run(profileId).lastInsertRowid,
+  );
+  const repository = new MediaRepository(db);
+  for (const file of [
+    { filename: "The.Movie.2021.tt7654321.mkv", parsedTitle: "movie", imdbId: "tt7654321" },
+    { filename: "Enriched.Movie.2021.mkv", parsedTitle: "enriched movie", imdbId: null },
+    { filename: "2021.mkv", parsedTitle: "", imdbId: null },
+    { filename: "Unrelated.2021.mkv", parsedTitle: "unrelated", imdbId: null },
+  ]) {
+    repository.upsertParsedFile(profileId, {
+      ftpServerId: serverId,
+      mediaKind: "movie",
+      catalogKind: "movie",
+      ftpPath: `/Movies/${file.filename}`,
+      filename: file.filename,
+      normalizedFilename: file.parsedTitle,
+      extension: "mkv",
+      parsedTitle: file.parsedTitle,
+      parsedYear: 2021,
+      season: null,
+      episode: null,
+      imdbId: file.imdbId,
+      quality: "1080p",
+      confidence: 80,
+    });
+  }
+  const seenAt = "2026-05-04T00:00:00.000Z";
+  repository.syncCatalogEnrichmentCandidates(profileId, serverId, repository.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), seenAt);
+  const enriched = repository.pendingCatalogEnrichment(profileId, serverId, seenAt, 10).find((item) => item.parsedTitle === "enriched movie")!;
+  repository.saveCatalogEnrichmentMatch(enriched.id, { id: "tt7654321", type: "movie", name: "The Movie" }, seenAt);
+  return { profileId, repository };
+}
+
 describe("stream resolver", () => {
+  it.each([
+    ["unavailable", null],
+    ["missing a usable title", { name: "!!!", releaseInfo: "2021" }],
+  ])("matches movies by IMDb id only when metadata is %s", async (_label, metadata) => {
+    const { profileId, repository } = movieRepositoryWithoutMetadata();
+
+    const streams = await resolveStreams({
+      baseUrl: "https://addon.example.test",
+      installToken: "token",
+      profileId,
+      type: "movie",
+      id: "tt7654321",
+      metadata,
+      mediaRepository: repository,
+    });
+
+    expect(streams.map((stream) => stream.behaviorHints.filename).sort()).toEqual([
+      "Enriched.Movie.2021.mkv",
+      "The.Movie.2021.tt7654321.mkv",
+    ]);
+  });
+
+  it("does not look up files without a usable title for series or malformed movie ids", async () => {
+    const findEpisode = vi.fn(() => []);
+    const findMovie = vi.fn(() => []);
+
+    for (const request of [
+      { type: "series" as const, id: "tt1234567:2:5", metadata: null },
+      { type: "series" as const, id: "tt1234567:2:5", metadata: { name: "!!!" } },
+      { type: "movie" as const, id: "not-imdb", metadata: null },
+    ]) {
+      await expect(
+        resolveStreams({
+          baseUrl: "https://addon.example.test",
+          installToken: "token",
+          profileId: 1,
+          ...request,
+          mediaRepository: { findEpisode, findMovie },
+        }),
+      ).resolves.toEqual([]);
+    }
+
+    expect(findEpisode).not.toHaveBeenCalled();
+    expect(findMovie).not.toHaveBeenCalled();
+  });
+
   it("resolves a series episode to a proxy stream", async () => {
     const streams = await resolveStreams({
       baseUrl: "https://addon.example.test",

@@ -1,4 +1,5 @@
 import { normalizeTitle } from "../media/normalizer.js";
+import { isImdbId } from "../metadata/cinemetaClient.js";
 import type { FtpConfig, StreamDeliveryMode } from "../profiles/profileService.js";
 import {
   renderStreamTemplate,
@@ -22,6 +23,10 @@ export type MediaMatch = {
   serverName?: string | null;
   streamDeliveryMode?: StreamDeliveryMode | null;
 };
+
+// Stored titles are normalizeTitle() output, which never contains "#", so this
+// matches no title and findMovie falls back to IMDb id and enrichment meta_id.
+const IMDB_ID_ONLY_TITLE = "#imdb-id-only";
 
 type RepoLike = {
   findEpisode(profileId: number, normalizedTitle: string, season: number, episode: number): MediaMatch[];
@@ -48,17 +53,7 @@ export async function resolveStreams(input: {
   streamNameTemplate?: string | null;
   streamDescriptionTemplate?: string | null;
 }) {
-  if (!input.metadata) return [];
-
-  const matches =
-    input.type === "series"
-      ? episodeMatches(input)
-      : input.mediaRepository.findMovie(
-          input.profileId,
-          input.id,
-          normalizeTitle(input.metadata.name),
-          yearFrom(input.metadata.releaseInfo),
-        );
+  const matches = input.type === "series" ? episodeMatches(input) : movieMatches(input);
 
   return matches.map((match) => streamForMatch({
     baseUrl: input.baseUrl,
@@ -248,19 +243,22 @@ function encodeFtpPath(ftpPath: string): string {
     .join("/");
 }
 
+function movieMatches(input: Parameters<typeof resolveStreams>[0]): MediaMatch[] {
+  if (!isImdbId(input.id)) return [];
+  const title = input.metadata ? normalizeTitle(input.metadata.name) : "";
+  return input.mediaRepository.findMovie(input.profileId, input.id, title || IMDB_ID_ONLY_TITLE, yearFrom(input.metadata?.releaseInfo));
+}
+
 function episodeMatches(input: Parameters<typeof resolveStreams>[0]): MediaMatch[] {
+  const title = input.metadata ? normalizeTitle(input.metadata.name) : "";
+  if (!title) return [];
   const parts = input.id.split(":");
   if (parts.length !== 3) return [];
   const [, seasonRaw, episodeRaw] = parts;
   if (!isPositiveDecimalInteger(seasonRaw) || !isPositiveDecimalInteger(episodeRaw)) return [];
   const season = Number(seasonRaw);
   const episode = Number(episodeRaw);
-  return input.mediaRepository.findEpisode(
-    input.profileId,
-    normalizeTitle(input.metadata?.name ?? ""),
-    season,
-    episode,
-  );
+  return input.mediaRepository.findEpisode(input.profileId, title, season, episode);
 }
 
 function isPositiveDecimalInteger(value: string): boolean {
