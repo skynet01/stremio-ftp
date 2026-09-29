@@ -413,8 +413,33 @@ describe("profile routes", () => {
       .expect(429);
 
     await statusAttempt("wrong-passphrase", "203.0.113.50", "other-browser-uid").expect(401);
-    await statusAttempt("passphrase", "203.0.113.51").expect(200);
-    for (let attempt = 0; attempt < 5; attempt += 1) await statusAttempt("passphrase", "203.0.113.52").expect(200);
+    await statusAttempt("passphrase", "203.0.113.51").expect(429);
+  });
+
+  it("does not reset failed unlock attempts when forwarded IPs rotate", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const app = createApp({ ...config(), profileRateLimitMax: 3 }, db);
+    await request(app)
+      .post("/api/profile")
+      .set("x-setup-token", "setup-secret-123")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(201);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await request(app)
+        .post("/api/profile/index/status")
+        .set("x-setup-token", "setup-secret-123")
+        .set("x-forwarded-for", `203.0.113.${50 + attempt}`)
+        .send({ browserUid: "browser-uid", passphrase: "wrong-passphrase" })
+        .expect(401);
+    }
+    await request(app)
+      .post("/api/profile/index/status")
+      .set("x-setup-token", "setup-secret-123")
+      .set("x-forwarded-for", "203.0.113.53")
+      .send({ browserUid: "browser-uid", passphrase: "passphrase" })
+      .expect(429);
   });
 
   it("sweeps expired rate-limit buckets", () => {

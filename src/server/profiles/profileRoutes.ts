@@ -636,7 +636,7 @@ export type FailedUnlockLimiter = ReturnType<typeof createFailedUnlockLimiter>;
 export function createFailedUnlockLimiter(config: Pick<AppConfig, "profileRateLimitWindowMs" | "profileRateLimitMax">) {
   const maxFailures = Math.min(config.profileRateLimitMax, MAX_FAILED_UNLOCK_ATTEMPTS);
   const failures = new AttemptWindow(config.profileRateLimitWindowMs);
-  const keyFor = (req: Request, browserUid: string) => `${profileRateLimitKey(req)}|uid:${browserUid}`;
+  const keyFor = (_req: Request, browserUid: string) => `uid:${browserUid}`;
 
   return {
     retryAfterSeconds(req: Request, browserUid: string, now = Date.now()) {
