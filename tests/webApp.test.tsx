@@ -1,5 +1,6 @@
 /* @vitest-environment jsdom */
 import "@testing-library/jest-dom/vitest";
+import { StrictMode } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App, globalScanProgressForServers, mergeServerStatus } from "../src/web/App";
@@ -2415,6 +2416,61 @@ describe("App", () => {
       }),
     );
     expect(within(await screen.findByRole("dialog", { name: "Bulk action status" })).getByText("2 cancelled")).toBeTruthy();
+  });
+
+  it("debounces recovery UID setup lookups and ignores stale responses", async () => {
+    vi.useFakeTimers();
+    const resolvers = new Map<string, (value: Awaited<ReturnType<typeof loadSetupStatus>>) => void>();
+    loadSetupStatusMock.mockImplementation((browserUid) => new Promise((resolve) => resolvers.set(browserUid ?? "", resolve)));
+    createProfileMock.mockResolvedValue({
+      profileId: 1,
+      recoveryUid: "admin-uid",
+      manifestUrl: "https://addon.example.test/u/admin/manifest.json",
+      stremioInstallUrl: "stremio://addon.example.test/u/admin/manifest.json",
+    });
+    saveCustomizationMock.mockResolvedValue({ ok: true });
+    const advance = async (ms: number) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+
+    render(<App />);
+    expect(loadSetupStatusMock).toHaveBeenCalledTimes(1);
+    const recoveryUid = screen.getByLabelText("Recovery UID");
+    for (const value of ["o", "ol", "old-uid"]) fireEvent.change(recoveryUid, { target: { value } });
+    await advance(299);
+    expect(loadSetupStatusMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(loadSetupStatusMock).toHaveBeenCalledTimes(2);
+    expect(loadSetupStatusMock).toHaveBeenLastCalledWith("old-uid");
+
+    fireEvent.change(recoveryUid, { target: { value: "admin-uid" } });
+    await advance(300);
+    expect(loadSetupStatusMock).toHaveBeenCalledTimes(3);
+    expect(loadSetupStatusMock).toHaveBeenLastCalledWith("admin-uid");
+
+    await act(async () => resolvers.get("admin-uid")?.({ setupTokenRequired: false, isSuperAdmin: true, maxFtpServersPerProfile: 5 }));
+    await act(async () => resolvers.get("old-uid")?.({ setupTokenRequired: false, isSuperAdmin: false, maxFtpServersPerProfile: 1 }));
+
+    fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "passphrase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    for (let attempt = 0; attempt < 20 && !screen.queryByRole("button", { name: "Log out" }); attempt += 1) await advance(0);
+
+    expect(screen.getByText(/Up to 5 servers per profile\./)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create group" })).toBeTruthy();
+  });
+
+  it("requests setup status once on mount under StrictMode", async () => {
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(loadSetupStatusMock).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(loadSetupStatusMock).toHaveBeenCalledTimes(1);
   });
 
   describe("scan status polling", () => {

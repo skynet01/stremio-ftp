@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelScan,
   createAdminSharedIndexGroup,
@@ -102,6 +102,7 @@ const SERVER_LIBRARY_SETTING_KEYS = new Set<keyof ServerForm>([
 ]);
 const SHARED_INDEX_UNLINK_REQUIRED_FRAGMENT = "will unlink it from the shared index group";
 const SCAN_STATUS_POLL_MS = 3000;
+const SETUP_STATUS_DEBOUNCE_MS = 300;
 const AdminDashboard = lazy(() => import("./components/AdminDashboard.js").then((module) => ({ default: module.AdminDashboard })));
 
 function browserUid() {
@@ -392,6 +393,8 @@ export function App() {
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [exportStripCredentials, setExportStripCredentials] = useState(true);
   const { confirm, confirmDialog } = useConfirmDialog();
+  const requestedSetupStatusUid = useRef<string | null>(null);
+  const latestRecoveryUid = useRef(recoveryUid);
   const profileReady = profileState === "created" || profileState === "unlocked";
   const currentYear = new Date().getFullYear();
   const anyScanActive = useMemo(() => servers.some((server) => scanIsActive(server.scanStatus)), [servers]);
@@ -412,17 +415,31 @@ export function App() {
   );
 
   useEffect(() => {
-    void loadSetupStatus(recoveryUid)
-      .then((status) => {
-        if (typeof status.maxFtpServersPerProfile === "number") setMaxFtpServersPerProfile(status.maxFtpServersPerProfile);
-        if (typeof status.proxyStreamsDisabled === "boolean") setProxyStreamsDisabled(status.proxyStreamsDisabled);
-        setIsSuperAdmin(Boolean(status.isSuperAdmin));
-        if (needsSetupProbe) setSetupTokenRequired(status.setupTokenRequired);
-      })
-      .catch(() => {
-        setIsSuperAdmin(false);
-        if (needsSetupProbe) setSetupTokenRequired(true);
-      });
+    latestRecoveryUid.current = recoveryUid;
+    if (requestedSetupStatusUid.current === recoveryUid) return;
+    const requestSetupStatus = () => {
+      requestedSetupStatusUid.current = recoveryUid;
+      const isStale = () => latestRecoveryUid.current !== recoveryUid;
+      void loadSetupStatus(recoveryUid)
+        .then((status) => {
+          if (isStale()) return;
+          if (typeof status.maxFtpServersPerProfile === "number") setMaxFtpServersPerProfile(status.maxFtpServersPerProfile);
+          if (typeof status.proxyStreamsDisabled === "boolean") setProxyStreamsDisabled(status.proxyStreamsDisabled);
+          setIsSuperAdmin(Boolean(status.isSuperAdmin));
+          if (needsSetupProbe) setSetupTokenRequired(status.setupTokenRequired);
+        })
+        .catch(() => {
+          if (isStale()) return;
+          setIsSuperAdmin(false);
+          if (needsSetupProbe) setSetupTokenRequired(true);
+        });
+    };
+    if (requestedSetupStatusUid.current === null) {
+      requestSetupStatus();
+      return;
+    }
+    const timer = window.setTimeout(requestSetupStatus, SETUP_STATUS_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
   }, [recoveryUid]);
 
   useEffect(() => {
