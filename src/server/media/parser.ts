@@ -170,7 +170,7 @@ function seriesFolderOf(ftpPath: string): TitleYear | null {
   };
 }
 
-export function seriesFolderYearOf(ftpPath: string, parsedTitle: string): number | null {
+export function matchingFolderYearOf(ftpPath: string, parsedTitle: string): number | null {
   const folder = seriesFolderOf(ftpPath);
   return folder?.title === parsedTitle ? folder.year : null;
 }

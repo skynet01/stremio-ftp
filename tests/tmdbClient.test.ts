@@ -347,7 +347,7 @@ describe("tmdbCatalogMeta", () => {
 
   it.each([
     ["golden boy", 1995, "Golden Boy", "Golden Boy", 2022, "tt0159145", "tt2229167"],
-    ["dragon ball", 1986, "Dragon Ball", "Dragon Ball Z", 1986, "tt0088504", "tt0121220"],
+    ["dragon ball", 1986, "Dragon Ball", "Dragon Ball Z", 1986, "tt0088509", "tt0121220"],
   ])("uses the folder year and exact TV title for %s", async (parsedTitle, year, correctTitle, decoyTitle, decoyYear, correctId, decoyId) => {
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = new URL(String(input));
@@ -383,6 +383,49 @@ describe("tmdbCatalogMeta", () => {
 
     await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle: "the fall", parsedYear: 2006, imdbId: null }, "tmdb-key")).resolves.toEqual({ status: "unmatched" });
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/movie/1/external_ids");
+  });
+
+  it.each([
+    ["the fall", 2006, [
+      { id: 1, title: "The Fall", release_date: "2008-01-01" },
+      { id: 2, title: "Heavens Fall", release_date: "2006-01-01" },
+      { id: 3, title: "Fall to Grace", release_date: "2006-01-01" },
+    ]],
+    ["orbit", 2012, [
+      { id: 4, title: "Orbit Rising", release_date: "2012-01-01" },
+      { id: 5, title: "The Orbit of Mars", release_date: "2012-01-01" },
+    ]],
+  ])("rejects extra significant words when %s has no plausible exact title", async (parsedTitle, parsedYear, results) => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results }) };
+      if (url.pathname.endsWith("/external_ids")) return { ok: true, json: async () => ({ imdb_id: "tt0000001" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle, parsedYear, imdbId: null }, "tmdb-key")).resolves.toEqual({ status: "unmatched" });
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname).some((path) => path.endsWith("/external_ids"))).toBe(false);
+  });
+
+  it("uses a matching movie folder year when the filename has none", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [
+        { id: 1, title: "Fall", release_date: "2022-01-01" },
+        { id: 2, title: "The Fall", release_date: "2008-01-01" },
+        { id: 3, title: "Fall to Grace", release_date: "2006-01-01" },
+      ] }) };
+      if (url.pathname.endsWith("/external_ids")) return { ok: true, json: async () => ({ imdb_id: "tt0000001" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const item = { mediaKind: "movie" as const, catalogKind: "movie" as const, parsedTitle: "fall", parsedYear: null, alternateYear: 2006, imdbId: null };
+    await expect(tmdbCatalogEnrichment(item, "tmdb-key")).resolves.toEqual({ status: "unmatched" });
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("year")).toBe("2006");
+    expect(catalogMetaMatchesItem(item, { id: "tt0460791", type: "movie", name: "The Fall", releaseInfo: "2006" }, "movie")).toBe(true);
+    expect(catalogMetaMatchesItem(item, { id: "tt15325794", type: "movie", name: "Fall", releaseInfo: "2022" }, "movie")).toBe(false);
   });
 
   it("prefers an exact TV title and matching first-air year over a longer result", async () => {

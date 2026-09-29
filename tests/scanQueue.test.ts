@@ -927,15 +927,16 @@ describe("ScanQueue", () => {
       meta_id: "tt0133093",
       meta_name: "The Matrix",
       genres: '["Drama"]',
-      algorithm_version: 8,
+      algorithm_version: 9,
     });
   });
 
   it.each([
-    ["The Fall", "tt0460791", false],
-    ["Heavens Fall", "tt9999999", false],
-    ["The Fall", "tt0460791", true],
-  ])("rechecks a stored %s match before accepting a replacement (expected: %s, retry: %s)", async (storedName, expectedId, retryFirst) => {
+    ["The Fall", "tt0460791", false, false],
+    ["Heavens Fall", "tt9999999", false, false],
+    ["The Fall", "tt0460791", true, false],
+    ["The Fall", "tt0460791", false, true],
+  ])("rechecks a stored %s match before accepting a replacement (expected: %s, retry: %s, live dates: %s)", async (storedName, expectedId, retryFirst, liveDates) => {
     const path = "/The Fall (2006)/The Fall_35_8_RIGHT_ONLY_00_v1.8.6_halfSBS.mp4";
     const { db, profileService, queue } = createHarness(
       async () => ({
@@ -958,7 +959,11 @@ describe("ScanQueue", () => {
         return { ok: false, status: 429, json: async () => ({}) };
       }
       if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: rechecking
-        ? [
+        ? liveDates ? [
+            { id: 3, title: "Heavens Fall", release_date: "2006-01-01" },
+            { id: 4, title: "Fall to Grace", release_date: "2006-01-01" },
+            { id: 2, title: "The Fall", release_date: "2008-01-01" },
+          ] : [
             { id: 3, title: "Heavens Fall", release_date: "2006-01-01" },
             { id: 2, title: "The Fall", release_date: "2006-01-01" },
           ]
@@ -966,6 +971,7 @@ describe("ScanQueue", () => {
       if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0460791" }) };
       if (url.pathname === "/3/movie/2/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt9999999" }) };
       if (url.pathname === "/3/movie/3/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0425094" }) };
+      if (url.pathname === "/3/movie/4/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0452618" }) };
       throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
     }));
 

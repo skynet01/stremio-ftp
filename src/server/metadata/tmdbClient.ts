@@ -140,6 +140,7 @@ export async function tmdbCatalogMeta(item: CatalogItem, apiKey: string | null, 
     item.imdbId ?? "",
     item.parsedTitle.toLowerCase(),
     item.parsedYear ?? "",
+    item.alternateYear ?? "",
   ].join("|");
   const cached = catalogMetaCache.get(cacheKey);
   if (cached) return cached;
@@ -175,14 +176,14 @@ export function catalogMetaMatchesItem(item: CatalogItem, meta: PersistedCatalog
   if (meta.type !== (catalogKind === "movie" ? "movie" : "series")) return false;
   if (titleRelationshipScore(titleWithoutEditionSuffix(item.parsedTitle), meta.name) <= 0 &&
     (!item.alternateTitle || titleRelationshipScore(titleWithoutEditionSuffix(item.alternateTitle), meta.name) <= 0)) return false;
-  const year = searchYear(item, catalogKind);
+  const year = searchYear(item);
   const alternateYear = item.alternateTitle ? item.alternateYear : null;
   const metaYear = Number(meta.releaseInfo?.slice(0, 4));
   return !year || !metaYear || Math.abs(year - metaYear) <= 1 || Boolean(alternateYear && Math.abs(alternateYear - metaYear) <= 1);
 }
 
-function searchYear(item: CatalogItem, catalogKind: TmdbCatalogKind): number | null {
-  return item.parsedYear ?? (catalogKind === "movie" ? null : item.alternateYear ?? null);
+function searchYear(item: CatalogItem): number | null {
+  return item.parsedYear ?? item.alternateYear ?? null;
 }
 
 async function metaFromImdbId(item: CatalogItem, imdbId: string, apiKey: string | null, catalogKind: TmdbCatalogKind): Promise<CatalogMeta | null> {
@@ -211,7 +212,7 @@ async function metaFromSearch(item: CatalogItem, apiKey: string | null, catalogK
   }
   const variant = hadResults ? wordNumberSequelTitle(query) ?? romanNumeralSequelTitle(query) : romanNumeralSequelTitle(query) ?? wordNumberSequelTitle(query);
   if (variant && variant !== query) return metaFromSearchQuery(item, apiKey, catalogKind, variant, true);
-  return searchYear(item, catalogKind) ? metaFromSearchQuery(item, apiKey, catalogKind, query, false) : null;
+  return searchYear(item) ? metaFromSearchQuery(item, apiKey, catalogKind, query, false) : null;
 }
 
 async function metaFromSearchQuery(
@@ -226,7 +227,7 @@ async function metaFromSearchQuery(
   const url = new URL(`https://api.themoviedb.org/3/search/${searchType}`);
   url.searchParams.set("api_key", apiKey);
   url.searchParams.set("query", query);
-  const year = searchYear(item, catalogKind);
+  const year = searchYear(item);
   if (includeYear && year) {
     url.searchParams.set(catalogKind === "movie" ? "year" : "first_air_date_year", String(year));
   }
@@ -272,7 +273,7 @@ async function resultWithImdbId(
 function resultScore(item: CatalogItem, catalogKind: TmdbCatalogKind, result: TmdbMovie | TmdbTv) {
   const titleScore = titleRelationshipScore(item.parsedTitle, resultTitle(result, catalogKind));
   const resultYear = resultReleaseYear(result, catalogKind);
-  const year = searchYear(item, catalogKind);
+  const year = searchYear(item);
   const yearScore =
     year && resultYear
       ? year === resultYear
@@ -286,7 +287,7 @@ function resultScore(item: CatalogItem, catalogKind: TmdbCatalogKind, result: Tm
 
 function resultHasPlausibleYear(item: CatalogItem, catalogKind: TmdbCatalogKind, result: TmdbMovie | TmdbTv) {
   const resultYear = resultReleaseYear(result, catalogKind);
-  const year = searchYear(item, catalogKind);
+  const year = searchYear(item);
   return !year || !resultYear || Math.abs(year - resultYear) <= 1;
 }
 
@@ -301,7 +302,7 @@ function titleRelationshipScore(expectedTitle: string, resultTitleValue: string)
   if (expectedTokens.join(" ") === resultTokens.join(" ")) return 50;
   const expectedSet = new Set(expectedTokens);
   const resultSet = new Set(resultTokens);
-  if (expectedSet.size === 1) return resultTokens[0] === expectedTokens[0] ? 25 : 0;
+  if (expectedSet.size === 1) return 0;
   if (Array.from(expectedSet).every((token) => resultSet.has(token))) return 25;
   const commonTokens = Array.from(expectedSet).filter((token) => resultSet.has(token)).length;
   return expectedTokens.some((token) => /^(?:[2-9]|1\d|20)$/.test(token)) && commonTokens >= 2 ? 25 : 0;

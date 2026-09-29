@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
-import { PARSER_VERSION, parseMediaPath, seriesFolderYearOf, type ParsedMedia, type ParseMediaOptions } from "./parser.js";
+import { PARSER_VERSION, matchingFolderYearOf, parseMediaPath, type ParsedMedia, type ParseMediaOptions } from "./parser.js";
 
-const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 8;
+const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 9;
 
 export type ParsedMediaFileInput = Omit<ParsedMedia, "catalogKind"> & {
   catalogKind?: ParsedMedia["catalogKind"];
@@ -31,7 +31,7 @@ export type CatalogItem = {
   parsedYear: number | null;
   imdbId: string | null;
   alternateTitle?: string | null;
-  // Also carries a known series folder year when the filename has no year.
+  // Also carries a matching folder year when the filename has no year.
   alternateYear?: number | null;
 };
 
@@ -120,7 +120,7 @@ function storedParseValues(parsed: ParsedMedia) {
 function alternateForPath(ftpPath: string, libraryLayout: ParseMediaOptions["libraryLayout"], parsedTitle?: string) {
   const parsed = parseMediaPath(ftpPath, { libraryLayout, contentTypes: { movies: true, series: true, anime: true } });
   if (!parsed || (parsedTitle && parsed.parsedTitle !== parsedTitle)) return { alternateTitle: null, alternateYear: null };
-  return { alternateTitle: parsed.alternateTitle, alternateYear: parsed.alternateYear ?? (parsed.mediaKind === "series" ? seriesFolderYearOf(ftpPath, parsed.parsedTitle) : null) };
+  return { alternateTitle: parsed.alternateTitle, alternateYear: parsed.alternateYear ?? matchingFolderYearOf(ftpPath, parsed.parsedTitle) };
 }
 
 export class MediaRepository {

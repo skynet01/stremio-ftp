@@ -143,6 +143,23 @@ describe("MediaRepository", () => {
     });
   });
 
+  it("carries a matching movie folder year into enrichment in auto layout", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const profileId = createProfile(db);
+    const serverId = createServer(db, profileId);
+    const repo = new MediaRepository(db);
+    const path = "/The Fall (2006)/The Fall_35_8_RIGHT_ONLY_00_v1.8.6_halfSBS.mp4";
+    repo.upsertParsedFile(profileId, { ...parseMediaPath(path)!, ftpServerId: serverId });
+    repo.syncCatalogEnrichmentCandidates(profileId, serverId, repo.catalogEnrichmentCandidates(profileId, serverId, ["movie"]), "2026-01-01");
+
+    expect(repo.pendingCatalogEnrichment(profileId, serverId, "2026-01-01", 10)[0]).toMatchObject({
+      parsedTitle: "fall",
+      parsedYear: null,
+      alternateYear: 2006,
+    });
+  });
+
   it("upserts and queries episode rows", () => {
     const db = new Database(":memory:");
     migrate(db);
