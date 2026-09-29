@@ -5,3 +5,7 @@ coverage
 .env
 config/
 docs/superpowers
+.worktrees
+.claude
+.config*
+stremio-ftp-settings*.json

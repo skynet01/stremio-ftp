@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { date: "2026-09-29", hash: "v0.4.53", subject: "fix: steadier playback when skipping or pausing, safer scans, faster stream lookups, and portal fixes" },
   { date: "2026-07-17", hash: "v0.4.52", subject: "feat: add per-server catalog sorting with safer matching and index refreshes" },
   { date: "2026-06-03", hash: "v0.4.49", subject: "fix: resolve shared-index movie streams through master enrichment" },
   { date: "2026-05-24", hash: "v0.4.48", subject: "fix: show shared-index Other counts in admin linked rows" },

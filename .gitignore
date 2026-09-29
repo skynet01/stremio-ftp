@@ -13,3 +13,4 @@ TODO.md
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+stremio-ftp-settings*.json
