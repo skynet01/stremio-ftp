@@ -508,4 +508,13 @@ describe("tmdbCatalogMeta", () => {
     }));
     await expect(tmdbCatalogEnrichment({ mediaKind: "series", catalogKind: "series", parsedTitle: "12 monkeys", parsedYear: 2015, imdbId: null }, "tmdb-key")).resolves.toMatchObject({ status: "matched", meta: { id: "tt3148266" } });
   });
+
+  it("makes no more than two search requests for one item", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ results: [] }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle: "matrix 2 ultimate cut", parsedYear: 1999, imdbId: null }, "tmdb-key"),
+    ).resolves.toEqual({ status: "unmatched" });
+    expect(fetchMock.mock.calls.filter(([input]) => new URL(String(input)).pathname.startsWith("/3/search/")).length).toBeLessThanOrEqual(2);
+  });
 });
