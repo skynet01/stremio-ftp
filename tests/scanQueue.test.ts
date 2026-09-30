@@ -1051,6 +1051,32 @@ describe("ScanQueue", () => {
     expect(db.prepare("select status, meta_id from catalog_enrichment").get()).toEqual({ status: "matched", meta_id: "tt0133093" });
   });
 
+  it("enriches only a shared library's master at startup and drops linked-server copies", async () => {
+    const { db, profileService, mediaRepository, queue } = createHarness(async () => { throw new Error("FTP must not be contacted"); }, { ...baseConfig, tmdbApiKey: "tmdb-key" });
+    const masterProfileId = await createProfileWithFtp(profileService);
+    const linkedProfileId = await createProfileWithFtp(profileService);
+    const masterServerId = profileService.defaultFtpServerId(masterProfileId);
+    const linkedServerId = profileService.defaultFtpServerId(linkedProfileId);
+    const group = profileService.createSharedIndexGroupFromServer(masterProfileId, masterServerId, { name: "Shared Main", keyHint: "shared-main" }).group;
+    profileService.forceLinkServerToSharedGroup(linkedProfileId, linkedServerId, group.id);
+    for (const profileId of [masterProfileId, linkedProfileId]) profileService.saveAddonCustomization(profileId, { catalogEnabled: true });
+    mediaRepository.upsertSharedParsedFile(group.id, { ...parseMediaPath("/Movies/The.Matrix.1999.mkv")! });
+    db.prepare(`
+      insert into catalog_enrichment (profile_id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, status, algorithm_version, last_seen_at, created_at, updated_at)
+      values (?, ?, 'movie||leftover|', 'movie', 'movie', 'leftover', 'pending', 1, '2026-01-01', '2026-01-01', '2026-01-01')
+    `).run(linkedProfileId, linkedServerId);
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [{ id: 603, title: "The Matrix", release_date: "1999-01-01" }] }) };
+      if (url.pathname === "/3/movie/603/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0133093" }) };
+      throw new Error(`Unexpected URL: ${url.pathname}`);
+    }));
+
+    await queue.refreshStoredCatalogMetadata();
+
+    expect(db.prepare("select ftp_server_id, meta_id from catalog_enrichment").all()).toEqual([{ ftp_server_id: masterServerId, meta_id: "tt0133093" }]);
+  });
+
   it("preserves a stale matched enrichment when no TMDB key can verify it", async () => {
     const { db, profileService, queue } = createHarness(
       async () => ({

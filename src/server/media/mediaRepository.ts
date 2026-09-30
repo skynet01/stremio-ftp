@@ -1226,6 +1226,24 @@ export class MediaRepository {
     }));
   }
 
+  // Linked servers read their shared library's catalog from the master server, so their own rows are leftovers:
+  // 0.4.55's startup refresh copied every shared title to each of about 160 linked servers per library.
+  removeLinkedServerEnrichment() {
+    return this.db
+      .prepare(
+        `
+        delete from catalog_enrichment
+        where ftp_server_id in (
+          select s.id
+          from profile_ftp_servers s
+          join shared_index_groups g on g.id = s.shared_index_group_id
+          where g.master_profile_ftp_server_id <> s.id
+        )
+      `,
+      )
+      .run().changes;
+  }
+
   // A TMDB outcome another profile or server already looked up for the same title under the current algorithm.
   catalogTitleLookup(lookupKey: string, nowIso: string): { status: "matched"; meta: PersistedCatalogMeta } | { status: "unmatched" } | null {
     const row = this.db

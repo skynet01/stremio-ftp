@@ -91,7 +91,15 @@ export class ScanQueue {
 
   async refreshStoredCatalogMetadata(): Promise<void> {
     await this.mediaRepository.reparseStoredFiles();
-    const servers = this.db.prepare("select profile_id, id, shared_index_group_id from profile_ftp_servers where catalog_enabled = 1 order by id").all() as Array<{
+    this.mediaRepository.removeLinkedServerEnrichment();
+    // A shared library's catalog is read from its master server's enrichment, so linked servers are not enriched.
+    const servers = this.db.prepare(`
+      select s.profile_id, s.id, s.shared_index_group_id
+      from profile_ftp_servers s
+      left join shared_index_groups g on g.id = s.shared_index_group_id
+      where s.catalog_enabled = 1 and (s.shared_index_group_id is null or g.master_profile_ftp_server_id = s.id)
+      order by s.id
+    `).all() as Array<{
       profile_id: number; id: number; shared_index_group_id: number | null;
     }>;
     const signal = new AbortController().signal;
