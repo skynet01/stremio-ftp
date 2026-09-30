@@ -306,6 +306,7 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureCatalogEnrichmentColumn(db, "genres", "text");
   ensureCatalogEnrichmentColumn(db, "alternate_title", "text");
   ensureCatalogEnrichmentColumn(db, "alternate_year", "integer");
+  ensureCatalogTitleLookupsTable(db);
 }
 
 function ensureProfileColumn(db: Database.Database, name: string, definition: string) {
@@ -351,6 +352,19 @@ ${CATALOG_ENRICHMENT_COLUMNS}
     );
     create index if not exists idx_catalog_enrichment_status on catalog_enrichment(profile_id, ftp_server_id, status, next_attempt_at);
     create index if not exists idx_catalog_enrichment_catalog on catalog_enrichment(profile_id, catalog_kind, status);
+  `);
+}
+
+// One TMDB lookup outcome per distinct title, shared by every profile and server that has that title.
+function ensureCatalogTitleLookupsTable(db: Database.Database) {
+  db.exec(`
+    create table if not exists catalog_title_lookups (
+      lookup_key text primary key,
+      algorithm_version integer not null,
+      status text not null check (status in ('matched', 'unmatched')),
+      meta_json text,
+      checked_at text not null
+    );
   `);
 }
 

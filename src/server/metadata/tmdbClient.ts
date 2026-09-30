@@ -66,6 +66,7 @@ const TMDB_CACHE_MAX_ENTRIES = 1000;
 const TMDB_TIMEOUT_MS = 10000;
 // Results whose alternative titles are checked when no result fits by its TMDB or original title.
 const ALTERNATIVE_TITLE_CANDIDATES = 3;
+const DEEP_MATCH_MAX_QUERIES = 4;
 const catalogMetaCache = new TtlCache<Promise<CatalogMeta | null>>(TMDB_CACHE_MAX_ENTRIES);
 const TITLE_RELATIONSHIP_STOP_WORDS = new Set(["a", "an", "and", "in", "of", "or", "the", "to"]);
 const TITLE_REGION_TOKENS = new Set(["au", "ca", "nz", "uk", "us"]);
@@ -176,6 +177,63 @@ export async function tmdbCatalogEnrichment(
   } catch (error) {
     return { status: "retry", error: error instanceof Error ? error.message : "TMDB enrichment failed" };
   }
+}
+
+// A slower second pass for titles the regular search leaves unmatched. It tries looser queries (without the year,
+// without release clutter, "&" for "and", folded romanization) but only accepts a result whose title equals the query.
+export async function tmdbDeepMatch(
+  item: CatalogItem,
+  apiKey: string,
+  catalogKind: TmdbCatalogKind = item.catalogKind,
+): Promise<TmdbEnrichmentResult> {
+  if (item.imdbId) return { status: "unmatched" };
+  try {
+    const meta = await deepMatchMeta(item, apiKey, catalogKind);
+    return meta ? { status: "matched", meta } : { status: "unmatched" };
+  } catch (error) {
+    return { status: "retry", error: error instanceof Error ? error.message : "TMDB enrichment failed" };
+  }
+}
+
+async function deepMatchMeta(item: CatalogItem, apiKey: string, catalogKind: TmdbCatalogKind) {
+  const searchType = catalogKind === "movie" ? "movie" : "tv";
+  const years = [item.parsedYear, item.alternateYear].filter((year): year is number => Boolean(year));
+  const titles = [item.parsedTitle, item.alternateTitle].filter((title): title is string => Boolean(title));
+  const queries = Array.from(new Set(titles.flatMap(deepMatchQueries))).slice(0, DEEP_MATCH_MAX_QUERIES);
+  for (const query of queries) {
+    const url = new URL(`https://api.themoviedb.org/3/search/${searchType}`);
+    url.searchParams.set("api_key", apiKey);
+    url.searchParams.set("query", query);
+    const body = await fetchJson<TmdbSearchResponse<TmdbMovie | TmdbTv>>(url);
+    const exact = (body?.results ?? [])
+      .filter((result): result is (TmdbMovie | TmdbTv) & { id: number } => Boolean(result.id))
+      .filter((result) => bestTitleScore(query, resultTitles(result, catalogKind)) >= 50);
+    const yearFits = exact.filter((result) => {
+      const resultYear = resultReleaseYear(result, catalogKind);
+      return !resultYear || years.some((year) => Math.abs(year - resultYear) <= 1);
+    });
+    // The year in a file name is sometimes a later release ("The Adventures of Priscilla" 2005), so a long title with
+    // exactly one exact match is taken even when its year differs.
+    const unique = exact.length === 1 && (!years.length || relationshipTokens(normalizeRelationshipTitle(query)).length >= 4) ? exact[0] : null;
+    const pick = yearFits[0] ?? unique;
+    if (!pick) continue;
+    const externalIds = await fetchExternalIds(searchType, pick.id, apiKey);
+    if (externalIds?.imdb_id) return metaFromTmdbResult(item, externalIds.imdb_id, pick, catalogKind);
+  }
+  return null;
+}
+
+function deepMatchQueries(title: string) {
+  // VR and 360° pieces share their titles with the films they promote ("Dunkirk 360 VR Experience"), not TMDB entries.
+  if (/\b(?:vr|360|virtual reality)\b/.test(title)) return [];
+  const edition = titleWithoutEditionSuffix(title);
+  const cleaned = edition
+    .replace(/\b(?:episode|ncop|nced)\b.*$/, " ")
+    .replace(/\b(?:compilation|recap|undefined|official|blu ray|canon|ova|oad|jesterko|s\d{1,2}(?:e\d{1,3}|recap)?)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const romanized = cleaned.replace(/([aeiou])\1/g, "$1");
+  return [edition, cleaned, cleaned.replace(/ and /g, " & "), romanized].filter((query) => query.length >= 2);
 }
 
 export function clearTmdbCatalogCache() {

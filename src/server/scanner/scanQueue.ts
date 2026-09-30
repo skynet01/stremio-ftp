@@ -9,8 +9,8 @@ import {
   type CrawlProgress,
 } from "../ftp/crawler.js";
 import type { FtpClientFactory } from "../ftp/ftpTypes.js";
-import type { CatalogEnrichmentCandidate, MediaRepository } from "../media/mediaRepository.js";
-import { catalogRecheckChoice, tmdbCatalogEnrichment, type TmdbCatalogKind } from "../metadata/tmdbClient.js";
+import { catalogTitleLookupKey, type CatalogEnrichmentCandidate, type MediaRepository } from "../media/mediaRepository.js";
+import { catalogRecheckChoice, tmdbCatalogEnrichment, tmdbDeepMatch, type TmdbCatalogKind, type TmdbEnrichmentResult } from "../metadata/tmdbClient.js";
 import type { ProfileService } from "../profiles/profileService.js";
 import { nextAlignedScanAt } from "./schedule.js";
 
@@ -639,7 +639,16 @@ export class ScanQueue {
   // Returns false when the lookup failed and the candidate was scheduled for retry.
   private async enrichCatalogCandidate(candidate: CatalogEnrichmentCandidate, apiKey: string | null) {
     const catalogKind = tmdbLookupKind(candidate);
-    const result = await tmdbCatalogEnrichment(candidate, apiKey, catalogKind);
+    const lookupKey = catalogTitleLookupKey(candidate, catalogKind);
+    const stored = apiKey ? this.mediaRepository.catalogTitleLookup(lookupKey, new Date().toISOString()) : null;
+    let result: TmdbEnrichmentResult;
+    if (stored) {
+      result = stored;
+    } else {
+      result = await tmdbCatalogEnrichment(candidate, apiKey, catalogKind);
+      if (result.status === "unmatched" && apiKey) result = await tmdbDeepMatch(candidate, apiKey, catalogKind);
+      if (apiKey && result.status !== "retry") this.mediaRepository.saveCatalogTitleLookup(lookupKey, result, new Date().toISOString());
+    }
     const now = new Date().toISOString();
     if (result.status === "retry") {
       const nextAttemptAt = new Date(Date.now() + ENRICHMENT_RETRY_DELAY_MS).toISOString();

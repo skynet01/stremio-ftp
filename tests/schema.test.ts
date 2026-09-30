@@ -78,6 +78,7 @@ describe("schema", () => {
       .all() as { name: string }[];
     expect(tables.map((row) => row.name)).toEqual([
       "catalog_enrichment",
+      "catalog_title_lookups",
       "media_files",
       "profile_ftp_servers",
       "profile_install_tokens",

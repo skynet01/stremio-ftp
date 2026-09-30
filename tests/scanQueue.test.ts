@@ -865,6 +865,40 @@ describe("ScanQueue", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("looks each title up once across profiles and deep-matches what the regular search misses", async () => {
+    const path = "/Adventures of Priscilla Queen of the Desert (2005)/Adventures.of.Priscilla.Queen.of.the.Desert.2005.mkv";
+    const { db, profileService, queue } = createHarness(
+      async () => ({
+        list: async (directory) => directory === "/"
+          ? [{ name: "Adventures of Priscilla Queen of the Desert (2005)", path: path.split("/").slice(0, 2).join("/"), type: "directory" }]
+          : [{ name: path.split("/").at(-1)!, path, type: "file", size: 1024 * 1024 }],
+        openReadStream: async () => Readable.from("not used"),
+        close: async () => undefined,
+      }),
+      { ...baseConfig, tmdbApiKey: "tmdb-key", scanCooldownMs: 0 },
+    );
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      // The regular search sends the file's 2005 year; the film is from 1994, so only the deep pass finds it.
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: url.searchParams.has("year")
+        ? []
+        : [{ id: 2759, title: "The Adventures of Priscilla, Queen of the Desert", release_date: "1994-05-31" }] }) };
+      if (url.pathname === "/3/movie/2759/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0109045" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const profileId of [await createProfileWithFtp(profileService), await createProfileWithFtp(profileService)]) {
+      profileService.saveAddonCustomization(profileId, { catalogEnabled: true });
+      const job = queue.enqueueProfileScan(profileId, "manual");
+      await waitForNextStatus(queue, profileId, job.id - 1, "succeeded");
+    }
+
+    expect(db.prepare("select distinct meta_id from catalog_enrichment").all()).toEqual([{ meta_id: "tt0109045" }]);
+    expect(db.prepare("select count(*) as n from catalog_enrichment").get()).toEqual({ n: 2 });
+    expect(fetchMock.mock.calls.filter(([input]) => new URL(String(input)).pathname.endsWith("/external_ids"))).toHaveLength(1);
+  });
+
   it("preserves a stale matched enrichment when the refreshed result is unmatched", async () => {
     const { db, profileService, queue } = createHarness(
       async () => ({
@@ -913,6 +947,7 @@ describe("ScanQueue", () => {
     const first = queue.enqueueProfileScan(profileId, "manual");
     await waitForNextStatus(queue, profileId, first.id - 1, "succeeded");
     db.prepare("update catalog_enrichment set algorithm_version = 1, genres = '[\"Drama\"]' where profile_id = ?").run(profileId);
+    db.prepare("delete from catalog_title_lookups").run();
     matched = false;
 
     const second = queue.enqueueProfileScan(profileId, "manual");
@@ -927,7 +962,7 @@ describe("ScanQueue", () => {
       meta_id: "tt0133093",
       meta_name: "The Matrix",
       genres: '["Drama"]',
-      algorithm_version: 10,
+      algorithm_version: 11,
     });
   });
 
@@ -980,6 +1015,7 @@ describe("ScanQueue", () => {
     const first = queue.enqueueProfileScan(profileId, "manual");
     await waitForNextStatus(queue, profileId, first.id - 1, "succeeded");
     db.prepare("update catalog_enrichment set meta_name = ?, algorithm_version = 1 where profile_id = ?").run(storedName, profileId);
+    db.prepare("delete from catalog_title_lookups").run();
     rechecking = true;
     const second = queue.enqueueProfileScan(profileId, "manual");
     await waitForNextStatus(queue, profileId, second.id - 1, "succeeded");

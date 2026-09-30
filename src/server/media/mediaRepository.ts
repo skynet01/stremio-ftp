@@ -1,7 +1,9 @@
 import type Database from "better-sqlite3";
 import { PARSER_VERSION, matchingFolderYearOf, parseMediaPath, type ParsedMedia, type ParseMediaOptions } from "./parser.js";
 
-const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 10;
+const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 11;
+const TITLE_LOOKUP_MATCHED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TITLE_LOOKUP_UNMATCHED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type ParsedMediaFileInput = Omit<ParsedMedia, "catalogKind"> & {
   catalogKind?: ParsedMedia["catalogKind"];
@@ -115,6 +117,10 @@ function toMediaMatch(row: MediaFileRow): MediaMatch {
 function storedParseValues(parsed: ParsedMedia) {
   return [parsed.normalizedFilename, parsed.extension, parsed.mediaKind, parsed.catalogKind, parsed.parsedTitle, parsed.parsedYear,
     parsed.season, parsed.episode, parsed.imdbId, parsed.quality, parsed.confidence];
+}
+
+export function catalogTitleLookupKey(item: CatalogItem, lookupKind: string) {
+  return JSON.stringify([lookupKind, item.parsedTitle, item.parsedYear, item.imdbId, item.alternateTitle ?? null, item.alternateYear ?? null]);
 }
 
 function alternateForPath(ftpPath: string, libraryLayout: ParseMediaOptions["libraryLayout"], parsedTitle?: string) {
@@ -1218,6 +1224,33 @@ export class MediaRepository {
         ? { id: row.meta_id, type: row.meta_type, name: row.meta_name, releaseInfo: row.release_info ?? undefined }
         : null,
     }));
+  }
+
+  // A TMDB outcome another profile or server already looked up for the same title under the current algorithm.
+  catalogTitleLookup(lookupKey: string, nowIso: string): { status: "matched"; meta: PersistedCatalogMeta } | { status: "unmatched" } | null {
+    const row = this.db
+      .prepare("select status, meta_json, checked_at from catalog_title_lookups where lookup_key = ? and algorithm_version = ?")
+      .get(lookupKey, CATALOG_ENRICHMENT_ALGORITHM_VERSION) as { status: "matched" | "unmatched"; meta_json: string | null; checked_at: string } | undefined;
+    if (!row) return null;
+    const ttl = row.status === "matched" ? TITLE_LOOKUP_MATCHED_TTL_MS : TITLE_LOOKUP_UNMATCHED_TTL_MS;
+    if (Date.parse(nowIso) - Date.parse(row.checked_at) > ttl) return null;
+    return row.status === "matched" && row.meta_json ? { status: "matched", meta: JSON.parse(row.meta_json) as PersistedCatalogMeta } : { status: "unmatched" };
+  }
+
+  saveCatalogTitleLookup(lookupKey: string, result: { status: "matched"; meta: PersistedCatalogMeta } | { status: "unmatched" }, nowIso: string) {
+    this.db
+      .prepare(
+        `
+        insert into catalog_title_lookups (lookup_key, algorithm_version, status, meta_json, checked_at)
+        values (?, ?, ?, ?, ?)
+        on conflict(lookup_key) do update set
+          algorithm_version = excluded.algorithm_version,
+          status = excluded.status,
+          meta_json = excluded.meta_json,
+          checked_at = excluded.checked_at
+      `,
+      )
+      .run(lookupKey, CATALOG_ENRICHMENT_ALGORITHM_VERSION, result.status, result.status === "matched" ? JSON.stringify(result.meta) : null, nowIso);
   }
 
   saveCatalogEnrichmentMatch(enrichmentId: number, meta: PersistedCatalogMeta, nowIso: string) {

@@ -42,7 +42,12 @@ type Item = CatalogItem & { key: string; rows: number; matchedRows: number; stor
 type Outcome = { key: string; rows: number; storedId: string | null; storedName: string | null; freshId: string | null; freshName: string | null; finalId: string | null };
 
 const args = new Map<string, string>();
-for (let index = 2; index < process.argv.length; index += 2) args.set(process.argv[index].replace(/^--/, ""), process.argv[index + 1]);
+for (let index = 2; index < process.argv.length; index += 1) {
+  const value = process.argv[index + 1];
+  const takesValue = value !== undefined && !value.startsWith("--");
+  args.set(process.argv[index].replace(/^--/, ""), takesValue ? value : "true");
+  if (takesValue) index += 1;
+}
 const itemsPath = args.get("items");
 const cachePath = args.get("cache");
 if (!itemsPath || !cachePath) throw new Error("--items and --cache are required");
@@ -72,7 +77,9 @@ for (const item of items) {
   const stored = storedMeta(item.storedId);
   tracing = Boolean(trace && item.key.includes(trace));
   if (tracing) console.log(item.key);
-  const result = await matcher.tmdbCatalogEnrichment(item, "replay-key", catalogKind);
+  // Mirrors ScanQueue: the deep match runs when the regular search finds nothing.
+  let result = await matcher.tmdbCatalogEnrichment(item, "replay-key", catalogKind);
+  if (result.status === "unmatched" && matcher.tmdbDeepMatch) result = await matcher.tmdbDeepMatch(item, "replay-key", catalogKind);
   const fresh = result.status === "matched" ? result.meta : null;
   const choice = stored ? matcher.catalogRecheckChoice(item, stored, fresh, catalogKind) : fresh ? "fresh" : "none";
   outcomes.push({

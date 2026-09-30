@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { catalogMetaMatchesItem, catalogRecheckChoice, clearTmdbCatalogCache, tmdbCatalogEnrichment, tmdbCatalogMeta } from "../src/server/metadata/tmdbClient";
+import { catalogMetaMatchesItem, catalogRecheckChoice, clearTmdbCatalogCache, tmdbDeepMatch, tmdbCatalogEnrichment, tmdbCatalogMeta } from "../src/server/metadata/tmdbClient";
 
 describe("tmdbCatalogMeta", () => {
   afterEach(() => {
@@ -572,6 +572,43 @@ describe("tmdbCatalogMeta", () => {
 
     await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle: "dracula", parsedYear: 2012, imdbId: null }, "tmdb-key")).resolves.toMatchObject({
       status: "matched", meta: { id: "tt1852770" },
+    });
+  });
+
+  describe("deep match", () => {
+    function searchReturning(resultsByQuery: Record<string, Array<{ id: number; title: string; release_date: string }>>) {
+      const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: resultsByQuery[url.searchParams.get("query")!] ?? [] }) };
+        if (url.pathname.endsWith("/external_ids")) return { ok: true, json: async () => ({ imdb_id: `tt${url.pathname.split("/")[3]}` }) };
+        throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+    const movie = (parsedTitle: string, parsedYear: number | null) => ({ mediaKind: "movie" as const, catalogKind: "movie" as const, parsedTitle, parsedYear, imdbId: null });
+
+    it("takes a long unique exact title even when the file's year is a later release", async () => {
+      searchReturning({ "adventures of priscilla queen of desert": [{ id: 2759, title: "The Adventures of Priscilla, Queen of the Desert", release_date: "1994-05-31" }] });
+      await expect(tmdbDeepMatch(movie("adventures of priscilla queen of desert", 2005), "tmdb-key")).resolves.toMatchObject({ status: "matched", meta: { id: "tt2759" } });
+    });
+
+    it("rejects a short exact title from a different year", async () => {
+      searchReturning({ "i love boosters": [{ id: 1, title: "I Love Boosters", release_date: "2026-01-01" }] });
+      await expect(tmdbDeepMatch(movie("i love boosters", 2006), "tmdb-key")).resolves.toEqual({ status: "unmatched" });
+    });
+
+    it("searches with an ampersand and without release clutter", async () => {
+      searchReturning({
+        "mortadelo & filemon mission implausible": [{ id: 7, title: "Mortadelo & Filemon: Mission Implausible", release_date: "2014-01-01" }],
+      });
+      await expect(tmdbDeepMatch(movie("mortadelo and filemon mission implausible", 2014), "tmdb-key")).resolves.toMatchObject({ status: "matched", meta: { id: "tt7" } });
+    });
+
+    it("skips VR and 360 pieces named after films", async () => {
+      const fetchMock = searchReturning({ dunkirk: [{ id: 1, title: "Dunkirk", release_date: "2017-07-19" }] });
+      await expect(tmdbDeepMatch(movie("dunkirk 360 degree vr experience", 2018), "tmdb-key")).resolves.toEqual({ status: "unmatched" });
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 
