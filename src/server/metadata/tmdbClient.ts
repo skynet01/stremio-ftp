@@ -175,11 +175,29 @@ export function clearTmdbCatalogCache() {
 
 export function catalogMetaMatchesItem(item: CatalogItem, meta: PersistedCatalogMeta, catalogKind: TmdbCatalogKind): boolean {
   if (meta.type !== (catalogKind === "movie" ? "movie" : "series")) return false;
-  if (metaTitleScore(item, meta) <= 0) return false;
   const year = searchYear(item);
   const alternateYear = item.alternateTitle ? item.alternateYear : null;
   const metaYear = Number(meta.releaseInfo?.slice(0, 4));
-  return !year || !metaYear || Math.abs(year - metaYear) <= 1 || Boolean(alternateYear && Math.abs(alternateYear - metaYear) <= 1);
+  if (year && metaYear && Math.abs(year - metaYear) > 1 && !(alternateYear && Math.abs(alternateYear - metaYear) <= 1)) return false;
+  const exactYear = Boolean(metaYear && (year === metaYear || alternateYear === metaYear));
+  return storedTitleFits(titleWithoutEditionSuffix(item.parsedTitle), meta.name, exactYear) ||
+    Boolean(item.alternateTitle && storedTitleFits(titleWithoutEditionSuffix(item.alternateTitle), meta.name, exactYear));
+}
+
+// A stored match may have come from a TMDB alternate title or drop a franchise prefix ("Rambo First Blood" ->
+// "First Blood"), so a recheck keeps it on looser title evidence than a fresh search accepts.
+function storedTitleFits(expectedTitle: string, storedTitle: string, exactYear: boolean) {
+  if (titleRelationshipScore(expectedTitle, storedTitle) > 0) return true;
+  const expectedTokens = relationshipTokens(normalizeRelationshipTitle(expectedTitle));
+  const storedTokens = relationshipTokens(normalizeRelationshipTitle(storedTitle));
+  if (!expectedTokens.length || !storedTokens.length) return false;
+  const expectedSet = new Set(expectedTokens);
+  const storedSet = new Set(storedTokens);
+  if (storedTokens.every((token) => expectedSet.has(token))) return true;
+  // "Misery" -> "Misery Harbour" in the same year; "Fall" -> "Heavens Fall" is not kept.
+  if (expectedSet.size === 1) return exactYear && storedTokens[0] === expectedTokens[0];
+  const commonTokens = Array.from(expectedSet).filter((token) => storedSet.has(token)).length;
+  return commonTokens >= 2 && (commonTokens / expectedSet.size >= 0.5 || commonTokens / storedSet.size >= 0.5);
 }
 
 // Decides what a recheck keeps: a still-valid stored match wins unless the fresh match's title is a closer fit.
@@ -319,7 +337,9 @@ function titleRelationshipScore(expectedTitle: string, resultTitleValue: string)
   const expectedTokens = relationshipTokens(normalizedExpectedTitle);
   const resultTokens = relationshipTokens(normalizedResultTitle);
   if (!expectedTokens.length || !resultTokens.length) return 0;
-  if (expectedTokens.join(" ") === resultTokens.join(" ")) return 50;
+  // Spacing and punctuation differ between releases and TMDB: "Dandadan" / "Dan Da Dan", "Titan A E" / "Titan A.E.".
+  if (expectedTokens.join(" ") === resultTokens.join(" ") || expectedTokens.join("") === resultTokens.join("") ||
+    normalizedExpectedTitle.replace(/ /g, "") === normalizedResultTitle.replace(/ /g, "")) return 50;
   // "The Office US" -> "The Office"; "Borat" -> "Borat: Cultural Learnings of America..."
   if (TITLE_REGION_TOKENS.has(expectedTokens.at(-1)!) && !resultTokens.includes(expectedTokens.at(-1)!) &&
     expectedTokens.slice(0, -1).join(" ") === resultTokens.join(" ")) return 25;
@@ -336,14 +356,17 @@ function titleRelationshipScore(expectedTitle: string, resultTitleValue: string)
 }
 
 function normalizeRelationshipTitle(value: string) {
-  return normalizeTitle(value.normalize("NFKD").replace(/\p{M}/gu, ""));
+  return normalizeTitle(value.normalize("NFKD").replace(/\p{M}/gu, "").replace(/æ/gi, "ae").replace(/œ/gi, "oe"));
 }
 
+// "3D" in a TMDB title ("Saw 3D", "Amityville 3-D") marks the format, not the film; plurals fold ("Beast"/"Beasts").
 function relationshipTokens(value: string) {
   return value
+    .replace(/\b3 d\b/g, "3d")
     .split(" ")
-    .filter((token) => !TITLE_RELATIONSHIP_STOP_WORDS.has(token))
+    .filter((token) => token !== "3d" && !TITLE_RELATIONSHIP_STOP_WORDS.has(token))
     .map((token) => TITLE_NUMBER_TOKENS.get(token) ?? token)
+    .map((token) => (/^[a-z]{4,}s$/.test(token) && !token.endsWith("ss") ? token.slice(0, -1) : token))
     .filter((token) => token.length >= 2 || /^\d+$/.test(token));
 }
 

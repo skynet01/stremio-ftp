@@ -499,6 +499,24 @@ describe("tmdbCatalogMeta", () => {
     });
   });
 
+  it.each([
+    ["saw", 2010, "Saw 3D", true],
+    ["amityville", 1983, "Amityville 3-D", true],
+    ["titan a e", 2000, "Titan A.E.", true],
+    ["dandadan", 2024, "Dan Da Dan", true],
+    ["aeon flux", 2005, "Æon Flux", true],
+    ["rambo first blood", 1982, "First Blood", true],
+    ["transformers rise of beast", 2023, "Transformers: Rise of the Beasts", true],
+    ["misery", 1999, "Misery Harbour", true],
+    ["misery", 1998, "Misery Harbour", false],
+    ["fall", 2006, "Heavens Fall", false],
+    ["sample", null, "Sample People", false],
+  ] as const)("judges a stored %s match against %s", (parsedTitle, parsedYear, name, expected) => {
+    const item = { mediaKind: "movie" as const, catalogKind: "movie" as const, parsedTitle, parsedYear, imdbId: null };
+    const releaseInfo = name === "Sample People" ? "2000" : String(parsedYear === 1998 ? 1999 : parsedYear);
+    expect(catalogMetaMatchesItem(item, { id: "tt0000001", type: "movie", name, releaseInfo }, "movie")).toBe(expected);
+  });
+
   it("chooses between a stored match and a recheck result", () => {
     const item = { mediaKind: "series" as const, catalogKind: "series" as const, parsedTitle: "harbor lights", parsedYear: 2004, imdbId: null };
     const exact = { id: "tt0000002", type: "series" as const, name: "Harbor Lights", releaseInfo: "2004" };
