@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { date: "2026-09-29", hash: "v0.4.56", subject: "fix: more accurate title matching and hosted servers refuse private FTP addresses" },
   { date: "2026-09-29", hash: "v0.4.55", subject: "fix: faster stream starts and skips with better title matching" },
   { date: "2026-09-29", hash: "v0.4.54", subject: "fix: accept FTP hosts pasted as ftp:// links and flag private network addresses" },
   { date: "2026-09-29", hash: "v0.4.53", subject: "fix: steadier playback when skipping or pausing, safer scans, faster stream lookups, and portal fixes" },
