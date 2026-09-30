@@ -91,7 +91,8 @@ export class ScanQueue {
 
   async refreshStoredCatalogMetadata(): Promise<void> {
     await this.mediaRepository.reparseStoredFiles();
-    this.mediaRepository.removeLinkedServerEnrichment();
+    const removed = this.mediaRepository.removeLinkedServerEnrichment();
+    if (removed > 0) console.warn(`[catalog] Removed ${removed} catalog rows copied to linked servers of shared libraries`);
     // A shared library's catalog is read from its master server's enrichment, so linked servers are not enriched.
     const servers = this.db.prepare(`
       select s.profile_id, s.id, s.shared_index_group_id

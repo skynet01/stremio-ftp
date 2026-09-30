@@ -414,7 +414,6 @@ describe("MediaRepository", () => {
     const groupId = createSharedGroup(db, masterServerId, "catalog-metas");
     const linkedProfileId = createProfile(db);
     const linkedServerId = createServer(db, linkedProfileId);
-    db.prepare("update profile_ftp_servers set shared_index_group_id = ? where id = ?").run(groupId, linkedServerId);
     const repo = new MediaRepository(db);
 
     repo.upsertSharedParsedFile(groupId, {
@@ -467,11 +466,36 @@ describe("MediaRepository", () => {
       type: "series",
       name: "Stale Show",
     }, seenAt);
+    // The linked server's own rows were written before it joined the shared library.
+    db.prepare("update profile_ftp_servers set shared_index_group_id = ? where id = ?").run(groupId, linkedServerId);
 
     expect(repo.catalogMetas(linkedProfileId, "series", 10, 0, { ftpServerIds: [linkedServerId] })).toEqual([
       expect.objectContaining({ id: "tt1111111", type: "series", name: "Shared Show" }),
     ]);
     expect(repo.catalogMetas(linkedProfileId, "series", 10, 0, { ftpServerIds: [linkedServerId], search: "stale" })).toEqual([]);
+  });
+
+  it("refuses to write catalog rows for a linked server of a shared library", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    const masterServerId = createServer(db, createProfile(db));
+    const groupId = createSharedGroup(db, masterServerId, "master-only");
+    const linkedProfileId = createProfile(db);
+    const linkedServerId = createServer(db, linkedProfileId);
+    db.prepare("update profile_ftp_servers set shared_index_group_id = ? where id = ?").run(groupId, linkedServerId);
+    const repo = new MediaRepository(db);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const candidate = { id: 1, ftpServerId: linkedServerId, itemKey: "movie||shared movie|2020", mediaKind: "movie" as const, catalogKind: "movie" as const, parsedTitle: "shared movie", parsedYear: 2020, imdbId: null };
+
+    repo.syncCatalogEnrichmentCandidates(linkedProfileId, linkedServerId, [candidate], "2026-01-01");
+
+    expect(db.prepare("select count(*) as n from catalog_enrichment").get()).toEqual({ n: 0 });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`linked server ${linkedServerId}`));
+    expect(() => db.prepare(`
+      insert into catalog_enrichment (profile_id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, status, algorithm_version, last_seen_at, created_at, updated_at)
+      values (?, ?, 'movie||shared movie|2020', 'movie', 'movie', 'shared movie', 'pending', 1, '2026-01-01', '2026-01-01', '2026-01-01')
+    `).run(linkedProfileId, linkedServerId)).toThrow(/belongs to its shared library master/);
+    warn.mockRestore();
   });
 
   it("uses shared master movie enrichment even when the shared parser row was misclassified", () => {

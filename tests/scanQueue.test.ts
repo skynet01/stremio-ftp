@@ -1061,6 +1061,8 @@ describe("ScanQueue", () => {
     profileService.forceLinkServerToSharedGroup(linkedProfileId, linkedServerId, group.id);
     for (const profileId of [masterProfileId, linkedProfileId]) profileService.saveAddonCustomization(profileId, { catalogEnabled: true });
     mediaRepository.upsertSharedParsedFile(group.id, { ...parseMediaPath("/Movies/The.Matrix.1999.mkv")! });
+    // Rows 0.4.55-0.4.58 copied to linked servers, written before the master-only trigger existed.
+    db.exec("drop trigger catalog_enrichment_master_only");
     db.prepare(`
       insert into catalog_enrichment (profile_id, ftp_server_id, item_key, media_kind, catalog_kind, parsed_title, status, algorithm_version, last_seen_at, created_at, updated_at)
       values (?, ?, 'movie||leftover|', 'movie', 'movie', 'leftover', 'pending', 1, '2026-01-01', '2026-01-01', '2026-01-01')

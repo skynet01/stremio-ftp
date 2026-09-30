@@ -1109,6 +1109,20 @@ export class MediaRepository {
   }
 
   syncCatalogEnrichmentCandidates(profileId: number, ftpServerId: number, candidates: CatalogEnrichmentCandidate[], seenAt: string) {
+    const linkedTo = this.db
+      .prepare(
+        `
+        select g.id
+        from profile_ftp_servers s
+        join shared_index_groups g on g.id = s.shared_index_group_id
+        where s.id = ? and g.master_profile_ftp_server_id is not s.id
+      `,
+      )
+      .get(ftpServerId) as { id: number } | undefined;
+    if (linkedTo) {
+      console.warn(`[catalog] Skipped enriching linked server ${ftpServerId}: shared library ${linkedTo.id} is enriched on its master server`);
+      return;
+    }
     const upsert = this.db.prepare(
       `
       insert into catalog_enrichment (

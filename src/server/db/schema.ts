@@ -307,6 +307,7 @@ ${CATALOG_ENRICHMENT_COLUMNS}
   ensureCatalogEnrichmentColumn(db, "alternate_title", "text");
   ensureCatalogEnrichmentColumn(db, "alternate_year", "integer");
   ensureCatalogTitleLookupsTable(db);
+  ensureCatalogEnrichmentMasterOnlyTrigger(db);
 }
 
 function ensureProfileColumn(db: Database.Database, name: string, definition: string) {
@@ -352,6 +353,24 @@ ${CATALOG_ENRICHMENT_COLUMNS}
     );
     create index if not exists idx_catalog_enrichment_status on catalog_enrichment(profile_id, ftp_server_id, status, next_attempt_at);
     create index if not exists idx_catalog_enrichment_catalog on catalog_enrichment(profile_id, catalog_kind, status);
+  `);
+}
+
+// A shared library's catalog lives only under its master server; linked servers read the master's rows. Refuse any
+// write that would copy it to a linked server (0.4.55 copied it to ~160 linked servers per library).
+function ensureCatalogEnrichmentMasterOnlyTrigger(db: Database.Database) {
+  db.exec(`
+    create trigger if not exists catalog_enrichment_master_only
+    before insert on catalog_enrichment
+    when exists (
+      select 1
+      from profile_ftp_servers s
+      join shared_index_groups g on g.id = s.shared_index_group_id
+      where s.id = new.ftp_server_id and g.master_profile_ftp_server_id is not new.ftp_server_id
+    )
+    begin
+      select raise(abort, 'catalog enrichment for a linked server belongs to its shared library master');
+    end;
   `);
 }
 
