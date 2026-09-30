@@ -377,6 +377,7 @@ describe("tmdbCatalogMeta", () => {
       const url = new URL(String(input));
       if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [{ id: 1, title: "Heavens Fall", release_date: "2006-01-01" }] }) };
       if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0425094" }) };
+      if (url.pathname.endsWith("/alternative_titles")) return { ok: true, json: async () => ({ titles: [], results: [] }) };
       throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -398,8 +399,11 @@ describe("tmdbCatalogMeta", () => {
   ])("rejects extra significant words when %s has no plausible exact title", async (parsedTitle, parsedYear, results) => {
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = new URL(String(input));
-      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results }) };
+      // TMDB's year filter only returns films with a release that year.
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: results.filter((result) =>
+        !url.searchParams.has("year") || result.release_date.startsWith(url.searchParams.get("year")!)) }) };
       if (url.pathname.endsWith("/external_ids")) return { ok: true, json: async () => ({ imdb_id: "tt0000001" }) };
+      if (url.pathname.endsWith("/alternative_titles")) return { ok: true, json: async () => ({ titles: [], results: [] }) };
       throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -411,18 +415,21 @@ describe("tmdbCatalogMeta", () => {
   it("uses a matching movie folder year when the filename has none", async () => {
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = new URL(String(input));
-      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [
-        { id: 1, title: "Fall", release_date: "2022-01-01" },
+      // The Fall premiered in 2006, so TMDB's 2006 search returns it despite its 2008 release date.
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: url.searchParams.has("year") ? [
+        { id: 3, title: "Heavens Fall", release_date: "2006-01-01" },
         { id: 2, title: "The Fall", release_date: "2008-01-01" },
-        { id: 3, title: "Fall to Grace", release_date: "2006-01-01" },
-      ] }) };
+        { id: 4, title: "Fall to Grace", release_date: "2006-01-01" },
+      ] : [{ id: 1, title: "Fall", release_date: "2022-01-01" }] }) };
+      if (url.pathname === "/3/movie/2/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0460791" }) };
       if (url.pathname.endsWith("/external_ids")) return { ok: true, json: async () => ({ imdb_id: "tt0000001" }) };
+      if (url.pathname.endsWith("/alternative_titles")) return { ok: true, json: async () => ({ titles: [], results: [] }) };
       throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const item = { mediaKind: "movie" as const, catalogKind: "movie" as const, parsedTitle: "fall", parsedYear: null, alternateYear: 2006, imdbId: null };
-    await expect(tmdbCatalogEnrichment(item, "tmdb-key")).resolves.toEqual({ status: "unmatched" });
+    await expect(tmdbCatalogEnrichment(item, "tmdb-key")).resolves.toMatchObject({ status: "matched", meta: { id: "tt0460791", name: "The Fall" } });
     expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("year")).toBe("2006");
     expect(catalogMetaMatchesItem(item, { id: "tt0460791", type: "movie", name: "The Fall", releaseInfo: "2006" }, "movie")).toBe(true);
     expect(catalogMetaMatchesItem(item, { id: "tt15325794", type: "movie", name: "Fall", releaseInfo: "2022" }, "movie")).toBe(false);
@@ -472,6 +479,7 @@ describe("tmdbCatalogMeta", () => {
       const url = new URL(String(input));
       if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [{ id: 1, title: candidateTitle, release_date: "2001-01-01" }] }) };
       if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0000001" }) };
+      if (url.pathname.endsWith("/alternative_titles")) return { ok: true, json: async () => ({ titles: [], results: [] }) };
       throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -515,6 +523,56 @@ describe("tmdbCatalogMeta", () => {
     const item = { mediaKind: "movie" as const, catalogKind: "movie" as const, parsedTitle, parsedYear, imdbId: null };
     const releaseInfo = name === "Sample People" ? "2000" : String(parsedYear === 1998 ? 1999 : parsedYear);
     expect(catalogMetaMatchesItem(item, { id: "tt0000001", type: "movie", name, releaseInfo }, "movie")).toBe(expected);
+  });
+
+  it("matches a TMDB original title", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [
+        { id: 1, title: "Coconut the Dragon", original_title: "Der kleine Drache Kokosnuss", release_date: "2014-01-01" },
+      ] }) };
+      if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt3726220" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    }));
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle: "der kleine drache kokosnuss", parsedYear: 2014, imdbId: null }, "tmdb-key")).resolves.toMatchObject({
+      status: "matched", meta: { id: "tt3726220", name: "Coconut the Dragon" },
+    });
+  });
+
+  it("checks alternative titles of same-year results only when no title fits", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [
+        { id: 1, title: "Bound by Honor", release_date: "1993-04-16" },
+        { id: 2, title: "Blood Ties", release_date: "1991-01-01" },
+      ] }) };
+      if (url.pathname === "/3/movie/1/alternative_titles") return { ok: true, json: async () => ({ titles: [{ title: "Blood In Blood Out" }] }) };
+      if (url.pathname === "/3/movie/1/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0106469" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle: "blood in blood out", parsedYear: 1993, imdbId: null }, "tmdb-key")).resolves.toMatchObject({
+      status: "matched", meta: { id: "tt0106469", name: "Bound by Honor" },
+    });
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).not.toContain("/3/movie/2/alternative_titles");
+  });
+
+  it("prefers a same-year film over an old film TMDB lists as re-released that year", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/3/search/movie") return { ok: true, json: async () => ({ results: [
+        { id: 1, title: "Dracula", release_date: "1958-05-08" },
+        { id: 2, title: "Dracula 3D", release_date: "2012-11-22" },
+      ] }) };
+      if (url.pathname === "/3/movie/2/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt1852770" }) };
+      throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
+    }));
+
+    await expect(tmdbCatalogEnrichment({ mediaKind: "movie", catalogKind: "movie", parsedTitle: "dracula", parsedYear: 2012, imdbId: null }, "tmdb-key")).resolves.toMatchObject({
+      status: "matched", meta: { id: "tt1852770" },
+    });
   });
 
   it("chooses between a stored match and a recheck result", () => {
@@ -618,6 +676,7 @@ describe("tmdbCatalogMeta", () => {
       if (url.pathname === "/3/movie/99/external_ids") {
         return { ok: true, json: async () => ({ imdb_id: "tt0317740" }) };
       }
+      if (url.pathname.endsWith("/alternative_titles")) return { ok: true, json: async () => ({ titles: [], results: [] }) };
       throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -661,6 +720,7 @@ describe("tmdbCatalogMeta", () => {
       if (url.pathname === "/3/movie/120/external_ids") {
         return { ok: true, json: async () => ({ imdb_id: "tt0120737" }) };
       }
+      if (url.pathname.endsWith("/alternative_titles")) return { ok: true, json: async () => ({ titles: [], results: [] }) };
       throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);

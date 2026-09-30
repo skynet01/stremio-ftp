@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { PARSER_VERSION, matchingFolderYearOf, parseMediaPath, type ParsedMedia, type ParseMediaOptions } from "./parser.js";
 
-const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 9;
+const CATALOG_ENRICHMENT_ALGORITHM_VERSION = 10;
 
 export type ParsedMediaFileInput = Omit<ParsedMedia, "catalogKind"> & {
   catalogKind?: ParsedMedia["catalogKind"];

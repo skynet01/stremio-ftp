@@ -32,6 +32,7 @@ type TmdbSearchResponse<T> = {
 type TmdbMovie = {
   id?: number;
   title?: string;
+  original_title?: string;
   overview?: string;
   poster_path?: string | null;
   backdrop_path?: string | null;
@@ -42,11 +43,17 @@ type TmdbMovie = {
 type TmdbTv = {
   id?: number;
   name?: string;
+  original_name?: string;
   overview?: string;
   poster_path?: string | null;
   backdrop_path?: string | null;
   first_air_date?: string;
   genre_ids?: number[];
+};
+
+type TmdbAlternativeTitles = {
+  titles?: Array<{ title?: string }>;
+  results?: Array<{ title?: string }>;
 };
 
 type TmdbExternalIds = {
@@ -57,6 +64,8 @@ const TMDB_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const TMDB_FAILURE_CACHE_TTL_MS = 5 * 60 * 1000;
 const TMDB_CACHE_MAX_ENTRIES = 1000;
 const TMDB_TIMEOUT_MS = 10000;
+// Results whose alternative titles are checked when no result fits by its TMDB or original title.
+const ALTERNATIVE_TITLE_CANDIDATES = 3;
 const catalogMetaCache = new TtlCache<Promise<CatalogMeta | null>>(TMDB_CACHE_MAX_ENTRIES);
 const TITLE_RELATIONSHIP_STOP_WORDS = new Set(["a", "an", "and", "in", "of", "or", "the", "to"]);
 const TITLE_REGION_TOKENS = new Set(["au", "ca", "nz", "uk", "us"]);
@@ -237,20 +246,44 @@ async function metaFromImdbId(item: CatalogItem, imdbId: string, apiKey: string 
   return metaFromTmdbResult(item, imdbId, result, catalogKind);
 }
 
+// A title match that TMDB's movie `year` filter returned although its listed release date is years away. It may be
+// a festival premiere ("The Fall": 2006 premiere, 2008 release) or an old film re-released that year ("Ring 2", 1999,
+// for a 2005 file), so it is only used when no search finds a result dated near the item.
+type LateRelease = {
+  item: CatalogItem;
+  result: (TmdbMovie | TmdbTv) & { id: number };
+  exactTitle: boolean;
+  score: number;
+};
+
 async function metaFromSearch(item: CatalogItem, apiKey: string | null, catalogKind: TmdbCatalogKind): Promise<CatalogMeta | null> {
   if (!apiKey) return null;
+  const lateReleases: LateRelease[] = [];
+  return (await metaFromSearchQueries(item, apiKey, catalogKind, lateReleases)) ?? metaFromLateRelease(apiKey, catalogKind, lateReleases);
+}
+
+async function metaFromSearchQueries(item: CatalogItem, apiKey: string, catalogKind: TmdbCatalogKind, lateReleases: LateRelease[]) {
   const query = titleWithoutEditionSuffix(item.parsedTitle);
   let hadResults = false;
-  const first = await metaFromSearchQuery(item, apiKey, catalogKind, query, true, (value) => { hadResults = value; });
+  const first = await metaFromSearchQuery(item, apiKey, catalogKind, query, true, lateReleases, (value) => { hadResults = value; });
   if (first) return first;
   const alternate = item.alternateTitle ? titleWithoutEditionSuffix(item.alternateTitle) : null;
   if (alternate && alternate !== query) {
     const alternateItem = { ...item, parsedTitle: item.alternateTitle!, parsedYear: item.alternateYear ?? item.parsedYear };
-    return metaFromSearchQuery(alternateItem, apiKey, catalogKind, alternate, true);
+    return metaFromSearchQuery(alternateItem, apiKey, catalogKind, alternate, true, lateReleases);
   }
   const variant = hadResults ? wordNumberSequelTitle(query) ?? romanNumeralSequelTitle(query) : romanNumeralSequelTitle(query) ?? wordNumberSequelTitle(query);
-  if (variant && variant !== query) return metaFromSearchQuery(item, apiKey, catalogKind, variant, true);
-  return searchYear(item) ? metaFromSearchQuery(item, apiKey, catalogKind, query, false) : null;
+  if (variant && variant !== query) return metaFromSearchQuery(item, apiKey, catalogKind, variant, true, lateReleases);
+  return searchYear(item) ? metaFromSearchQuery(item, apiKey, catalogKind, query, false, lateReleases) : null;
+}
+
+async function metaFromLateRelease(apiKey: string, catalogKind: TmdbCatalogKind, lateReleases: LateRelease[]) {
+  const ranked = lateReleases.sort((a, b) => Number(b.exactTitle) - Number(a.exactTitle) || b.score - a.score);
+  for (const { item, result } of ranked.filter((entry, index) => ranked.findIndex((other) => other.result.id === entry.result.id) === index)) {
+    const externalIds = await fetchExternalIds("movie", result.id, apiKey);
+    if (externalIds?.imdb_id) return metaFromTmdbResult(item, externalIds.imdb_id, result, catalogKind);
+  }
+  return null;
 }
 
 async function metaFromSearchQuery(
@@ -259,6 +292,7 @@ async function metaFromSearchQuery(
   catalogKind: TmdbCatalogKind,
   query: string,
   includeYear: boolean,
+  lateReleases: LateRelease[],
   onResults?: (hadResults: boolean) => void,
 ): Promise<CatalogMeta | null> {
   const searchType = catalogKind === "movie" ? "movie" : "tv";
@@ -273,7 +307,9 @@ async function metaFromSearchQuery(
   const body = await fetchJson<TmdbSearchResponse<TmdbMovie | TmdbTv>>(url);
   if (!body) return null;
   onResults?.(Boolean(body.results?.length));
-  const result = await resultWithImdbId(item, catalogKind, searchType, body.results ?? [], apiKey, query);
+  // TMDB's movie `year` filter matches any release of the film, so its results all had a release in that year.
+  const releasedInYear = catalogKind === "movie" && url.searchParams.has("year");
+  const result = await resultWithImdbId(item, catalogKind, searchType, body.results ?? [], apiKey, query, releasedInYear ? lateReleases : null);
   if (!result) return null;
 
   return metaFromTmdbResult(item, result.imdbId, result.result, catalogKind);
@@ -286,20 +322,36 @@ async function resultWithImdbId(
   results: Array<TmdbMovie | TmdbTv>,
   apiKey: string,
   query: string,
+  lateReleases: LateRelease[] | null,
 ) {
   const normalizedQuery = normalizeRelationshipTitle(query);
-  const ranked = results
+  const candidates = results
     .filter((result): result is (TmdbMovie | TmdbTv) & { id: number } => Boolean(result.id))
-    .filter((result) => resultHasPlausibleYear(item, catalogKind, result))
-    .map((result, index) => ({
-      result,
-      index,
-      score: resultScore(item, catalogKind, result),
-      titleScore: titleRelationshipScore(query, resultTitle(result, catalogKind)),
-      exactTitle: normalizeRelationshipTitle(resultTitle(result, catalogKind)) === normalizedQuery,
+    .map((result, index) => ({ result, index, titles: resultTitles(result, catalogKind), yearFits: resultHasPlausibleYear(item, catalogKind, result) }));
+  const rank = () => candidates
+    .map((candidate) => ({
+      ...candidate,
+      score: resultScore(item, catalogKind, candidate.result, candidate.titles),
+      titleScore: bestTitleScore(query, candidate.titles),
+      exactTitle: candidate.titles.some((title) => normalizeRelationshipTitle(title) === normalizedQuery),
     }))
     .filter((candidate) => candidate.titleScore > 0)
     .sort((a, b) => Number(b.exactTitle) - Number(a.exactTitle) || b.score - a.score || a.index - b.index);
+
+  for (const candidate of rank().filter((candidate) => !candidate.yearFits)) {
+    lateReleases?.push({ item, result: candidate.result, exactTitle: candidate.exactTitle, score: candidate.score });
+  }
+  let ranked = rank().filter((candidate) => candidate.yearFits);
+  if (!ranked.length) {
+    // Regional and translated names ("Sorcerer's Stone", "Ooops! Noah Is Gone...") only appear among TMDB's
+    // alternative titles, so check those for the same-year results before giving up.
+    const year = searchYear(item);
+    const sameYear = candidates.filter((candidate) => candidate.yearFits && (!year || resultReleaseYear(candidate.result, catalogKind) === year));
+    for (const candidate of sameYear.slice(0, ALTERNATIVE_TITLE_CANDIDATES)) {
+      candidate.titles.push(...await fetchAlternativeTitles(searchType, candidate.result.id, apiKey));
+    }
+    ranked = rank().filter((candidate) => candidate.yearFits);
+  }
 
   for (const candidate of ranked) {
     const externalIds = await fetchExternalIds(searchType, candidate.result.id, apiKey);
@@ -308,8 +360,8 @@ async function resultWithImdbId(
   return null;
 }
 
-function resultScore(item: CatalogItem, catalogKind: TmdbCatalogKind, result: TmdbMovie | TmdbTv) {
-  const titleScore = titleRelationshipScore(item.parsedTitle, resultTitle(result, catalogKind));
+function resultScore(item: CatalogItem, catalogKind: TmdbCatalogKind, result: TmdbMovie | TmdbTv, titles: string[]) {
+  const titleScore = bestTitleScore(item.parsedTitle, titles);
   const resultYear = resultReleaseYear(result, catalogKind);
   const year = searchYear(item);
   const yearScore =
@@ -370,8 +422,15 @@ function relationshipTokens(value: string) {
     .filter((token) => token.length >= 2 || /^\d+$/.test(token));
 }
 
-function resultTitle(result: TmdbMovie | TmdbTv, catalogKind: TmdbCatalogKind) {
-  return catalogKind === "movie" ? (result as TmdbMovie).title || "" : (result as TmdbTv).name || "";
+function resultTitles(result: TmdbMovie | TmdbTv, catalogKind: TmdbCatalogKind) {
+  const titles = catalogKind === "movie"
+    ? [(result as TmdbMovie).title, (result as TmdbMovie).original_title]
+    : [(result as TmdbTv).name, (result as TmdbTv).original_name];
+  return titles.filter((title): title is string => Boolean(title));
+}
+
+function bestTitleScore(expectedTitle: string, titles: string[]) {
+  return Math.max(0, ...titles.map((title) => titleRelationshipScore(expectedTitle, title)));
 }
 
 function resultReleaseYear(result: TmdbMovie | TmdbTv, catalogKind: TmdbCatalogKind) {
@@ -419,6 +478,13 @@ function wordNumberSequelTitle(parsedTitle: string) {
   const match = parsedTitle.match(/\b(2|3|4|5|6|7|8|9|10)$/);
   if (!match) return null;
   return parsedTitle.replace(/\b(2|3|4|5|6|7|8|9|10)$/, wordByNumber[match[1]]);
+}
+
+async function fetchAlternativeTitles(type: "movie" | "tv", tmdbId: number, apiKey: string): Promise<string[]> {
+  const url = new URL(`https://api.themoviedb.org/3/${type}/${tmdbId}/alternative_titles`);
+  url.searchParams.set("api_key", apiKey);
+  const body = await fetchJson<TmdbAlternativeTitles>(url);
+  return (body?.titles ?? body?.results ?? []).map((entry) => entry.title).filter((title): title is string => Boolean(title));
 }
 
 async function fetchExternalIds(type: "movie" | "tv", tmdbId: number, apiKey: string): Promise<TmdbExternalIds | null> {

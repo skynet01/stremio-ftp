@@ -927,7 +927,7 @@ describe("ScanQueue", () => {
       meta_id: "tt0133093",
       meta_name: "The Matrix",
       genres: '["Drama"]',
-      algorithm_version: 9,
+      algorithm_version: 10,
     });
   });
 
@@ -936,7 +936,7 @@ describe("ScanQueue", () => {
     ["Heavens Fall", "tt9999999", false, false],
     ["The Fall", "tt0460791", true, false],
     ["The Fall", "tt0460791", false, true],
-    ["Heavens Fall", null, false, true],
+    ["Heavens Fall", "tt9999999", false, true],
   ])("rechecks a stored %s match before accepting a replacement (expected: %s, retry: %s, live dates: %s)", async (storedName, expectedId, retryFirst, liveDates) => {
     const path = "/The Fall (2006)/The Fall_35_8_RIGHT_ONLY_00_v1.8.6_halfSBS.mp4";
     const { db, profileService, queue } = createHarness(
@@ -973,6 +973,7 @@ describe("ScanQueue", () => {
       if (url.pathname === "/3/movie/2/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt9999999" }) };
       if (url.pathname === "/3/movie/3/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0425094" }) };
       if (url.pathname === "/3/movie/4/external_ids") return { ok: true, json: async () => ({ imdb_id: "tt0452618" }) };
+      if (url.pathname.endsWith("/alternative_titles")) return { ok: true, json: async () => ({ titles: [] }) };
       throw new Error(`Unexpected TMDB URL: ${url.pathname}`);
     }));
 
