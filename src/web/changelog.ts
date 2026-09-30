@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { date: "2026-09-30", hash: "v0.4.57", subject: "fix: match more titles using TMDB original and alternative titles" },
   { date: "2026-09-29", hash: "v0.4.56", subject: "fix: more accurate title matching and hosted servers refuse private FTP addresses" },
   { date: "2026-09-29", hash: "v0.4.55", subject: "fix: faster stream starts and skips with better title matching" },
   { date: "2026-09-29", hash: "v0.4.54", subject: "fix: accept FTP hosts pasted as ftp:// links and flag private network addresses" },
