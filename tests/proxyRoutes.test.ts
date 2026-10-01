@@ -78,6 +78,51 @@ describe("proxy routes", () => {
     }
   });
 
+  it("logs who was streaming and how long the stream sat idle before the FTP side dropped it", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const router = createProxyRouter({
+        resolve: async () => ({
+          filename: "video.mkv",
+          sizeBytes: 10,
+          profileId: 6,
+          ftpServerId: 723,
+          sharedIndexGroupId: 3,
+          openReadStream: async () => {
+            let sent = false;
+            return new Readable({
+              read() {
+                if (sent) return;
+                sent = true;
+                this.push(Buffer.from("01234"));
+                setTimeout(() => this.destroy(new Error("Premature close")), 60);
+              },
+            });
+          },
+        }),
+      });
+
+      const express = (await import("express")).default;
+      const app = express().use(router);
+
+      await request(app).get("/proxy/token/1").set("Range", "bytes=0-").catch(() => undefined);
+      await waitFor(() => info.mock.calls.some(([label, payload]) => label === "[proxy-timing]" && String(payload).includes("stream_error")));
+
+      const [, payload] = info.mock.calls.find(([label, entry]) => label === "[proxy-timing]" && String(entry).includes("stream_error"))!;
+      expect(JSON.parse(payload as string)).toMatchObject({
+        error: "Premature close",
+        profileId: 6,
+        serverId: 723,
+        sharedIndexGroupId: 3,
+        bytesFromFtp: 5,
+        msSinceLastData: expect.any(Number),
+      });
+      expect(JSON.parse(payload as string).msSinceLastData).toBeGreaterThanOrEqual(40);
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   it("ignores range requests when the file size is unknown", async () => {
     const router = createProxyRouter({
       resolve: async () => ({

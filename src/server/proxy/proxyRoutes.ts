@@ -7,6 +7,9 @@ import { parseRangeHeader } from "./range.js";
 type ProxyFile = {
   filename: string;
   sizeBytes: number | null;
+  profileId?: number | null;
+  ftpServerId?: number | null;
+  sharedIndexGroupId?: number | null;
   warmReadStream?: () => void;
   openReadStream(input: { start: number; end: number; openEnded?: boolean; signal?: AbortSignal }): Promise<NodeJS.ReadableStream>;
 };
@@ -29,6 +32,12 @@ type ProxyTiming = {
   sizeBytes?: number | null;
   contentLength?: number | null;
   bytesFromFtp: number;
+  profileId?: number | null;
+  serverId?: number | null;
+  sharedIndexGroupId?: number | null;
+  // When FTP data last arrived. A stream that ends long after it means the player had stopped reading (full buffer
+  // or an abandoned probe) and the FTP server dropped the paused download.
+  lastDataAt?: number;
   logged: boolean;
 };
 
@@ -116,6 +125,9 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
   const range = parseRangeHeader(rangeHeader, file.sizeBytes);
   timing.range = rangeHeader ?? undefined;
   timing.sizeBytes = file.sizeBytes;
+  timing.profileId = file.profileId ?? null;
+  timing.serverId = file.ftpServerId ?? null;
+  timing.sharedIndexGroupId = file.sharedIndexGroupId ?? null;
   if (rangeHeader && file.sizeBytes !== null && !range) {
     if (file.sizeBytes !== null) {
       res.setHeader("Content-Range", `bytes */${file.sizeBytes}`);
@@ -212,6 +224,7 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
   });
   stream.on("data", (chunk: Buffer | string) => {
     timing.firstByteMs ??= elapsedMs(timing.startedAt);
+    timing.lastDataAt = performance.now();
     timing.bytesFromFtp += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
   });
   stream.once("end", markFinished);
@@ -264,6 +277,10 @@ function logProxyTiming(timing: ProxyTiming, outcome: string, error?: unknown) {
       firstByteMs: timing.firstByteMs,
       totalMs: elapsedMs(timing.startedAt),
       bytesFromFtp: timing.bytesFromFtp,
+      msSinceLastData: timing.lastDataAt === undefined ? undefined : elapsedMs(timing.lastDataAt),
+      profileId: timing.profileId,
+      serverId: timing.serverId,
+      sharedIndexGroupId: timing.sharedIndexGroupId,
       ...(error instanceof Error ? { error: error.message.slice(0, 200) } : {}),
     }),
   );
