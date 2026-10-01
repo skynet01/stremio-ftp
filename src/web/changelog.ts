@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { date: "2026-10-01", hash: "v0.4.60", subject: "chore: clearer stream logs for diagnosing dropped downloads" },
   { date: "2026-09-30", hash: "v0.4.59", subject: "fix: stop copying shared catalogs to every linked server" },
   { date: "2026-09-30", hash: "v0.4.58", subject: "fix: match more titles with a deeper search and look each title up once" },
   { date: "2026-09-30", hash: "v0.4.57", subject: "fix: match more titles using TMDB original and alternative titles" },
