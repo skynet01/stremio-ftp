@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App, globalScanProgressForServers, mergeServerStatus } from "../src/web/App";
+import { APP_CHANGELOG } from "../src/web/changelog";
 import {
   cancelScan,
   createProfile,
@@ -416,12 +417,13 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Changelog" }));
 
     expect(screen.getByRole("dialog", { name: "Latest changes" })).toBeTruthy();
-    expect(screen.getAllByText("May 23").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("feat").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("fix").length).toBeGreaterThan(0);
-    expect(screen.getByText("Split Uncategorized catalogs by server with an optional combined view")).toBeTruthy();
-    expect(screen.getByText("Tune FTP playback concurrency and shared index count display")).toBeTruthy();
-    expect(screen.queryByText("fix: tune FTP playback concurrency and shared index count display")).toBeNull();
+    // The drawer lists the 15 newest entries, each as a type tag plus its sentence-cased subject.
+    const [newest] = APP_CHANGELOG;
+    const [, tag, subject] = newest.subject.match(/^([a-z]+):\s+(.+)$/)!;
+    expect(screen.getAllByText(tag).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`${subject[0].toUpperCase()}${subject.slice(1)}`).length).toBeGreaterThan(0);
+    expect(screen.queryByText(newest.subject)).toBeNull();
+    expect(within(screen.getByRole("dialog", { name: "Latest changes" })).getAllByRole("listitem")).toHaveLength(Math.min(15, APP_CHANGELOG.length));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Latest changes" })).toBeNull();
   });
