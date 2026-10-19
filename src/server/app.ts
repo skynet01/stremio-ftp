@@ -61,6 +61,7 @@ export function createApp(
   const ftpPool = createFtpConnectionPool(ftpClientFactory, {
     idleMs: config.ftpPoolIdleMs ?? 0,
     loginFailureMs: config.ftpLoginFailureCacheMs ?? 0,
+    loginFailureMaxMs: config.ftpLoginFailureMaxMs ?? 0,
   });
   const scanQueue = new ScanQueue(config, profileService, mediaRepository, ftpClientFactory);
   if (options.refreshStoredCatalogAtStartup) {

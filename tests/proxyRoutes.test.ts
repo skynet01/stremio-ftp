@@ -78,6 +78,34 @@ describe("proxy routes", () => {
     }
   });
 
+  it("drops a request for a refused login without passing the error on", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const next = vi.fn();
+    try {
+      const router = createProxyRouter({
+        resolve: async () => ({
+          filename: "video.mkv",
+          sizeBytes: 10,
+          openReadStream: async () => {
+            throw Object.assign(new Error("530 Login incorrect. (refused; not retried for 2 min)"), { name: "FtpLoginRefusedError" });
+          },
+        }),
+      });
+
+      const express = (await import("express")).default;
+      const app = express()
+        .use(router)
+        .use((error: unknown, _req: unknown, _res: unknown, _next: unknown) => next(error));
+
+      await request(app).get("/proxy/token/1").set("Range", "bytes=0-").catch(() => undefined);
+      await waitFor(() => info.mock.calls.some(([label, payload]) => label === "[proxy-timing]" && String(payload).includes("open_failed")));
+
+      expect(next).not.toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   it("logs who was streaming and how long the stream sat idle before the FTP side dropped it", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     try {

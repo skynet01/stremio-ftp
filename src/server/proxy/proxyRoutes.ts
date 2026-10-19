@@ -194,6 +194,11 @@ async function streamProxyFile(file: ProxyFile, req: Request, res: Response, hea
       return;
     }
     logProxyTiming(timing, "open_failed");
+    // The pool already logged the refusal; a player retrying a dead account should not print a stack each time.
+    if (error instanceof Error && error.name === "FtpLoginRefusedError") {
+      res.destroy();
+      return;
+    }
     throw error;
   }
   streamOpened = true;

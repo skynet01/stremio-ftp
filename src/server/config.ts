@@ -15,6 +15,7 @@ export type AppConfig = {
   ftpPoolIdleMs: number;
   // How long a playback login refused with 530 fails fast before that account is tried again; 0 turns it off.
   ftpLoginFailureCacheMs: number;
+  ftpLoginFailureMaxMs: number;
   maxOnDemandSearchMs: number;
   profileRateLimitWindowMs: number;
   profileRateLimitMax: number;
@@ -109,6 +110,7 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     ftpMaxConnections: numberValue(env, "FTP_MAX_CONNECTIONS", 3),
     ftpPoolIdleMs: nonNegativeNumberValue(env, "FTP_POOL_IDLE_MS", 45_000),
     ftpLoginFailureCacheMs: nonNegativeNumberValue(env, "FTP_LOGIN_FAILURE_CACHE_MS", 60_000),
+    ftpLoginFailureMaxMs: nonNegativeNumberValue(env, "FTP_LOGIN_FAILURE_MAX_MS", 6 * 60 * 60_000),
     maxOnDemandSearchMs: numberValue(env, "MAX_ON_DEMAND_SEARCH_MS", 4500),
     profileRateLimitWindowMs: numberValue(env, "PROFILE_RATE_LIMIT_WINDOW_MS", 600000),
     profileRateLimitMax: numberValue(env, "PROFILE_RATE_LIMIT_MAX", 200),

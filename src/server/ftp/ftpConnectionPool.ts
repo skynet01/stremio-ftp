@@ -23,6 +23,9 @@ export type FtpConnectionPoolOptions = {
   // How long a login refused with 530 makes further playback logins and warm-ups for that account fail without
   // contacting the server. 0 turns it off.
   loginFailureMs: number;
+  // Each further refusal of the same login doubles that wait, up to this cap; a successful login starts over.
+  // Defaults to loginFailureMs, which keeps the wait fixed.
+  loginFailureMaxMs?: number;
 };
 
 // Where a stream's login came from: a new login, an idle pooled one, a warm-up, or one handed over by a transfer that
@@ -79,7 +82,9 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
   const pooling = options.idleMs > 0;
   const accounts = new Map<string, Account>();
   // Players of a dead account retry over and over; a burst of failed logins from one IP can upset the provider.
-  const loginFailures = new Map<string, { until: number; message: string }>();
+  // An entry outlives its wait so the next refusal can wait longer; an expired account does not come back by itself.
+  const loginFailures = new Map<string, { until: number; waitMs: number; message: string }>();
+  const maxLoginFailureMs = Math.max(options.loginFailureMs, options.loginFailureMaxMs ?? 0);
   let stopped = false;
 
   function accountFor(key: string) {
@@ -150,21 +155,26 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
     account.idle.push(entry);
   }
 
-  function rememberLoginFailure(key: string, error: unknown) {
+  function rememberLoginFailure(key: string, config: FtpConfig, error: unknown) {
     if (options.loginFailureMs <= 0 || !isRefusedLogin(error)) return;
+    const previous = loginFailures.get(key);
+    // Logins that were already under way when the first refusal arrived do not count as another try.
+    const retried = previous !== undefined && previous.until <= Date.now();
+    const waitMs = !previous ? options.loginFailureMs : retried ? Math.min(previous.waitMs * 2, maxLoginFailureMs) : previous.waitMs;
     loginFailures.delete(key);
-    loginFailures.set(key, { until: Date.now() + options.loginFailureMs, message: (error as Error).message.slice(0, 200) });
+    loginFailures.set(key, { until: Date.now() + waitMs, waitMs, message: (error as Error).message.slice(0, 200) });
     if (loginFailures.size > MAX_REMEMBERED_LOGIN_FAILURES) loginFailures.delete(loginFailures.keys().next().value!);
+    if (retried) logFtpTiming("login_refused_again", { retryInMs: waitMs, ...target(config) });
+  }
+
+  function forgetLoginFailure(key: string) {
+    loginFailures.delete(key);
   }
 
   function recentLoginFailure(key: string) {
     const failure = loginFailures.get(key);
-    if (!failure) return null;
-    if (failure.until <= Date.now()) {
-      loginFailures.delete(key);
-      return null;
-    }
-    const error = new Error(`${failure.message} (refused within the last ${Math.round(options.loginFailureMs / 1000)} s; not retried yet)`);
+    if (!failure || failure.until <= Date.now()) return null;
+    const error = new Error(`${failure.message} (refused; not retried for ${formatWait(failure.waitMs)})`);
     error.name = "FtpLoginRefusedError";
     return error;
   }
@@ -190,6 +200,7 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
     };
     warmLogin.promise.then(
       (client) => {
+        forgetLoginFailure(key);
         logFtpTiming("warm_ready", { warmMs: elapsedMs(startedAt), ...target(config) });
         if (warmLogin.claimed) return;
         // Nobody claimed it while it logged in, so it waits in the pool like any other idle login.
@@ -198,7 +209,7 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
       },
       (error: unknown) => {
         clearWarming();
-        rememberLoginFailure(key, error);
+        rememberLoginFailure(key, config, error);
         const event = isFtpSlotUnavailableError(error) ? "warm_skipped" : error instanceof Error && error.name === "AbortError" ? "warm_cancelled" : "warm_failed";
         logFtpTiming(event, { warmMs: elapsedMs(startedAt), ...target(config) });
         forgetIfUnused(key);
@@ -245,6 +256,7 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
       }).then(
         (client) => {
           stopWaiting();
+          forgetLoginFailure(key);
           if (settled) {
             returnClient(key, client);
             return;
@@ -255,7 +267,7 @@ export function createFtpConnectionPool(factory: AbortableFtpClientFactory, opti
         },
         (error: unknown) => {
           stopWaiting();
-          rememberLoginFailure(key, error);
+          rememberLoginFailure(key, config, error);
           if (settled) return;
           settled = true;
           reject(error);
@@ -402,6 +414,12 @@ function isRefusedLogin(error: unknown) {
 
 function target(config: FtpConfig) {
   return { host: config.host, port: config.port, tlsMode: config.tlsMode };
+}
+
+function formatWait(ms: number) {
+  if (ms >= 3_600_000) return `${Math.round(ms / 360_000) / 10} h`;
+  if (ms >= 60_000) return `${Math.round(ms / 60_000)} min`;
+  return `${Math.round(ms / 1000)} s`;
 }
 
 function abortError() {

@@ -276,6 +276,72 @@ describe("createFtpConnectionPool rejected logins", () => {
     expect(ftp.loginAttempts).toBe(3);
   });
 
+  it("waits longer after each repeated refusal, up to the cap", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const ftp = fakeFtp({ maxConnections: 3, loginReply: { code: 530, message: "530 Login incorrect." } });
+    const pool = createPool(ftp, { loginFailureMs: 60_000, loginFailureMaxMs: 200_000 });
+    const open = () => pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 });
+
+    await expect(open()).rejects.toThrow("530");
+    now += 60_001;
+    await expect(open()).rejects.toThrow("530");
+    expect(ftp.loginAttempts).toBe(2);
+
+    now += 60_001;
+    await expect(open()).rejects.toThrow("not retried for 2 min");
+    expect(ftp.loginAttempts).toBe(2);
+    now += 60_000;
+    await expect(open()).rejects.toThrow("530");
+    expect(ftp.loginAttempts).toBe(3);
+
+    // 240 s would pass the cap.
+    now += 200_001;
+    await expect(open()).rejects.toThrow("530");
+    expect(ftp.loginAttempts).toBe(4);
+    now += 200_001;
+    await expect(open()).rejects.toThrow("530");
+    expect(ftp.loginAttempts).toBe(5);
+  });
+
+  it("does not count logins already under way as another refusal", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const ftp = fakeFtp({ maxConnections: 3, loginReply: { code: 530, message: "530 Login incorrect." } });
+    const pool = createPool(ftp, { loginFailureMs: 60_000, loginFailureMaxMs: 600_000 });
+    const open = () => pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 });
+
+    await Promise.allSettled([open(), open(), open()]);
+    expect(ftp.loginAttempts).toBe(3);
+
+    now += 60_001;
+    await expect(open()).rejects.toThrow("530");
+    expect(ftp.loginAttempts).toBe(4);
+  });
+
+  it("starts over once the login works again", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const ftp = fakeFtp({ maxConnections: 3, loginReply: { code: 530, message: "530 Login incorrect." } });
+    const pool = createPool(ftp, { idleMs: 0, loginFailureMs: 60_000, loginFailureMaxMs: 600_000 });
+    const open = () => pool.openReadStream(config(), "/a.mkv", { start: 0, end: 9 });
+
+    await expect(open()).rejects.toThrow("530");
+    now += 60_001;
+    await expect(open()).rejects.toThrow("530");
+
+    now += 120_001;
+    ftp.loginReply = undefined;
+    const opened = await open();
+    await drain(opened.stream);
+
+    ftp.loginReply = { code: 530, message: "530 Login incorrect." };
+    await expect(open()).rejects.toThrow("530");
+    now += 60_001;
+    await expect(open()).rejects.toThrow("530");
+    expect(ftp.loginAttempts).toBe(5);
+  });
+
   it("keeps retrying logins that failed for other reasons", async () => {
     const ftp = fakeFtp({ maxConnections: 3, loginReply: { message: "Timeout (control socket)" } });
     const pool = createPool(ftp);
@@ -300,8 +366,12 @@ describe("createFtpConnectionPool rejected logins", () => {
   });
 });
 
-function createPool(ftp: ReturnType<typeof fakeFtp>, options: { idleMs?: number; loginFailureMs?: number } = {}) {
-  const pool = createFtpConnectionPool(ftp.factory, { idleMs: options.idleMs ?? 45_000, loginFailureMs: options.loginFailureMs ?? 60_000 });
+function createPool(ftp: ReturnType<typeof fakeFtp>, options: { idleMs?: number; loginFailureMs?: number; loginFailureMaxMs?: number } = {}) {
+  const pool = createFtpConnectionPool(ftp.factory, {
+    idleMs: options.idleMs ?? 45_000,
+    loginFailureMs: options.loginFailureMs ?? 60_000,
+    loginFailureMaxMs: options.loginFailureMaxMs,
+  });
   pools.push(pool);
   return pool;
 }
@@ -320,6 +390,7 @@ function fakeFtp(options: {
     loginAttempts: 0,
     abortedLogins: 0,
     stallLogins: options.stallLogins ?? false,
+    loginReply: options.loginReply,
     loginPasswords: [] as string[],
     loginUsers: [] as string[],
     opened: [] as string[],
@@ -338,7 +409,7 @@ function fakeFtp(options: {
         }, { once: true });
       });
     }
-    if (options.loginReply) throw Object.assign(new Error(options.loginReply.message), { code: options.loginReply.code });
+    if (state.loginReply) throw Object.assign(new Error(state.loginReply.message), { code: state.loginReply.code });
     state.logins += 1;
     state.loginPasswords.push(ftpConfig.password);
     state.loginUsers.push(ftpConfig.username);
