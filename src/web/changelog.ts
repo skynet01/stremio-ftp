@@ -1,4 +1,5 @@
 export const APP_CHANGELOG = [
+  { date: "2026-10-18", hash: "v0.4.62", subject: "fix: keep playing when the FTP server stalls mid-file" },
   { date: "2026-10-18", hash: "v0.4.61", subject: "fix: stop retrying FTP logins that keep getting refused" },
   { date: "2026-10-01", hash: "v0.4.60", subject: "chore: clearer stream logs for diagnosing dropped downloads" },
   { date: "2026-09-30", hash: "v0.4.59", subject: "fix: stop copying shared catalogs to every linked server" },
