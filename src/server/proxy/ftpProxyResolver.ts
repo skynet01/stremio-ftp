@@ -3,6 +3,7 @@ import { logFtpTiming, type FtpConnectionPool } from "../ftp/ftpConnectionPool.j
 import type { MediaRepository } from "../media/mediaRepository.js";
 import type { ProfileService } from "../profiles/profileService.js";
 import { serverMatchesSharedIndexGroup } from "../shared/sharedIndex.js";
+import { resumableReadStream } from "./resumableStream.js";
 
 export function createFtpProxyResolver(
   profiles: ProfileService,
@@ -64,7 +65,15 @@ export function createFtpProxyResolver(
             rangeEnd: end === Number.MAX_SAFE_INTEGER ? null : end,
             openEnded: Boolean(openEnded),
           });
-          return opened.stream;
+          return resumableReadStream({
+            first: opened.stream,
+            start,
+            end,
+            reopen: async (offset, resumeSignal) =>
+              (await ftpPool.openReadStream(ftpConfig, file.ftpPath, { start: offset, end, openEnded }, resumeSignal)).stream,
+            onResume: (resume) => logFtpTiming("stream_resume", { ...resume, ...logTarget }),
+            onResumed: (resume) => logFtpTiming("stream_resumed", { attempt: resume.attempt, offset: resume.offset, resumeMs: resume.resumeMs, ...logTarget }),
+          });
         } catch (error) {
           if (signal?.aborted) throw new Error("Proxy request aborted");
           logFtpTiming("stream_open_failed", { totalOpenMs: elapsedMs(openStartedAt), ...logTarget });

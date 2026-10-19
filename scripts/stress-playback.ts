@@ -18,11 +18,14 @@
 //   --login-failure-cache-ms=1000  app FTP_LOGIN_FAILURE_CACHE_MS (how long a 530 fails fast)
 //   --file-mb=256             size of the generated files
 //   --seed=1                  PRNG seed for request plans and faults
+//   --data-drop-rate=0.15     scenario D: chance a transfer's data socket is cut off mid-file
+//   --data-stall-rate=0       scenario D: chance a transfer stops sending mid-file with the socket left open
 //   --no-long-pause           skip the paused-reader check in scenario C
 //   --json=path               also write the full report as JSON
 
 import { writeFileSync } from "node:fs";
 import {
+  DEFAULT_FAULTS,
   defaultHarnessOptions,
   fmtMs,
   runPlaybackStress,
@@ -75,6 +78,11 @@ for (const cap of caps) {
     seed: numberArg(args, "seed", 1),
     scenarios,
     longPause: !args.has("no-long-pause"),
+    faults: {
+      ...DEFAULT_FAULTS,
+      dataDropRate: numberArg(args, "data-drop-rate", DEFAULT_FAULTS.dataDropRate),
+      dataStallRate: numberArg(args, "data-stall-rate", DEFAULT_FAULTS.dataStallRate),
+    },
     log: out,
   });
   out(
@@ -133,7 +141,7 @@ function printScenario(scenario: ScenarioReport) {
   out(
     `      FTP server: ${server.loginsAccepted} logins ok, ${server.loginsRejectedOverCap} refused over cap, ${server.loginsRejectedInjected} injected 530, ` +
       `max ${server.maxSessionsPerUser} sessions/user, ${server.transfersStarted} transfers (${server.rangTransfers} by RANG, ${server.transfersCompleted} completed, ` +
-      `${server.transfersClosedByClient} closed by client), faults: ${server.dataDrops} data drops, ${server.controlDrops} control drops, ` +
+      `${server.transfersClosedByClient} closed by client), faults: ${server.dataDrops} data drops, ${server.dataStalls} data stalls, ${server.controlDrops} control drops, ` +
       `${server.stalls} stalls, ${server.delayedReplies} delayed replies; ${(server.bytesSent / 1024 / 1024).toFixed(0)} MB sent`,
   );
   out(`      proxy outcomes: ${formatCounts(scenario.proxyOutcomes)}`);

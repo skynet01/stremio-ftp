@@ -61,6 +61,7 @@ export const DEFAULT_FAULTS: FtpFaults = {
   replyDelayRate: 0.2,
   replyDelayMaxMs: 400,
   dataDropRate: 0.15,
+  dataStallRate: 0,
   controlDropRate: 0.02,
   stallRate: 0.01,
 };
@@ -226,6 +227,8 @@ async function startEnvironment(options: HarnessOptions, logs: LogCollector): Pr
     FTP_TIMEOUT_MS: String(options.ftpTimeoutMs),
     FTP_POOL_IDLE_MS: String(options.poolIdleMs),
     FTP_LOGIN_FAILURE_CACHE_MS: String(options.loginFailureCacheMs),
+    // Injected 530s are random, not a dead account, so repeated ones must not stretch the wait.
+    FTP_LOGIN_FAILURE_MAX_MS: String(options.loginFailureCacheMs),
     EMPTY_PROFILE_CLEANUP_DAYS: "0",
     SCAN_SCHEDULER_INTERVAL_MS: "3600000",
   });

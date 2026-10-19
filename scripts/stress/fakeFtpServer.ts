@@ -16,6 +16,9 @@ export type FtpFaults = {
   replyDelayMaxMs: number;
   // Chance that a RETR is cut off after a random number of bytes (data socket closed or reset, then 426).
   dataDropRate: number;
+  // Chance that a RETR stops sending after a random number of bytes but keeps the data socket open (the client has to
+  // time out), like a production server that stalls mid-file.
+  dataStallRate: number;
   // Chance per command that the control connection is dropped instead of answered.
   controlDropRate: number;
   // Chance per command that the session goes silent forever (the client has to time out).
@@ -27,6 +30,7 @@ export const NO_FAULTS: FtpFaults = {
   replyDelayRate: 0,
   replyDelayMaxMs: 0,
   dataDropRate: 0,
+  dataStallRate: 0,
   controlDropRate: 0,
   stallRate: 0,
 };
@@ -55,6 +59,7 @@ export type FakeFtpStats = {
   transfersCompleted: number;
   transfersClosedByClient: number;
   dataDrops: number;
+  dataStalls: number;
   controlDrops: number;
   stalls: number;
   delayedReplies: number;
@@ -91,6 +96,7 @@ export class FakeFtpServer {
     transfersCompleted: 0,
     transfersClosedByClient: 0,
     dataDrops: 0,
+    dataStalls: 0,
     controlDrops: 0,
     stalls: 0,
     delayedReplies: 0,
@@ -404,6 +410,9 @@ export class FakeFtpServer {
       const drop = this.faults.dataDropRate > 0 && this.random() < this.faults.dataDropRate;
       const dropAfter = drop ? Math.floor(this.random() * 4 * 1024 * 1024) : Number.POSITIVE_INFINITY;
       const resetOnDrop = this.random() < 0.5;
+      const stall = !drop && this.faults.dataStallRate > 0 && this.random() < this.faults.dataStallRate;
+      const stallAfter = stall ? Math.floor(this.random() * 4 * 1024 * 1024) : Number.POSITIVE_INFINITY;
+      let stalled = false;
       let position = start;
       let sent = 0;
       let finished = false;
@@ -425,7 +434,13 @@ export class FakeFtpServer {
             this.reply(session, "426 Connection closed; transfer aborted");
             return;
           }
-          const length = Math.min(CHUNK_BYTES, end - position, dropAfter - sent);
+          if (sent >= stallAfter) {
+            // Never push again; the socket stays open until the client gives up on it.
+            if (!stalled) this.stats.dataStalls += 1;
+            stalled = true;
+            return;
+          }
+          const length = Math.min(CHUNK_BYTES, end - position, dropAfter - sent, stallAfter - sent);
           const chunk = patternBytes(file.seed, position, length);
           position += length;
           sent += length;
