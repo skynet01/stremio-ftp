@@ -139,6 +139,53 @@ describe("resumableReadStream", () => {
     expect(late.destroyed).toBe(true);
   });
 
+  it("waits for a paused player to read again before reopening", async () => {
+    const reopened: number[] = [];
+    const first = new Readable({ read() {} });
+    const stream = resumableReadStream({
+      first,
+      start: 0,
+      end: 10 * 1024 * 1024 - 1,
+      reopen: async (offset) => {
+        reopened.push(offset);
+        return new Readable({ read() {} });
+      },
+    });
+    for (let index = 0; index < 8; index += 1) first.push(Buffer.alloc(64 * 1024));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    first.destroy(new Error("Premature close"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(reopened).toEqual([]);
+    stream.resume();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Only the first chunk got past the backpressure; the rest died with the old transfer.
+    expect(reopened).toEqual([64 * 1024]);
+    stream.destroy();
+  });
+
+  it("does not reopen after a paused player goes away", async () => {
+    let reopens = 0;
+    const first = new Readable({ read() {} });
+    const stream = resumableReadStream({
+      first,
+      start: 0,
+      end: 10 * 1024 * 1024 - 1,
+      reopen: async () => {
+        reopens += 1;
+        return new Readable({ read() {} });
+      },
+    });
+    for (let index = 0; index < 8; index += 1) first.push(Buffer.alloc(64 * 1024));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    first.destroy(new Error("Premature close"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    stream.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(reopens).toBe(0);
+  });
+
   it("passes the player's backpressure through to the FTP side", async () => {
     const big = new Readable({ read() {} });
     const stream = resumableReadStream({ first: big, start: 0, end: 10 * 1024 * 1024, reopen: async () => big });

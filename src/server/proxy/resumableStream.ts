@@ -68,7 +68,10 @@ export function resumableReadStream(options: ResumableStreamOptions): PassThroug
         return;
       }
       if (!gotData) failedInARow += 1;
-      void resume(error);
+      // A paused player stops reading, and Whatbox drops a download that cannot send for about a minute. Reopening
+      // then would only stall again, so wait until the player wants more data.
+      if (output.writableNeedDrain) output.once("drain", () => void resume(error));
+      else void resume(error);
     };
     segment.on("data", onData);
     segment.once("end", () => finish(null));
@@ -78,6 +81,7 @@ export function resumableReadStream(options: ResumableStreamOptions): PassThroug
   };
 
   const resume = async (cause: Error) => {
+    if (stopped) return;
     if (failedInARow >= MAX_FAILED_RESUMES_IN_A_ROW) {
       output.destroy(cause);
       return;
