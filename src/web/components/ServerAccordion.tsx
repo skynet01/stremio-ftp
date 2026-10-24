@@ -372,12 +372,12 @@ export function ServerAccordion({
                             />
                             {isPrivateNetworkHost(server.host) ? (
                               privateFtpHostsBlocked ? (
-                                <p className="field-hint notification notification-warning" id={`host-hint-${server.id}`}>
+                                <p className="field-hint host-hint host-hint-warning" id={`host-hint-${server.id}`}>
                                   This addon is publicly hosted, so it cannot reach local network addresses like 192.168.x.x. Use
                                   your FTP server's public hostname instead.
                                 </p>
                               ) : (
-                                <p className="field-hint" id={`host-hint-${server.id}`}>
+                                <p className="field-hint host-hint" id={`host-hint-${server.id}`}>
                                   This is a private network address. It only works when this addon runs on the same network as the FTP server.
                                 </p>
                               )
