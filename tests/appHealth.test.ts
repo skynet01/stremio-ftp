@@ -285,6 +285,7 @@ describe("app health", () => {
       setupTokenRequired: true,
       maxFtpServersPerProfile: 0,
       proxyStreamsDisabled: false,
+      privateFtpHostsBlocked: false,
       isAdmin: true,
     });
 
@@ -293,6 +294,7 @@ describe("app health", () => {
       setupTokenRequired: true,
       maxFtpServersPerProfile: 2,
       proxyStreamsDisabled: true,
+      privateFtpHostsBlocked: false,
       isAdmin: false,
     });
   });

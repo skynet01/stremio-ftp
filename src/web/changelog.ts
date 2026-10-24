@@ -1,4 +1,6 @@
 export const APP_CHANGELOG = [
+  { date: "2026-10-24", hash: "v0.4.65", subject: "fix: show the host warning without shifting the server form" },
+  { date: "2026-10-24", hash: "v0.4.64", subject: "feat: explain that the hosted addon cannot reach local network FTP addresses" },
   { date: "2026-10-23", hash: "v0.4.63", subject: "fix: keep paused streams connected without extra FTP logins" },
   { date: "2026-10-18", hash: "v0.4.62", subject: "fix: keep playing when the FTP server stalls mid-file" },
   { date: "2026-10-18", hash: "v0.4.61", subject: "fix: stop retrying FTP logins that keep getting refused" },
