@@ -136,6 +136,7 @@ export function ServerAccordion({
   profileReady,
   maxFtpServersPerProfile = 0,
   proxyStreamsDisabled = false,
+  privateFtpHostsBlocked = false,
   onToggle,
   onAddServer,
   onDeleteServer,
@@ -151,6 +152,7 @@ export function ServerAccordion({
   profileReady: boolean;
   maxFtpServersPerProfile?: number;
   proxyStreamsDisabled?: boolean;
+  privateFtpHostsBlocked?: boolean;
   onToggle: (serverId: number) => void;
   onAddServer: () => void;
   onDeleteServer: (serverId: number) => void;
@@ -369,9 +371,16 @@ export function ServerAccordion({
                               onChange={(event) => onServerChange(server.id, { host: event.currentTarget.value })}
                             />
                             {isPrivateNetworkHost(server.host) ? (
-                              <p className="field-hint" id={`host-hint-${server.id}`}>
-                                This is a private network address. It only works when this addon runs on the same network as the FTP server.
-                              </p>
+                              privateFtpHostsBlocked ? (
+                                <p className="field-hint notification notification-warning" id={`host-hint-${server.id}`}>
+                                  This addon is publicly hosted, so it cannot reach local network addresses like 192.168.x.x. Use
+                                  your FTP server's public hostname instead.
+                                </p>
+                              ) : (
+                                <p className="field-hint" id={`host-hint-${server.id}`}>
+                                  This is a private network address. It only works when this addon runs on the same network as the FTP server.
+                                </p>
+                              )
                             ) : null}
                           </>,
                           "field-stack host-field",

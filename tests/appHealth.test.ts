@@ -258,6 +258,17 @@ describe("app health", () => {
     errorSpy.mockRestore();
   });
 
+  it("tells the portal whether local network FTP hosts are blocked", async () => {
+    const db = new Database(":memory:");
+    migrate(db);
+
+    const hosted = await request(createApp({ ...loadMinimalConfig(), blockPrivateFtpHosts: true }, db)).get("/api/setup").expect(200);
+    const selfHosted = await request(createApp(loadMinimalConfig(), db)).get("/api/setup").expect(200);
+
+    expect(hosted.body.privateFtpHostsBlocked).toBe(true);
+    expect(selfHosted.body.privateFtpHostsBlocked).toBe(false);
+  });
+
   it("exempts admin browser UIDs from server caps in setup status", async () => {
     const db = new Database(":memory:");
     migrate(db);

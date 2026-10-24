@@ -570,13 +570,13 @@ describe("profile routes", () => {
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase", ftpConfig })
       .expect(400);
-    expect(saved.body.error).toMatch(/Private network addresses are not allowed/);
+    expect(saved.body.error).toMatch(/cannot reach local network addresses/);
     const tested = await request(app)
       .post("/api/profile/ftp/test")
       .set("x-setup-token", "setup-secret-123")
       .send({ browserUid: "browser-uid", passphrase: "passphrase", ftpConfig })
       .expect(400);
-    expect(tested.body.error).toMatch(/Private network addresses are not allowed/);
+    expect(tested.body.error).toMatch(/cannot reach local network addresses/);
     expect(ftpClientFactory).not.toHaveBeenCalled();
   });
 

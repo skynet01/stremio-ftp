@@ -220,6 +220,8 @@ export type SetupStatusResponse = {
   setupTokenRequired: boolean;
   maxFtpServersPerProfile?: number;
   proxyStreamsDisabled?: boolean;
+  // Hosted instances cannot reach FTP servers on the visitor's local network.
+  privateFtpHostsBlocked?: boolean;
   isAdmin?: boolean;
 };
 

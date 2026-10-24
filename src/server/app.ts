@@ -95,6 +95,7 @@ export function createApp(
       setupTokenRequired: Boolean(config.setupToken) || !config.allowPublicProfileApi,
       maxFtpServersPerProfile: isAdmin ? 0 : config.maxFtpServersPerProfile,
       proxyStreamsDisabled: isAdmin ? false : config.proxyStreamsDisabled,
+      privateFtpHostsBlocked: Boolean(config.blockPrivateFtpHosts),
       isAdmin,
     });
   });

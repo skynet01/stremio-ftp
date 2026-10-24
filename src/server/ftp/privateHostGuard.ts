@@ -3,7 +3,8 @@ import { isIP } from "node:net";
 import { isPrivateNetworkHost, splitFtpHost } from "../../shared/ftpHost.js";
 import type { AbortableFtpClientFactory } from "./ftpConnectionLimiter.js";
 
-export const PRIVATE_FTP_HOST_MESSAGE = "Private network addresses are not allowed on this server. Use the FTP server's public hostname.";
+export const PRIVATE_FTP_HOST_MESSAGE =
+  "This addon is publicly hosted, so it cannot reach local network addresses like 192.168.x.x. Use your FTP server's public hostname.";
 
 type HostLookup = (host: string) => Promise<string[]>;
 

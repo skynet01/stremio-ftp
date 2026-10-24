@@ -73,10 +73,11 @@ describe("ServerAccordion", () => {
   });
 
   it("warns when the FTP host is a private network address", () => {
-    const renderHost = (host: string) =>
+    const renderHost = (host: string, privateFtpHostsBlocked = false) =>
       render(
         <ServerAccordion
           servers={[{ ...failedServer, host }]}
+          privateFtpHostsBlocked={privateFtpHostsBlocked}
           expandedServerId={failedServer.id}
           profileReady={true}
           onToggle={vi.fn()}
@@ -95,8 +96,12 @@ describe("ServerAccordion", () => {
     expect(screen.getByLabelText("Host")).toHaveAccessibleDescription(/private network address/i);
     privateHost.unmount();
 
-    renderHost("ftp.example.test");
-    expect(screen.queryByText(/private network address/i)).not.toBeInTheDocument();
+    const hostedPrivateHost = renderHost("192.168.1.20", true);
+    expect(screen.getByLabelText("Host")).toHaveAccessibleDescription(/publicly hosted, so it cannot reach local network addresses/i);
+    hostedPrivateHost.unmount();
+
+    renderHost("ftp.example.test", true);
+    expect(screen.queryByText(/private network address|publicly hosted/i)).not.toBeInTheDocument();
   });
 
   it("clears uncategorized when Stremio catalogs are turned off", () => {

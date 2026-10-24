@@ -385,6 +385,7 @@ export function App() {
   const [changelogEntries, setChangelogEntries] = useState<ChangelogEntry[]>(APP_CHANGELOG);
   const [maxFtpServersPerProfile, setMaxFtpServersPerProfile] = useState(0);
   const [proxyStreamsDisabled, setProxyStreamsDisabled] = useState(false);
+  const [privateFtpHostsBlocked, setPrivateFtpHostsBlocked] = useState(false);
   const [importedSettings, setImportedSettings] = useState<ImportSummary | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [exportStripCredentials, setExportStripCredentials] = useState(true);
@@ -422,6 +423,7 @@ export function App() {
           if (isStale()) return;
           if (typeof status.maxFtpServersPerProfile === "number") setMaxFtpServersPerProfile(status.maxFtpServersPerProfile);
           if (typeof status.proxyStreamsDisabled === "boolean") setProxyStreamsDisabled(status.proxyStreamsDisabled);
+          if (typeof status.privateFtpHostsBlocked === "boolean") setPrivateFtpHostsBlocked(status.privateFtpHostsBlocked);
           if (needsSetupProbe) setSetupTokenRequired(status.setupTokenRequired);
         })
         .catch(() => {
@@ -1414,6 +1416,7 @@ export function App() {
                 profileReady={profileReady}
                 maxFtpServersPerProfile={maxFtpServersPerProfile}
                 proxyStreamsDisabled={proxyStreamsDisabled}
+                privateFtpHostsBlocked={privateFtpHostsBlocked}
                 onToggle={(serverId) => setExpandedServerId(expandedServerId === serverId ? null : serverId)}
                 onAddServer={() => void addServer()}
                 onDeleteServer={(serverId) => void removeServer(serverId)}
